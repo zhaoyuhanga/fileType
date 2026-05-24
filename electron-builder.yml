@@ -1,0 +1,27 @@
+appId: com.internal.filetype
+productName: 万能格式转换器
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+asarUnpack:
+  - node_modules/ffmpeg-static/**/*
+  - node_modules/sharp/**/*
+  - node_modules/@img/**/*
+  - node_modules/@napi-rs/**/*
+extraResources:
+  - from: resources/engines
+    to: engines
+win:
+  signAndEditExecutable: false
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
