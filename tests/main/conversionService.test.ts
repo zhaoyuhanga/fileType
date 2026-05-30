@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import ffmpegPath from "ffmpeg-static";
+import JSZip from "jszip";
 import { runConversion } from "../../src/main/services/conversionService";
 
 describe("conversion service", () => {
@@ -266,6 +267,163 @@ describe("conversion service", () => {
     await expect(stat(result.outputPath!)).resolves.toMatchObject({ size: expect.any(Number) });
   });
 });
+
+  it("compresses a single file into a zip archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello zip", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 9,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "compress-to-zip",
+        label: "压缩为 ZIP",
+        sourceFormats: ["txt"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("zip");
+    expect(result.outputPath).toMatch(/\.zip$/);
+
+    const zipData = await readFile(result.outputPath!);
+    const zip = await JSZip.loadAsync(zipData);
+    expect(zip.file("note.txt")).toBeTruthy();
+    const content = await zip.file("note.txt")!.async("string");
+    expect(content).toBe("hello zip");
+  });
+
+  it("extracts files from a valid zip archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bundle.zip");
+    const outputDir = join(root, "out");
+
+    const zip = new JSZip();
+    zip.file("readme.txt", "hello from zip");
+    zip.file("sub/note.txt", "nested file");
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+    await writeFile(sourcePath, zipBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "bundle",
+        path: sourcePath,
+        name: "bundle.zip",
+        extension: "zip",
+        format: "zip",
+        category: "archive",
+        sizeBytes: zipBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "zip-extract",
+        label: "ZIP 解压",
+        sourceFormats: ["zip"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toBeTruthy();
+    await expect(readFile(join(result.outputPath!, "readme.txt"), "utf8")).resolves.toBe("hello from zip");
+    await expect(readFile(join(result.outputPath!, "sub", "note.txt"), "utf8")).resolves.toBe("nested file");
+  });
+
+  it("rejects a corrupt zip archive for extraction", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bad.zip");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "not a zip file at all", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "bad",
+        path: sourcePath,
+        name: "bad.zip",
+        extension: "zip",
+        format: "zip",
+        category: "archive",
+        sizeBytes: 22,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "zip-extract",
+        label: "ZIP 解压",
+        sourceFormats: ["zip"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("不是有效的 ZIP");
+  });
+
+  it("reports an empty zip extraction as failed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "empty.zip");
+    const outputDir = join(root, "out");
+
+    const zip = new JSZip();
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+    await writeFile(sourcePath, zipBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "empty",
+        path: sourcePath,
+        name: "empty.zip",
+        extension: "zip",
+        format: "zip",
+        category: "archive",
+        sizeBytes: zipBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "zip-extract",
+        label: "ZIP 解压",
+        sourceFormats: ["zip"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("空");
+  });
 
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {

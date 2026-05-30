@@ -9,7 +9,7 @@ describe("engine health", () => {
     const root = await mkdtemp(join(tmpdir(), "engines-"));
     const status = await getEngineStatus(root);
 
-    expect(status).toHaveLength(4);
+    expect(status).toHaveLength(3);
     expect(status.every((engine) => engine.available === false)).toBe(true);
   });
 });

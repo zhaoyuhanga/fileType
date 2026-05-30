@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, existsSync } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, join, parse } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import type { ConverterAction, FileItem, SupportedFormat } from "../../shared/types.js";
@@ -21,6 +21,7 @@ const bmp = require("bmp-js") as { encode: (bitmap: { data: Buffer; width: numbe
 const WordExtractor = require("word-extractor") as new () => {
   extract: (path: string) => Promise<{ getBody: () => string }>;
 };
+const JSZip = require("jszip") as typeof import("jszip");
 
 export interface ConversionInput {
   action: ConverterAction;
@@ -99,12 +100,33 @@ export async function runConversion(input: ConversionInput): Promise<ConversionR
     return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath };
   }
 
-  if (input.action.id === "compress-to-zip") {
-    return {
-      fileId: input.file.id,
-      status: "failed",
-      message: "ZIP 压缩需要内置压缩模块，当前版本尚未启用"
-    };
+  if (canRunBuiltInZipCompression(input)) {
+    try {
+      await runZipCompression(input.file, outputPath);
+      return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath };
+    } catch (error) {
+      return {
+        fileId: input.file.id,
+        status: "failed",
+        outputPath,
+        message: error instanceof Error ? error.message : "压缩失败"
+      };
+    }
+  }
+
+  if (canRunBuiltInZipExtraction(input)) {
+    const extractionDir = join(input.outputDir, parse(input.file.path).name);
+    try {
+      await runZipExtraction(input.file, extractionDir);
+      return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath: extractionDir };
+    } catch (error) {
+      return {
+        fileId: input.file.id,
+        status: "failed",
+        outputPath: extractionDir,
+        message: error instanceof Error ? error.message : "解压失败"
+      };
+    }
   }
 
   return {
@@ -133,6 +155,14 @@ function canRunBuiltInImageConversion(input: ConversionInput): boolean {
 
 function canRunBuiltInMediaConversion(input: ConversionInput): boolean {
   return Boolean(ffmpegPath) && mediaFormats.has(input.file.format) && mediaFormats.has(input.action.targetFormat);
+}
+
+function canRunBuiltInZipCompression(input: ConversionInput): boolean {
+  return input.action.id === "compress-to-zip";
+}
+
+function canRunBuiltInZipExtraction(input: ConversionInput): boolean {
+  return input.action.id === "zip-extract";
 }
 
 async function runBuiltInTextConversion(file: FileItem, action: ConverterAction, outputPath: string): Promise<void> {
@@ -542,6 +572,50 @@ async function runMediaConversion(sourcePath: string, outputPath: string, target
 
   const result = await runCommand({ plan: { executable, args }, timeoutMs: 10 * 60 * 1000 });
   if (result.exitCode !== 0) throw new Error(result.stderr || `ffmpeg 退出码 ${result.exitCode}`);
+}
+
+async function runZipCompression(file: FileItem, outputPath: string): Promise<void> {
+  const fileData = await readFile(file.path);
+  const zip = new JSZip();
+  zip.file(file.name, fileData);
+  const zipBuffer = await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE"
+  });
+  await writeFile(outputPath, zipBuffer);
+}
+
+async function runZipExtraction(file: FileItem, outputDir: string): Promise<void> {
+  let zipData: Buffer;
+  try {
+    zipData = await readFile(file.path);
+  } catch {
+    throw new Error("无法读取 ZIP 文件");
+  }
+
+  let zip: Awaited<ReturnType<typeof JSZip.loadAsync>>;
+  try {
+    zip = await JSZip.loadAsync(zipData);
+  } catch (error) {
+    throw new Error(
+      `该文件不是有效的 ZIP 归档：${error instanceof Error ? error.message : "未知错误"}`
+    );
+  }
+
+  const fileEntries = Object.values(zip.files).filter((entry) => !entry.dir);
+
+  if (fileEntries.length === 0) {
+    throw new Error("ZIP 文件为空，没有可提取的内容");
+  }
+
+  await mkdir(outputDir, { recursive: true });
+
+  for (const zipEntry of fileEntries) {
+    const fullPath = join(outputDir, zipEntry.name);
+    await mkdir(dirname(fullPath), { recursive: true });
+    const content = await zipEntry.async("nodebuffer");
+    await writeFile(fullPath, content);
+  }
 }
 
 async function writePdf(outputPath: string, text: string): Promise<void> {

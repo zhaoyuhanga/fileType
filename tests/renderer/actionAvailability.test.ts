@@ -49,4 +49,36 @@ describe("action availability", () => {
       )
     ).toBe(true);
   });
+
+  it("allows built-in zip compression without any engines", () => {
+    expect(
+      isActionAvailable(
+        {
+          id: "compress-to-zip",
+          label: "压缩为 ZIP",
+          sourceFormats: ["txt"],
+          targetFormat: "zip",
+          category: "archive",
+          engine: "zip"
+        },
+        []
+      )
+    ).toBe(true);
+  });
+
+  it("allows built-in zip extraction without any engines", () => {
+    expect(
+      isActionAvailable(
+        {
+          id: "zip-extract",
+          label: "ZIP 解压",
+          sourceFormats: ["zip"],
+          targetFormat: "zip",
+          category: "archive",
+          engine: "zip"
+        },
+        []
+      )
+    ).toBe(true);
+  });
 });

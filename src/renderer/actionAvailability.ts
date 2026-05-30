@@ -7,7 +7,7 @@ const builtInImageFormats = new Set<FileFormat>(["jpg", "png", "webp", "bmp", "g
 const builtInMediaFormats = new Set<FileFormat>(["m4a", "mp3", "wav", "mp4", "mov", "avi"]);
 
 export function isActionAvailable(action: ConverterAction, _engineStatus: EngineStatus[]): boolean {
-  if (action.id === "compress-to-zip" || action.id === "pdf-to-image") return false;
+  if (action.id === "pdf-to-image") return false;
   if (isBuiltInAction(action)) return true;
 
   return false;
@@ -17,7 +17,6 @@ export function getActionUnavailableReason(action: ConverterAction, engineStatus
   if (isActionAvailable(action, engineStatus)) return undefined;
 
   if (action.id === "pdf-to-image") return "PDF 转图片待增强";
-  if (action.id === "compress-to-zip") return "ZIP 压缩待增强";
   return `暂不支持 ${getEngineLabel(action.engine)}`;
 }
 
@@ -48,6 +47,8 @@ export function isBuiltInAction(action: ConverterAction): boolean {
   }
 
   if (action.id === "pdf-to-txt" || action.id === "pdf-to-word") return true;
+
+  if (action.id === "compress-to-zip" || action.id === "zip-extract") return true;
 
   return false;
 }

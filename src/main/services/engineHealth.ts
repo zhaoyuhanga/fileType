@@ -22,8 +22,7 @@ export async function getEngineStatus(engineRoot: string): Promise<EngineStatus[
   return Promise.all([
     probeBinary(join(engineRoot, `soffice${suffix}`), "libreoffice"),
     probeBinary(join(engineRoot, `pandoc${suffix}`), "pandoc"),
-    probeBinary(join(engineRoot, `ffmpeg${suffix}`), "ffmpeg"),
-    probeBinary(join(engineRoot, `zip${suffix}`), "zip")
+    probeBinary(join(engineRoot, `ffmpeg${suffix}`), "ffmpeg")
   ]);
 }
 

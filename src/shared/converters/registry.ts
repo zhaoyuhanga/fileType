@@ -63,7 +63,8 @@ export const converterActions: ConverterAction[] = [
   ),
   { id: "video-to-mp3", label: "提取 MP3", sourceFormats: videoFormats, targetFormat: "mp3", category: "audio", engine: "ffmpeg" },
   { id: "video-to-wav", label: "提取 WAV", sourceFormats: videoFormats, targetFormat: "wav", category: "audio", engine: "ffmpeg" },
-  { id: "compress-to-zip", label: "压缩为 ZIP", sourceFormats: ["docx", "doc", "pdf", "markdown", "html", "txt", "xlsx", "xls", "jpg", "png", "webp", "bmp", "gif", "mp4", "mov", "avi", "m4a", "mp3", "wav"], targetFormat: "zip", category: "archive", engine: "zip" }
+  { id: "compress-to-zip", label: "压缩为 ZIP", sourceFormats: ["docx", "doc", "pdf", "markdown", "html", "txt", "xlsx", "xls", "jpg", "png", "webp", "bmp", "gif", "mp4", "mov", "avi", "m4a", "mp3", "wav"], targetFormat: "zip", category: "archive", engine: "zip" },
+  { id: "zip-extract", label: "ZIP 解压", sourceFormats: ["zip"], targetFormat: "zip", category: "archive", engine: "zip" }
 ];
 
 export function getConverterActionsForFormat(format: FileFormat): ConverterAction[] {

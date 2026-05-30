@@ -34,4 +34,11 @@ describe("converter registry", () => {
     expect(actions).not.toContain("jpg");
     expect(actions).not.toContain("png");
   });
+
+  it("returns zip-extract action for zip source format", () => {
+    const actions = getConverterActionsForFormat("zip").map((action) => action.id);
+
+    expect(actions).toContain("zip-extract");
+    expect(actions).not.toContain("compress-to-zip");
+  });
 });
