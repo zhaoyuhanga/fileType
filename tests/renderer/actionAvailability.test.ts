@@ -81,4 +81,52 @@ describe("action availability", () => {
       )
     ).toBe(true);
   });
+
+  it("allows built-in tar compression without any engines", () => {
+    expect(
+      isActionAvailable(
+        {
+          id: "compress-to-tar",
+          label: "压缩为 TAR",
+          sourceFormats: ["txt"],
+          targetFormat: "tar",
+          category: "archive",
+          engine: "zip"
+        },
+        []
+      )
+    ).toBe(true);
+  });
+
+  it("allows built-in tar extraction without any engines", () => {
+    expect(
+      isActionAvailable(
+        {
+          id: "tar-extract",
+          label: "TAR 解压",
+          sourceFormats: ["tar"],
+          targetFormat: "tar",
+          category: "archive",
+          engine: "zip"
+        },
+        []
+      )
+    ).toBe(true);
+  });
+
+  it("allows built-in rar extraction without any engines", () => {
+    expect(
+      isActionAvailable(
+        {
+          id: "rar-extract",
+          label: "RAR 解压",
+          sourceFormats: ["rar"],
+          targetFormat: "rar",
+          category: "archive",
+          engine: "zip"
+        },
+        []
+      )
+    ).toBe(true);
+  });
 });

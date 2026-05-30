@@ -49,6 +49,7 @@ export function isBuiltInAction(action: ConverterAction): boolean {
   if (action.id === "pdf-to-txt" || action.id === "pdf-to-word") return true;
 
   if (action.id === "compress-to-zip" || action.id === "zip-extract") return true;
+  if (action.id === "compress-to-tar" || action.id === "tar-extract" || action.id === "rar-extract") return true;
 
   return false;
 }

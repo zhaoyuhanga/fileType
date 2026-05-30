@@ -21,6 +21,8 @@ export type SupportedFormat =
   | "wav"
   | "mov"
   | "avi"
+  | "rar"
+  | "tar"
   | "zip";
 
 export type UnknownFormat = "unknown";

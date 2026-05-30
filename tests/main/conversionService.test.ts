@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import ffmpegPath from "ffmpeg-static";
 import JSZip from "jszip";
+import tarStream from "tar-stream";
 import { runConversion } from "../../src/main/services/conversionService";
 
 describe("conversion service", () => {
@@ -423,6 +424,137 @@ describe("conversion service", () => {
 
     expect(result.status).toBe("failed");
     expect(result.message).toContain("空");
+  });
+
+  it("compresses a single file into a tar archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello tar", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 9,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "compress-to-tar",
+        label: "压缩为 TAR",
+        sourceFormats: ["txt"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("tar");
+    expect(result.outputPath).toMatch(/\.tar$/);
+
+    const entries: Array<{ name: string }> = [];
+    await new Promise<void>((resolve) => {
+      const extract = tarStream.extract();
+      extract.on("entry", (header, _stream, next) => {
+        entries.push({ name: header.name });
+        _stream.resume();
+        next();
+      });
+      extract.on("finish", resolve);
+      require("fs").createReadStream(result.outputPath!).pipe(extract);
+    });
+    expect(entries.some((e) => e.name === "note.txt")).toBe(true);
+  });
+
+  it("extracts files from a valid tar archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bundle.tar");
+    const outputDir = join(root, "out");
+
+    const pack = tarStream.pack();
+    pack.entry({ name: "readme.txt" }, "hello from tar");
+    pack.entry({ name: "sub/note.txt" }, "nested tar file");
+    pack.finalize();
+    const tarBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      pack.on("data", (chunk: Buffer) => chunks.push(chunk));
+      pack.on("end", () => resolve(Buffer.concat(chunks)));
+      pack.on("error", reject);
+    });
+    await writeFile(sourcePath, tarBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "bundle",
+        path: sourcePath,
+        name: "bundle.tar",
+        extension: "tar",
+        format: "tar",
+        category: "archive",
+        sizeBytes: tarBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "tar-extract",
+        label: "TAR 解压",
+        sourceFormats: ["tar"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toBeTruthy();
+    await expect(readFile(join(result.outputPath!, "readme.txt"), "utf8")).resolves.toBe("hello from tar");
+    await expect(readFile(join(result.outputPath!, "sub", "note.txt"), "utf8")).resolves.toBe("nested tar file");
+  });
+
+  it("rejects an invalid tar archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bad.tar");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "not a tar file", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      engineRoot: root,
+      file: {
+        id: "bad",
+        path: sourcePath,
+        name: "bad.tar",
+        extension: "tar",
+        format: "tar",
+        category: "archive",
+        sizeBytes: 15,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "tar-extract",
+        label: "TAR 解压",
+        sourceFormats: ["tar"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "zip"
+      }
+    });
+
+    expect(result.status).toBe("failed");
   });
 
 function runFfmpeg(args: string[]): Promise<void> {

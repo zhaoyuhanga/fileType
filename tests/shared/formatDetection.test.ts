@@ -24,9 +24,23 @@ describe("format detection", () => {
   });
 
   it("falls back to unknown", () => {
-    expect(detectFormatFromPath("archive.rar")).toMatchObject({
+    expect(detectFormatFromPath("archive.xyz")).toMatchObject({
       format: "unknown",
       category: "unknown"
+    });
+  });
+
+  it("detects rar archive", () => {
+    expect(detectFormatFromPath("data.rar")).toMatchObject({
+      format: "rar",
+      category: "archive"
+    });
+  });
+
+  it("detects tar archive", () => {
+    expect(detectFormatFromPath("data.tar")).toMatchObject({
+      format: "tar",
+      category: "archive"
     });
   });
 });

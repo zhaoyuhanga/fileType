@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createWriteStream, existsSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { dirname, extname, join, parse } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -22,6 +22,8 @@ const WordExtractor = require("word-extractor") as new () => {
   extract: (path: string) => Promise<{ getBody: () => string }>;
 };
 const JSZip = require("jszip") as typeof import("jszip");
+const tarStream = require("tar-stream") as typeof import("tar-stream");
+const unrar = require("node-unrar-js") as typeof import("node-unrar-js");
 
 export interface ConversionInput {
   action: ConverterAction;
@@ -129,6 +131,50 @@ export async function runConversion(input: ConversionInput): Promise<ConversionR
     }
   }
 
+  if (canRunBuiltInTarCompression(input)) {
+    try {
+      await runTarCompression(input.file, outputPath);
+      return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath };
+    } catch (error) {
+      return {
+        fileId: input.file.id,
+        status: "failed",
+        outputPath,
+        message: error instanceof Error ? error.message : "TAR 压缩失败"
+      };
+    }
+  }
+
+  if (canRunBuiltInTarExtraction(input)) {
+    const extractionDir = join(input.outputDir, parse(input.file.path).name);
+    try {
+      await runTarExtraction(input.file, extractionDir);
+      return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath: extractionDir };
+    } catch (error) {
+      return {
+        fileId: input.file.id,
+        status: "failed",
+        outputPath: extractionDir,
+        message: error instanceof Error ? error.message : "TAR 解压失败"
+      };
+    }
+  }
+
+  if (canRunBuiltInRarExtraction(input)) {
+    const extractionDir = join(input.outputDir, parse(input.file.path).name);
+    try {
+      await runRarExtraction(input.file, extractionDir);
+      return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath: extractionDir };
+    } catch (error) {
+      return {
+        fileId: input.file.id,
+        status: "failed",
+        outputPath: extractionDir,
+        message: error instanceof Error ? error.message : "RAR 解压失败"
+      };
+    }
+  }
+
   return {
     fileId: input.file.id,
     status: "failed",
@@ -163,6 +209,18 @@ function canRunBuiltInZipCompression(input: ConversionInput): boolean {
 
 function canRunBuiltInZipExtraction(input: ConversionInput): boolean {
   return input.action.id === "zip-extract";
+}
+
+function canRunBuiltInTarCompression(input: ConversionInput): boolean {
+  return input.action.id === "compress-to-tar";
+}
+
+function canRunBuiltInTarExtraction(input: ConversionInput): boolean {
+  return input.action.id === "tar-extract";
+}
+
+function canRunBuiltInRarExtraction(input: ConversionInput): boolean {
+  return input.action.id === "rar-extract";
 }
 
 async function runBuiltInTextConversion(file: FileItem, action: ConverterAction, outputPath: string): Promise<void> {
@@ -615,6 +673,82 @@ async function runZipExtraction(file: FileItem, outputDir: string): Promise<void
     await mkdir(dirname(fullPath), { recursive: true });
     const content = await zipEntry.async("nodebuffer");
     await writeFile(fullPath, content);
+  }
+}
+
+async function runTarCompression(file: FileItem, outputPath: string): Promise<void> {
+  const pack = tarStream.pack();
+  const fileData = await readFile(file.path);
+  pack.entry({ name: file.name, size: fileData.length }, fileData);
+  pack.finalize();
+
+  await new Promise<void>((resolve, reject) => {
+    const ws = createWriteStream(outputPath);
+    pack.pipe(ws);
+    ws.on("close", resolve);
+    ws.on("error", reject);
+    pack.on("error", reject);
+  });
+}
+
+async function runTarExtraction(file: FileItem, outputDir: string): Promise<void> {
+  const entries: Array<{ name: string; data: Buffer }> = [];
+
+  await new Promise<void>((resolve, reject) => {
+    const extract = tarStream.extract();
+    extract.on("entry", (header, stream, next) => {
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.on("end", () => {
+        entries.push({ name: header.name, data: Buffer.concat(chunks) });
+        next();
+      });
+      stream.on("error", reject);
+    });
+    extract.on("finish", resolve);
+    extract.on("error", reject);
+
+    createReadStream(file.path).pipe(extract);
+  });
+
+  if (entries.length === 0) throw new Error("TAR 文件为空");
+
+  await mkdir(outputDir, { recursive: true });
+  for (const entry of entries) {
+    if (entry.name.endsWith("/")) continue;
+    const fullPath = join(outputDir, entry.name);
+    await mkdir(dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, entry.data);
+  }
+}
+
+async function runRarExtraction(file: FileItem, outputDir: string): Promise<void> {
+  let buf: Buffer;
+  try {
+    buf = await readFile(file.path);
+  } catch {
+    throw new Error("无法读取 RAR 文件");
+  }
+
+  const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+
+  let extractor: Awaited<ReturnType<typeof unrar.createExtractorFromData>>;
+  try {
+    extractor = await unrar.createExtractorFromData({ data: arrayBuffer });
+  } catch {
+    throw new Error("该文件不是有效的 RAR 归档");
+  }
+
+  const extracted = extractor.extract();
+  const fileEntries = Array.from(extracted.files).filter((f) => !f.fileHeader.flags.directory);
+
+  if (fileEntries.length === 0) throw new Error("RAR 文件为空");
+
+  await mkdir(outputDir, { recursive: true });
+  for (const f of fileEntries) {
+    const fullPath = join(outputDir, f.fileHeader.name);
+    await mkdir(dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, Buffer.from(f.extraction!));
   }
 }
 

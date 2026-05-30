@@ -41,4 +41,22 @@ describe("converter registry", () => {
     expect(actions).toContain("zip-extract");
     expect(actions).not.toContain("compress-to-zip");
   });
+
+  it("returns tar-extract action for tar source format", () => {
+    const actions = getConverterActionsForFormat("tar").map((action) => action.id);
+
+    expect(actions).toContain("tar-extract");
+  });
+
+  it("returns rar-extract action for rar source format", () => {
+    const actions = getConverterActionsForFormat("rar").map((action) => action.id);
+
+    expect(actions).toContain("rar-extract");
+  });
+
+  it("allows compressing txt to tar", () => {
+    const actions = getConverterActionsForFormat("txt").map((action) => action.id);
+
+    expect(actions).toContain("compress-to-tar");
+  });
 });

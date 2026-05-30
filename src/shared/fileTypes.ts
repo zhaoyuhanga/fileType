@@ -21,7 +21,9 @@ export const formatCategories: Record<SupportedFormat, FormatCategory> = {
   m4a: "audio",
   mp3: "audio",
   wav: "audio",
-  zip: "archive"
+  zip: "archive",
+  rar: "archive",
+  tar: "archive"
 };
 
 const extensionAliases: Record<string, SupportedFormat> = {
