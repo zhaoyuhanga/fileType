@@ -225,8 +225,6 @@ def _make_preview_widget(parent: QWidget) -> QWidget:
     return browser
 
 
-VIEWABLE_TEXT = {".txt", ".md", ".json"}
-
 
 class DocViewerDialog(QDialog):
     """统一文档查看器。"""

@@ -15,9 +15,6 @@ SUPPORTED_FORMATS = (
     TEXT_FORMATS + WORD_FORMATS + SHEET_FORMATS + IMAGE_FORMATS + MEDIA_FORMATS + ARCHIVE_FORMATS + ("json",)
 )
 
-# 文本族动作可选择的源集合（引擎层用于文件家族判断）
-TEXT_SOURCE_FORMATS = TEXT_FORMATS
-
 # 转换输出的目标格式 → 扩展名（归档解压输出为目录，不入此表）
 TARGET_EXTENSION = {
     "txt": ".txt",
