@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -99,10 +100,22 @@ class ConvertBoardPage(QWidget):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
-        self._actions_box = QVBoxLayout()
-        right_layout.addWidget(QLabel("可用转换动作（按列表文件自动匹配）"))
-        right_layout.addLayout(self._actions_box)
-        right_layout.addStretch(1)
+        right_layout.setContentsMargins(12, 12, 12, 12)
+        right_layout.setSpacing(8)
+        title_label = QLabel("可用转换动作")
+        title_label.setObjectName("sectionTitle")
+        sub_label = QLabel("按列表中的文件自动匹配")
+        sub_label.setObjectName("readerStatus")
+        actions_host = QWidget()
+        self._actions_box = QVBoxLayout(actions_host)
+        self._actions_box.setContentsMargins(0, 2, 2, 2)
+        self._actions_box.setSpacing(7)
+        actions_scroll = QScrollArea()
+        actions_scroll.setWidgetResizable(True)
+        actions_scroll.setWidget(actions_host)
+        right_layout.addWidget(title_label)
+        right_layout.addWidget(sub_label)
+        right_layout.addWidget(actions_scroll, 1)
 
         run_row = QHBoxLayout()
         self._run_button = QPushButton("开始转换")

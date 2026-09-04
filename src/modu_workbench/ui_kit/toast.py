@@ -10,23 +10,30 @@ _T = ThemeTokens()
 
 _STYLES = {
     "success": (
-        "QLabel {{ background: #17301f; color: {text}; border: 1px solid {accent};"
-        " border-radius: 8px; padding: 9px 16px; font-size: 13px; }}"
+        "QLabel {{ background: {success_bg}; color: #0b7a3c; border: 1px solid {success};"
+        " border-radius: 9px; padding: 10px 18px; font-size: 13px; }}"
     ),
     "info": (
-        "QLabel {{ background: #1a2740; color: {text}; border: 1px solid {border};"
-        " border-radius: 8px; padding: 9px 16px; font-size: 13px; }}"
+        "QLabel {{ background: {info_bg}; color: #2458b5; border: 1px solid {info};"
+        " border-radius: 9px; padding: 10px 18px; font-size: 13px; }}"
     ),
     "error": (
-        "QLabel {{ background: #3a1d1d; color: #f3cfcf; border: 1px solid {danger};"
-        " border-radius: 8px; padding: 9px 16px; font-size: 13px; }}"
+        "QLabel {{ background: {danger_bg}; color: #b3262b; border: 1px solid {danger};"
+        " border-radius: 9px; padding: 10px 18px; font-size: 13px; }}"
     ),
 }
 
 
 def _style_for(kind: str) -> str:
     template = _STYLES.get(kind, _STYLES["info"])
-    return template.format(text=_T.text, accent=_T.accent, border=_T.border, danger=_T.danger)
+    return template.format(
+        success=_T.success,
+        success_bg=_T.success_bg,
+        info=_T.info,
+        info_bg=_T.info_bg,
+        danger=_T.danger,
+        danger_bg=_T.danger_bg,
+    )
 
 
 class Toaster:

@@ -90,6 +90,7 @@ class ShelfView(QWidget):
 
     def __init__(self, library: Library, toaster: Toaster, parent: QWidget | None = None):
         super().__init__(parent)
+        self.setObjectName("shelfPage")
         self._library = library
         self._toaster = toaster
         self._filter = ""
@@ -126,6 +127,7 @@ class ShelfView(QWidget):
         layout.addWidget(scroll, 1)
         self._scroll = scroll
         self._grid_host: QWidget | None = None
+        self._cols = 3
         self.reload()
 
     # ---------- 导入 ----------
@@ -178,7 +180,8 @@ class ShelfView(QWidget):
         if self._records:
             grid = QGridLayout(host)
             grid.setContentsMargins(4, 4, 4, 4)
-            grid.setSpacing(14)
+            grid.setSpacing(16)
+            columns = self._cols
             column = 0
             row = 0
             for record in self._records:
@@ -190,11 +193,14 @@ class ShelfView(QWidget):
                 card.remove_requested.connect(self._remove_book)
                 grid.addWidget(card, row, column)
                 column += 1
-                if column >= 3:
+                if column >= columns:
                     column = 0
                     row += 1
-            grid.setRowStretch(grid.rowCount(), 1)
-            grid.setColumnStretch(3, 1)
+            if column > 0:
+                row += 1
+            for col in range(columns):
+                grid.setColumnStretch(col, 1)
+            grid.setRowStretch(row, 1)
         else:
             layout = QVBoxLayout(host)
             hint = QLabel(
@@ -210,6 +216,13 @@ class ShelfView(QWidget):
         self._scroll.setWidget(host)
         if old is not None:
             old.deleteLater()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        count = max(1, int(self.width() // 340))
+        if count != self._cols:
+            self._cols = count
+            self._rebuild_grid()
+        super().resizeEvent(event)
 
     def _remove_book(self, book_id: int) -> None:
         record = self._library.get_book(book_id)
