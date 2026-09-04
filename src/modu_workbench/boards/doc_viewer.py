@@ -198,11 +198,13 @@ def _make_preview_widget(parent: QWidget) -> QWidget:
 
             settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, False)
             settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+            view._preview_engine = "Chromium"  # type: ignore[attr-defined]
             return view
         except Exception:  # noqa: BLE001
             pass
     browser = QTextBrowser(parent)
     browser.setOpenExternalLinks(False)
+    browser._preview_engine = "兼容文本预览"  # type: ignore[attr-defined]
     return browser
 
 
@@ -254,6 +256,7 @@ class DocViewerDialog(QDialog):
     def _build_text(self) -> None:
         splitter = QSplitter(Qt.Orientation.Vertical)
         self._preview = _make_preview_widget(self)
+        engine = getattr(self._preview, "_preview_engine", "未知")
         self._editor = QPlainTextEdit()
         self._editor.hide()
         self._editor.textChanged.connect(self._notify_edit)
@@ -261,7 +264,8 @@ class DocViewerDialog(QDialog):
         splitter.addWidget(self._editor)
         layout = self.layout()
         layout.addWidget(splitter, 1)
-        layout.addWidget(QLabel("提示：预览为只读；切换到「编辑」后可修改，Ctrl+S 保存。"))
+        self._hint_label = QLabel(f"预览引擎：{engine}（预览只读；切换到「编辑」后可修改，Ctrl+S 保存）")
+        layout.addWidget(self._hint_label)
         self._is_text = True
 
     def _build_media(self) -> None:

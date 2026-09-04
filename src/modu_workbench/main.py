@@ -71,11 +71,35 @@ def _run_dependency_check(output_path: str) -> int:
         except Exception:  # noqa: BLE001
             return False
 
+    def check_webengine_render() -> bool:
+        """真实渲染自检：创建 QWebEngineView 并确认 HTML 加载成功。"""
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return True  # 无头环境不要求 Chromium 渲染
+        try:
+            from PySide6.QtCore import QEventLoop, QTimer
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+
+            app = QApplication.instance() or QApplication([])
+            view = QWebEngineView()
+            state = {"ok": False}
+            view.loadFinished.connect(lambda ok: state.update(ok=bool(ok)))
+            view.setHtml("<!doctype html><html><body>ok</body></html>")
+            loop = QEventLoop()
+            view.loadFinished.connect(lambda _ok: loop.quit())
+            QTimer.singleShot(4000, loop.quit)
+            loop.exec()
+            view.close()
+            return bool(state["ok"])
+        except Exception:  # noqa: BLE001
+            return False
+
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
     record("lexer_by_name", check_lexer_by_name)
     record("webengine_import", check_webengine_import)
+    record("webengine_render", check_webengine_render)
 
     try:
         with open(output_path, "w", encoding="utf-8") as fp:
