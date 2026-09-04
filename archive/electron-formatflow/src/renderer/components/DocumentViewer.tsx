@@ -86,6 +86,32 @@ export function DocumentViewer({ request, onClose, onPathChanged }: DocumentView
   const isJson = doc?.format === "json";
   const isMedia = doc?.kind === "media";
 
+  // 嵌入式环境：向 Python 请求本地 HTTP 流地址用于内嵌播放；失败则回退本地播放器。
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaFallback, setMediaFallback] = useState(false);
+  useEffect(() => {
+    if (!isMedia) return;
+    setMediaUrl(null);
+    setMediaFallback(false);
+    const flow = window.formatFlow as { mediaUrl?: (path: string) => Promise<string> };
+    if (!flow || typeof flow.mediaUrl !== "function") {
+      setMediaFallback(true);
+      return;
+    }
+    let live = true;
+    flow
+      .mediaUrl(file.path)
+      .then((url) => {
+        if (live) setMediaUrl(typeof url === "string" && url ? url : null);
+      })
+      .catch(() => {
+        if (live) setMediaFallback(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [isMedia, file.path]);
+
   const markdownHtml = useMemo(() => {
     if (!isText || doc?.format !== "markdown") return "";
     try {
@@ -296,7 +322,11 @@ export function DocumentViewer({ request, onClose, onPathChanged }: DocumentView
             </div>
           ) : isMedia ? (
             <div className="viewer__media">
-              {typeof window.formatFlow?.openMedia === "function" ? (
+              {mediaUrl ? (
+                <video controls preload="metadata" src={mediaUrl}>
+                  当前环境不支持播放该视频。
+                </video>
+              ) : mediaFallback || typeof window.formatFlow?.mediaUrl !== "function" ? (
                 <>
                   <button
                     type="button"
@@ -308,20 +338,19 @@ export function DocumentViewer({ request, onClose, onPathChanged }: DocumentView
                   </button>
                   <p className="viewer__notice">
                     <AlertCircle size={14} />
-                    Web 视图内不内嵌视频，请点击上方按钮调用本地播放器预览。
+                    Web 视图未能内嵌视频，请点击上方按钮调用本地播放器预览。
                   </p>
                 </>
               ) : (
-                <>
-                  <video controls preload="metadata" src={toDocStreamUrl(file.path)}>
-                    当前环境不支持播放该视频。
-                  </video>
-                  <p className="viewer__notice">
-                    <AlertCircle size={14} />
-                    {previewNote}。可点击"另存为"复制到其它位置。
-                  </p>
-                </>
+                <p className="viewer__notice">
+                  <AlertCircle size={14} />
+                  正在准备视频播放…
+                </p>
               )}
+              <p className="viewer__notice">
+                <AlertCircle size={14} />
+                {previewNote}。可点击"另存为"复制到其它位置。
+              </p>
             </div>
           ) : mode === "edit" ? (
             <div className="viewer__editor">

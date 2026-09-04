@@ -52,6 +52,7 @@
       saveDoc: function (path, content) { return call("saveDoc", path, content); },
       saveDocAs: function (source, name, content) { return call("saveDocAs", source, name, content); },
       openMedia: function (path) { return call("openMedia", path); }
+      mediaUrl: function (path) { return call("mediaUrl", path); }
     };
     window.dispatchEvent(new Event("formatflow-ready"));
   }

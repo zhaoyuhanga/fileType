@@ -225,6 +225,12 @@ class WebBridge(QObject):
         dialog.show()
         return {}
 
+    def handle_mediaUrl(self, file_path: str) -> str:
+        """返回本地 HTTP 流地址，供 Web 视图内嵌 <video> 播放。"""
+        from modu_workbench.services.media_server import media_url
+
+        return media_url(file_path)
+
     def handle_startJobs(self, batch_id: str, action_id: str, files: list[dict], output_dir: str) -> dict:
         worker = _BatchWorker(self, batch_id, action_id, files, output_dir)
         worker.event_signal.connect(lambda payload: self.eventReady.emit("job", payload))
