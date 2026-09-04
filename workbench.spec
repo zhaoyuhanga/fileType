@@ -71,8 +71,10 @@ a = Analysis(
         "pygments.formatters.html",
         # 文档预览 WebView（完整 CSS 渲染，与旧版 Web 预览一致）
         "PySide6.QtWebEngineWidgets",
-        "PySide6.QtWebEngineCore",\n        "PySide6.QtWebChannel",\n        "modu_workbench.boards.convert_web",\n        "modu_workbench.services.web_bridge",
+        "PySide6.QtWebEngineCore",
         "PySide6.QtWebChannel",
+        "modu_workbench.boards.convert_web",
+        "modu_workbench.services.web_bridge",
     ],
     hookspath=[],
     hooksconfig={},

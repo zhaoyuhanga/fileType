@@ -94,12 +94,21 @@ def _run_dependency_check(output_path: str) -> int:
         except Exception:  # noqa: BLE001
             return False
 
+    def check_webfront_present() -> bool:
+        from modu_workbench.services.webfront import webfront_dir
+
+        front = webfront_dir()
+        if front is None:
+            return False
+        return (front / "index.html").is_file() and (front / "bridge_shim.js").is_file()
+
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
     record("lexer_by_name", check_lexer_by_name)
     record("webengine_import", check_webengine_import)
     record("webengine_render", check_webengine_render)
+    record("webfront_present", check_webfront_present)
 
     try:
         with open(output_path, "w", encoding="utf-8") as fp:

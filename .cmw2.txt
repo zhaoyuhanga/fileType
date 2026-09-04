@@ -1,0 +1,5 @@
+chore(modu): 修复 spec 注入并加 webfront 随包自检
+
+- workbench.spec datas 打入 webfront、hiddenimports 补齐 QtWebChannel/convert_web/web_bridge
+- main 自检新增 webfront_present
+- 打包 exe 自检 7 项全 true；桌面启动冒烟通过
