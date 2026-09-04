@@ -1,0 +1,8 @@
+feat(modu): 文档预览改用 QtWebEngine 渲染（对齐旧版 Web 预览观感）
+
+- DocViewer 预览优先 QtWebEngine（内嵌 Chromium，完整 CSS：标题/表格/代码块底色/
+  引用/行高等与旧 Electron 版一致）；无头或不可用时自动回退 QTextBrowser
+- 预览页面内置统一 CSS（字体/标题分隔线/代码块/行内 code/表格/引用/图片）
+- Markdown 语法高亮、JSON 语法高亮沿用 Pygments 内联色
+- workbench.spec 移除 QtWebEngine 排除并补充 hiddenimports；main.py 自检新增 webengine_import
+- 打包 exe 自检 5 项全 true（含 webengine_import）

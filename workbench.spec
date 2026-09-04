@@ -4,10 +4,7 @@
 # 产物：dist/ModuWorkbench/ModuWorkbench.exe
 
 EXCLUDES = [
-    # 用不到的 Qt 大模块
-    "PySide6.QtWebEngineCore",
-    "PySide6.QtWebEngineWidgets",
-    "PySide6.QtWebChannel",
+    # 用不到的 Qt 大模块（保留 QtWebEngine 用于文档预览渲染）
     "PySide6.Qt3DCore",
     "PySide6.Qt3DRender",
     "PySide6.Qt3DExtras",
@@ -32,7 +29,6 @@ EXCLUDES = [
     "PySide6.QtScxml",
     "PySide6.QtStateMachine",
     "PySide6.QtTextToSpeech",
-    "PySide6.QtWebSockets",
     "tkinter",
 ]
 
@@ -73,6 +69,10 @@ a = Analysis(
         "pygments.lexers.text",
         "pygments.lexers.markup",
         "pygments.formatters.html",
+        # 文档预览 WebView（完整 CSS 渲染，与旧版 Web 预览一致）
+        "PySide6.QtWebEngineWidgets",
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebChannel",
     ],
     hookspath=[],
     hooksconfig={},

@@ -62,10 +62,20 @@ def _run_dependency_check(output_path: str) -> int:
 
         return get_lexer_by_name("json") is not None
 
+    def check_webengine_import() -> bool:
+        try:
+            import PySide6.QtWebEngineWidgets  # noqa: F401
+            import PySide6.QtWebEngineCore  # noqa: F401
+
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
     record("lexer_by_name", check_lexer_by_name)
+    record("webengine_import", check_webengine_import)
 
     try:
         with open(output_path, "w", encoding="utf-8") as fp:

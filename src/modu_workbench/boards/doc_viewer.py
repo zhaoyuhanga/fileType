@@ -1,13 +1,16 @@
 """文档查看/编辑器（txt / md / json / mp4）。
 
 - 文本：预览只读 ↔ 编辑切换；保存 / 另存为；JSON 提供"美化"；
-- 预览排版：Markdown 渲染为规范文档（代码块语法高亮），JSON 语法高亮，TXT 等宽；
+- 预览渲染：优先 QtWebEngine（内嵌 Chromium，完整 CSS，与旧 Web 预览一致），
+  无头/不可用时回退 QTextBrowser；Markdown 规范排版 + 代码块语法高亮，
+  JSON 语法高亮（无效黄条提示），TXT 等宽换行；
 - mp4：本地播放（QMediaPlayer），仅可另存为复制；
 - 未保存修改在关闭时确认。
 """
 from __future__ import annotations
 
 import html as html_mod
+import os
 import re
 from pathlib import Path
 
@@ -28,21 +31,85 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.convert.text_io import JsonFormatError, json_pretty, read_text_smart, write_text
 
-# ---------- 语法高亮与排版 ----------
+# ---------- 预览页面 CSS（完整 CSS，经 QtWebEngine 渲染） ----------
+
+_PAGE_CSS = """
+body {{
+    margin: 22px 30px 48px;
+    color: #24292f;
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.85;
+    background: #ffffff;
+}}
+h1, h2, h3, h4, h5, h6 {{ color: #1a1f36; line-height: 1.4; }}
+h1 {{ font-size: 1.75em; border-bottom: 1px solid #e6ebf2; padding-bottom: 8px; }}
+h2 {{ font-size: 1.45em; border-bottom: 1px solid #eef1f6; padding-bottom: 6px; }}
+h3 {{ font-size: 1.22em; }}
+h4 {{ font-size: 1.08em; }}
+p {{ margin: 10px 0; }}
+a {{ color: #1f6feb; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+code {{
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    font-size: 13px;
+    background: #eef1f7;
+    color: #b02f60;
+    padding: 2px 6px;
+    border-radius: 4px;
+}}
+pre {{
+    background: #f7f9fc;
+    border: 1px solid #e3e9f2;
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow: auto;
+}}
+pre code {{
+    background: transparent;
+    padding: 0;
+    color: #2a3244;
+    font-size: 13px;
+    line-height: 1.65;
+}}
+blockquote {{
+    margin: 12px 0;
+    padding: 4px 16px;
+    border-left: 4px solid #d0d7de;
+    color: #57606a;
+    background: #f7f9fc;
+    border-radius: 0 6px 6px 0;
+}}
+table {{ border-collapse: collapse; margin: 12px 0; }}
+th, td {{ border: 1px solid #d8dfe9; padding: 7px 13px; }}
+th {{ background: #f4f7fb; }}
+ul, ol {{ margin: 8px 0; padding-left: 26px; }}
+hr {{ border: none; border-top: 2px solid #e6ebf2; margin: 18px 0; }}
+img {{ max-width: 100%; border-radius: 6px; }}
+.warn {{
+    color: #9a6700;
+    background: #fff5d6;
+    border: 1px solid #f0d27f;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 4px 0 12px;
+}}
+"""
 
 _MONO = "Consolas,'Cascadia Mono','Courier New',monospace"
-_CODE_FENCE = re.compile(
-    r"<pre><code(?: class=\"language-([\\w+-]+)\")?>(.*?)</code></pre>", re.DOTALL
-)
+_CODE_FENCE = re.compile(r"<pre><code(?: class=\"language-([\\w+-]+)\")?>(.*?)</code></pre>", re.DOTALL)
 _INLINE_CODE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
 
 
-def highlight_code(code: str, language: str | None = None) -> str:
-    """Pygments 语法高亮，返回带内联 token 颜色的 <pre> 片段（无需外部 CSS）。
+def _wrap_page(inner: str) -> str:
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<style>{_PAGE_CSS}</style></head><body>{inner}</body></html>"
+    )
 
-    常用语言直接引用词法器类（保证 PyInstaller 能静态收集）；
-    其它语言走动态查找，失败时回退纯文本。
-    """
+
+def highlight_code(code: str, language: str | None = None) -> str:
+    """Pygments 语法高亮，返回带内联 token 颜色的 <pre> 片段。"""
     from pygments import highlight as _pyg_highlight
     from pygments.formatters import HtmlFormatter
     from pygments.lexers import (
@@ -76,17 +143,14 @@ def highlight_code(code: str, language: str | None = None) -> str:
         "yaml": YamlLexer(),
         "yml": YamlLexer(),
     }
-    lexer = None
     try:
         lexer = _KNOWN.get((language or "").lower()) or (
             get_lexer_by_name(language) if language else guess_lexer(code)
         )
     except Exception:  # noqa: BLE001
-        lexer = None
-    if lexer is None:
         lexer = TextLexer()
     body = _pyg_highlight(code, lexer, HtmlFormatter(nowrap=True, noclasses=True))
-    return f"<pre style=\"font-family:{_MONO};font-size:13px;line-height:1.6;\">{body}</pre>"
+    return f"<pre style=\"font-family:{_MONO};font-size:13px;\">{body}</pre>"
 
 
 def _render_markdown(content: str) -> str:
@@ -101,34 +165,45 @@ def _render_markdown(content: str) -> str:
 
     html = _CODE_FENCE.sub(replace_block, html)
     html = _INLINE_CODE.sub(
-        lambda m: f"<code style=\"font-family:{_MONO};color:#a0401f;\">{m.group(1)}</code>",
+        lambda m: f"<code style=\"color:#b02f60;\">{m.group(1)}</code>",
         html,
     )
-    return (
-        f"<html><body style=\"font-family:'PingFang SC','Microsoft YaHei',sans-serif;"
-        f"font-size:15px;color:#24292f;\">{html}</body></html>"
-    )
+    return _wrap_page(html)
 
 
 def _render_json(content: str) -> str:
-    warn_html = ""
+    warn = ""
     try:
         pretty = json_pretty(content)
     except JsonFormatError as error:
         pretty = content
-        warn_html = (
-            f"<p style=\"color:#b76a08;background:#fdf3e3;padding:8px 12px;\">"
-            f"JSON 无效：{html_mod.escape(str(error))}</p>"
-        )
-    return f"<html><body style='color:#24292f;'>{warn_html}{highlight_code(pretty, 'json')}</body></html>"
+        warn = f"<div class='warn'>JSON 无效：{html_mod.escape(str(error))}</div>"
+    return _wrap_page(warn + highlight_code(pretty, "json"))
 
 
 def _render_txt(content: str) -> str:
     escaped = html_mod.escape(content, quote=False)
-    return (
-        f"<html><body style=\"font-family:{_MONO};font-size:13px;\">"
-        f"<pre style='white-space:pre-wrap;'>{escaped}</pre></body></html>"
-    )
+    return _wrap_page(f"<pre style='font-family:{_MONO};font-size:13px;white-space:pre-wrap;'>{escaped}</pre>")
+
+
+def _make_preview_widget(parent: QWidget) -> QWidget:
+    """创建预览控件：优先 QtWebEngine（完整 CSS），无头环境回退 QTextBrowser。"""
+    if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+
+            view = QWebEngineView(parent)
+            settings = view.settings()
+            from PySide6.QtWebEngineCore import QWebEngineSettings
+
+            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, False)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+            return view
+        except Exception:  # noqa: BLE001
+            pass
+    browser = QTextBrowser(parent)
+    browser.setOpenExternalLinks(False)
+    return browser
 
 
 VIEWABLE_TEXT = {".txt", ".md", ".json"}
@@ -140,11 +215,11 @@ class DocViewerDialog(QDialog):
     def __init__(self, file_path: str, parent: QWidget | None = None):
         super().__init__(parent)
         self._path = Path(file_path)
-        self._saved = ""  # 与磁盘一致的内容快照
+        self._saved = ""
         self._dirty = False
 
         self.setWindowTitle(f"查看：{self._path.name}")
-        self.resize(960, 660)
+        self.resize(960, 680)
 
         layout = QVBoxLayout(self)
         toolbar = QHBoxLayout()
@@ -178,8 +253,7 @@ class DocViewerDialog(QDialog):
 
     def _build_text(self) -> None:
         splitter = QSplitter(Qt.Orientation.Vertical)
-        self._preview = QTextBrowser()
-        self._preview.setOpenExternalLinks(False)
+        self._preview = _make_preview_widget(self)
         self._editor = QPlainTextEdit()
         self._editor.hide()
         self._editor.textChanged.connect(self._notify_edit)
