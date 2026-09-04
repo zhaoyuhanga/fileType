@@ -133,6 +133,7 @@ class WebBridge(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pending: dict[str, str] = {}
+        self._batch_requests: dict[str, str] = {}
         self._workers: dict[str, _BatchWorker] = {}
         self._cancel_flags: dict[str, threading.Event] = {}
 
@@ -148,7 +149,9 @@ class WebBridge(QObject):
                 return
             result = handler(*args)
             if isinstance(result, dict) and result.get("_async"):
-                self._pending[request_id] = result["_async"]
+                batch_id = result["_async"]
+                self._pending[request_id] = batch_id
+                self._batch_requests[batch_id] = request_id
                 return
             self._emit_result(request_id, result)
         except Exception as error:  # noqa: BLE001
@@ -157,10 +160,11 @@ class WebBridge(QObject):
     def _emit_result(self, request_id: str, value) -> None:
         self.resultReady.emit(request_id, json.dumps(value, ensure_ascii=False))
 
-    def _resolve_async(self, key: str, value) -> None:
-        request_id = self._pending.pop(key, None)
+    def _finish_batch(self, batch_id: str, payload: str) -> None:
+        request_id = self._batch_requests.pop(batch_id, None)
+        self._pending.pop(request_id, None) if request_id else None
         if request_id:
-            self._emit_result(request_id, value)
+            self._emit_result(request_id, json.loads(payload))
 
     # ---- 桥能力实现 ----
 
@@ -215,7 +219,7 @@ class WebBridge(QObject):
     def handle_startJobs(self, batch_id: str, action_id: str, files: list[dict], output_dir: str) -> dict:
         worker = _BatchWorker(self, batch_id, action_id, files, output_dir)
         worker.event_signal.connect(lambda payload: self.eventReady.emit("job", payload))
-        worker.done_signal.connect(lambda payload: self._resolve_async(batch_id, json.loads(payload)))
+        worker.done_signal.connect(lambda payload: self._finish_batch(batch_id, payload))
         self._workers[batch_id] = worker
         self._cancel_flags[batch_id] = threading.Event()
         worker.finished.connect(lambda: self._cleanup(batch_id, worker))

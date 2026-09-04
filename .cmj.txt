@@ -1,0 +1,6 @@
+fix(modu): 修复 startJobs 批次回传映射，转换完成不再卡“转换中”
+
+- web_bridge：批次完成回传按 batch_id→request_id 反向映射定位（原先键错位导致
+  startJobs 永不 resolve，runBusy 一直为真、界面停留“转换中…”）
+- 端到端验证：真实桌面 WebView 中 events[running→succeeded]+results[succeeded] 全部到达
+- 移除无用 _resolve_async；pytest 全量绿
