@@ -1,7 +1,20 @@
+# Node（electron 归档仅作参考，不再维护）
 node_modules/
 dist/
 release/
-.idea/
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+.coverage
+htmlcov/
+
+# 工具
+.idea/
 .DS_Store
 Thumbs.db
