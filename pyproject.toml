@@ -11,6 +11,11 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "PySide6>=6.8",
+    "ebooklib>=0.18",      # EPUB 解析（墨读书库）
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "chardet>=5.2",
+    "requests>=2.31",      # 在线书源下载
 ]
 
 [project.optional-dependencies]
