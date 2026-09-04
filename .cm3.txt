@@ -1,5 +1,0 @@
-feat(modu): DocViewer 增加渲染引擎提示与打包渲染自检
-
-- 预览底部显示当前渲染引擎（Chromium / 兼容文本预览），便于确认生效
-- main 自检新增 webengine_render（真实创建 QWebEngineView 并加载 HTML）
-- 打包 exe 自检 6 项全 true（含 webengine_render）
