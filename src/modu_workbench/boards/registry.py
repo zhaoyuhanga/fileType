@@ -10,7 +10,7 @@ BOOK_BOARD = BoardSpec(
     tagline="电子书阅读 · 本地书库",
     description="导入 TXT / EPUB，自动章节解析、进度记忆、阅读主题与历史记录；内置在线书库下载（个人学习用途）。",
     icon="📚",
-    phase="建设中",
+    phase="可用",
     page=book_board.BookBoardPage,
 )
 
@@ -18,9 +18,9 @@ CONVERT_BOARD = BoardSpec(
     key="convert",
     title="墨读转换",
     tagline="文档 / 表格 / 图片 / 媒体 / 归档",
-    description="本地离线转换：文本互转、PDF、图片、音视频、归档与 Word/Excel；附带 txt/md/json/mp4 查看编辑。",
+    description="本地离线转换：文本互转、PDF、图片、归档与查看编辑（txt/md/json/mp4）；Word/Excel、音视频能力陆续升级中。",
     icon="🔄",
-    phase="建设中",
+    phase="基础可用",
     page=convert_board.ConvertBoardPage,
 )
 
