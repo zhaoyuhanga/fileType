@@ -1,8 +1,0 @@
-style(modu): 全端样式对齐 fileType main 分支（v0.2.0 靛蓝浅色）
-
-- theme/toast 恢复 main 分支靛蓝主题：浅灰蓝底、白卡片、靛蓝主色、语义状态色
-- 转换模块：左“待处理文件”面板（头部计数）+ 右动作面板（actionPanel 白卡、
-  actionOption 动作按钮选中高亮）+ 主按钮 primaryButton，对齐 main 分支布局
-- 文档查看器重构为 header/meta/footer 三段（文件名+预览/编辑分段、元信息条、
-  状态底栏），预览走 QtWebEngine 完整 CSS（标题/代码暗块/表格/引用对齐 main 分支）
-- 修复令牌缺失字段；pytest 全量绿；打包 exe 自检 6 项 true、桌面启动冒烟通过
