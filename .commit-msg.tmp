@@ -1,7 +1,0 @@
-feat(modu): 文档预览 Markdown 排版与 JSON/代码语法高亮
-
-- DocViewer 预览改为 Pygments 内联语法高亮（noclasses 内联 token 色）
-- JSON 预览：美化 + 高亮；无效时黄条提示（行/列）
-- Markdown 预览：标题/列表/表格/代码块规范排版，代码块按语言高亮
-- TXT 保持等宽可换行；依赖新增 Pygments
-- 新增预览渲染单测；pytest 全量绿
