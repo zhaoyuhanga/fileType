@@ -1,7 +1,0 @@
-fix(modu): 打包版 Markdown 扩展与高亮缺失（No module named extra）
-
-- doc_viewer：常用语言直接引用 Pygments 词法器类（静态收集），
-  其它语言动态查找失败时回退纯文本
-- workbench.spec：补充 markdown.extensions.* 与 pygments.lexers.* hiddenimports
-- main.py：新增 MODU_CHECK_DEPS 依赖自检钩子（打包验证用，不影响正常启动）
-- 打包 exe 自检通过：markdown_extra / markdown_codeblock / json_highlight / lexer_by_name 均 true
