@@ -43,9 +43,9 @@ def _run_dependency_check(output_path: str) -> int:
             results[name] = f"ERROR: {error}"
 
     def check_markdown_extra() -> bool:
-        import markdown
+        from modu_workbench.boards.doc_viewer import _render_markdown
 
-        return "<h1>" in markdown.markdown("# 标题", extensions=["extra", "sane_lists"])
+        return "<h1>标题</h1>" in _render_markdown("# 标题\n\n正文。")
 
     def check_markdown_codeblock() -> bool:
         from modu_workbench.boards.doc_viewer import _render_markdown

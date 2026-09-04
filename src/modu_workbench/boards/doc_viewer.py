@@ -155,8 +155,25 @@ def highlight_code(code: str, language: str | None = None) -> str:
 
 def _render_markdown(content: str) -> str:
     import markdown as md_lib
+    # 直接实例化扩展类（静态导入），避免打包版中按名字加载扩展失败（No module named 'extra'）。
+    from markdown.extensions.attr_list import AttrListExtension
+    from markdown.extensions.def_list import DefListExtension
+    from markdown.extensions.fenced_code import FencedCodeExtension
+    from markdown.extensions.footnotes import FootnoteExtension
+    from markdown.extensions.md_in_html import MarkdownInHtmlExtension
+    from markdown.extensions.sane_lists import SaneListExtension
+    from markdown.extensions.tables import TableExtension
 
-    html = md_lib.markdown(content, extensions=["extra", "sane_lists"])
+    extensions = [
+        FencedCodeExtension(),
+        AttrListExtension(),
+        DefListExtension(),
+        TableExtension(),
+        FootnoteExtension(),
+        MarkdownInHtmlExtension(),
+        SaneListExtension(),
+    ]
+    html = md_lib.markdown(content, extensions=extensions)
 
     def replace_block(match: re.Match) -> str:
         language = (match.group(1) or "").strip() or None
