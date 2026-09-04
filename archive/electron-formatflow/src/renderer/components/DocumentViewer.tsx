@@ -296,13 +296,32 @@ export function DocumentViewer({ request, onClose, onPathChanged }: DocumentView
             </div>
           ) : isMedia ? (
             <div className="viewer__media">
-              <video controls preload="metadata" src={toDocStreamUrl(file.path)}>
-                当前环境不支持播放该视频。
-              </video>
-              <p className="viewer__notice">
-                <AlertCircle size={14} />
-                {previewNote}。可点击"另存为"复制到其它位置。
-              </p>
+              {typeof window.formatFlow?.openMedia === "function" ? (
+                <>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => window.formatFlow!.openMedia!(file.path)}
+                  >
+                    <Play size={16} />
+                    使用本地播放器播放
+                  </button>
+                  <p className="viewer__notice">
+                    <AlertCircle size={14} />
+                    Web 视图内不内嵌视频，请点击上方按钮调用本地播放器预览。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <video controls preload="metadata" src={toDocStreamUrl(file.path)}>
+                    当前环境不支持播放该视频。
+                  </video>
+                  <p className="viewer__notice">
+                    <AlertCircle size={14} />
+                    {previewNote}。可点击"另存为"复制到其它位置。
+                  </p>
+                </>
+              )}
             </div>
           ) : mode === "edit" ? (
             <div className="viewer__editor">

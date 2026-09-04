@@ -50,7 +50,8 @@
       },
       readDoc: function (path) { return call("readDoc", path); },
       saveDoc: function (path, content) { return call("saveDoc", path, content); },
-      saveDocAs: function (source, name, content) { return call("saveDocAs", source, name, content); }
+      saveDocAs: function (source, name, content) { return call("saveDocAs", source, name, content); },
+      openMedia: function (path) { return call("openMedia", path); }
     };
     window.dispatchEvent(new Event("formatflow-ready"));
   }

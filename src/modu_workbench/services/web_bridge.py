@@ -11,7 +11,7 @@ import os
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog
 
@@ -215,6 +215,15 @@ class WebBridge(QObject):
             {"name": "ffmpeg", "available": bool(find_ffmpeg()), "executable": find_ffmpeg()},
             {"name": "LibreOffice", "available": bool(find_soffice()), "executable": find_soffice()},
         ]
+
+    def handle_openMedia(self, file_path: str) -> dict:
+        """用 Python 原生播放器打开本地媒体（嵌入式前端 mp4 预览用）。"""
+        from modu_workbench.services.media_player import MediaPlayerDialog
+
+        dialog = MediaPlayerDialog(file_path)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
+        return {}
 
     def handle_startJobs(self, batch_id: str, action_id: str, files: list[dict], output_dir: str) -> dict:
         worker = _BatchWorker(self, batch_id, action_id, files, output_dir)
