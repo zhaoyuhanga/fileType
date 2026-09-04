@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
-from modu_workbench.core.reader import Library, Storage
-from modu_workbench.services.config import ensure_legacy_migration
+from modu_workbench.core.reader import Library
+from modu_workbench.services import app_context
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
@@ -17,15 +17,14 @@ ONLINE_KEY = "online"
 
 
 class BookBoardPage(QWidget):
-    """书库板块页面：书架为主视图，阅读时全屏阅读器。"""
+    """书库板块页面：书架为主视图，阅读时全屏阅读器。
+
+    数据层使用应用级共享书库（services.app_context），与"转换→加入书库"联动。
+    """
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-
-        # 数据层：墨读旧库自动迁移，随后打开读写
-        db_path = ensure_legacy_migration()
-        self._storage = Storage(db_path)
-        self._library = Library(self._storage)
+        self._library = app_context.library()
         self._toaster = Toaster(self)
 
         self._shelf = ShelfView(self._library, self._toaster)
@@ -100,12 +99,3 @@ class BookBoardPage(QWidget):
     @property
     def library(self) -> Library:
         return self._library
-
-    def closeEvent(self, event) -> None:  # noqa: N802
-        if self._reader is not None:
-            self._close_reader()
-        try:
-            self._storage.close()
-        except Exception:  # noqa: BLE001
-            pass
-        super().closeEvent(event)

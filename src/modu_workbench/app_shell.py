@@ -80,7 +80,17 @@ class AppShell(QMainWindow):
             self._nav_buttons[spec.key] = button
             layout.addWidget(button)
 
+        settings_btn = make_nav_button("⚙ 设置")
+        settings_btn.clicked.connect(self._open_settings)
+        layout.addWidget(settings_btn)
+
         return bar
+
+    def _open_settings(self) -> None:
+        from .ui_kit.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self)
+        dialog.exec()
 
     def go_page(self, key: str) -> None:
         index = self._pages.get(key)

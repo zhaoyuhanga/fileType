@@ -114,6 +114,13 @@ class ConvertBoardPage(QWidget):
         run_row.addWidget(self._run_button)
         run_row.addWidget(self._cancel_button)
         right_layout.addLayout(run_row)
+
+        self._book_btn = QPushButton("📚 将 TXT/EPUB 结果加入书架")
+        self._book_btn.setEnabled(False)
+        self._book_btn.clicked.connect(self._import_results_to_library)
+        right_layout.addWidget(self._book_btn)
+        self._book_candidates: list[str] = []
+
         self._hint = QLabel("提示：双击文件行可本地查看/编辑 txt、md、json、mp4")
         self._hint.setObjectName("readerStatus")
         right_layout.addWidget(self._hint)
@@ -292,6 +299,10 @@ class ConvertBoardPage(QWidget):
                 continue
             if status == "succeeded":
                 row["status"] = "成功"
+                suffix = Path(message).suffix.lower()
+                if suffix in (".txt", ".epub"):
+                    self._book_candidates.append(message)
+                    self._book_btn.setEnabled(True)
             elif status == "cancelled":
                 row["status"] = "已取消"
             else:
@@ -315,6 +326,24 @@ class ConvertBoardPage(QWidget):
         self._worker = None
         self._run_button.setEnabled(bool(self._current_actions))
         self._cancel_button.setEnabled(False)
+
+    def _import_results_to_library(self) -> None:
+        candidates = list(dict.fromkeys(self._book_candidates))
+        if not candidates:
+            return
+        from modu_workbench.services.app_context import library
+
+        imported = 0
+        for file_path in candidates:
+            try:
+                library().import_path(file_path)
+                imported += 1
+            except Exception as error:  # noqa: BLE001
+                self._toaster.info(f"导入失败：{file_path}（{error}）")
+        if imported:
+            self._toaster.success(f"已将 {imported} 本加入书架")
+        self._book_candidates.clear()
+        self._book_btn.setEnabled(False)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._worker is not None:
