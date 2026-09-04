@@ -1,0 +1,8 @@
+fix(modu): 修复“桌面能力未加载”竞态（formatFlow 同步暴露）
+
+- bridge_shim 重写：window.formatFlow 在 React 启动前同步定义（17 个方法），
+  方法内部等待 QWebChannel 就绪后执行
+- 修复“桥先就绪、调用后发”导致的 readyPromise 永不 resolve：
+  attach 时固化已就绪 Promise
+- 实测（真实桌面 WebView）：加载完成即 formatFlow=object；getEngineStatus 返回 OK:3
+- webfront 已随包重建；打包自检 7 项全 true
