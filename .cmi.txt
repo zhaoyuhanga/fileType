@@ -1,9 +1,0 @@
-feat(modu): mp4 预览改为 Web 视图内嵌播放（本地 HTTP 流，支持 Range）
-
-- 新增 services/media_server：127.0.0.1 随机端口媒体流（GET/HEAD/Range 206，
-  仅放行媒体扩展名绝对路径），懒启动守护线程
-- 桥：mediaUrl(path) → 返回内嵌 <video src> 可用的本地流地址
-- 前端 DocumentViewer：嵌入式环境优先内嵌播放（mediaUrl），失败再回退
-  “本地播放器播放”按钮（保留 openMedia）
-- 单测：全量 200 / Range 206 / 非媒体 404；pytest 全绿
-- webfront 重建随包；打包自检 7 项全 true
