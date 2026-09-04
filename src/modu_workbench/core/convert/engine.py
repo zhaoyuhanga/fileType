@@ -47,10 +47,18 @@ def run_conversion(
             target = action.target_format
             output_path = _unique_output(output_dir_path, source.stem, TARGET_EXTENSION[target])
             _run_text(source, source_format, target, output_path, source.stem)
+        elif action.kind in ("word", "sheet"):
+            output_path = _run_document_family(action, source, output_dir_path)
         elif action.kind == "image":
             target = action.target_format
             output_path = _unique_output(output_dir_path, source.stem, TARGET_EXTENSION[target])
             image_io.convert_image(source, target, output_path)
+        elif action.kind == "media":
+            target = action.target_format
+            output_path = _unique_output(output_dir_path, source.stem, TARGET_EXTENSION[target])
+            from . import media_io
+
+            media_io.convert_media(source, target, output_path, cancel)
         elif action.kind == "archive":
             return _run_archive(action, source, output_dir_path, cancel)
         else:
@@ -145,6 +153,30 @@ def _run_text(source: Path, source_format: str, target: str, output: Path, title
         return
 
     raise ValueError(f"不支持的文本目标：{target}")
+
+
+# ---------- 文档族（word / sheet） ----------
+
+def _run_document_family(action: ConverterAction, source: Path, output_dir: Path) -> Path:
+    """Word 与表格族：优先 LibreOffice 高保真，缺失时走内置文本/表格兜底。"""
+    target = action.target_format
+    out = _unique_output(output_dir, source.stem, TARGET_EXTENSION[target])
+
+    if action.kind == "word":
+        from . import office_io
+
+        if target == "pdf" and office_io.soffice_convert_to_pdf(source, out):
+            return out
+        text = office_io.extract_word_text(source)
+        office_io.write_text_content(text, target, out, source.stem)
+        return out
+
+    from . import office_io, sheet_io
+
+    if target == "pdf" and office_io.soffice_convert_to_pdf(source, out):
+        return out
+    sheet_io.convert_sheet(source, target, out, source.stem)
+    return out
 
 
 # ---------- 归档族 ----------

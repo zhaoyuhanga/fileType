@@ -19,6 +19,10 @@ dependencies = [
     "Pillow>=10.0",        # 图片转换
     "markdown>=3.5",       # Markdown → HTML
     "html2text>=2020.1.16",  # HTML → Markdown
+    "python-docx>=1.1",    # Word(docx) 读写
+    "openpyxl>=3.1",       # Excel(xlsx)
+    "xlrd>=2.0.1",         # Excel(xls 旧版)
+    "rarfile>=4.0",        # RAR 解压（需要系统 unrar/7z）
 ]
 
 [project.optional-dependencies]
