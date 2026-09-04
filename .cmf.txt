@@ -1,6 +1,0 @@
-fix(modu): Markdown 渲染改直接扩展实例，规避打包版名字解析失败
-
-- doc_viewer：extra 子扩展（fenced/attr/def/tables/footnotes/md_in_html/sane_lists）
-  改为直接 import 类并实例化传给 markdown（静态收集，不再依赖运行时按名加载）
-- main 自检 markdown 检查改为经 _render_markdown 渲染验证
-- 打包 exe 自检 6 项全 true；桌面启动冒烟通过
