@@ -16,6 +16,9 @@ dependencies = [
     "lxml>=4.9",
     "chardet>=5.2",
     "requests>=2.31",      # 在线书源下载
+    "Pillow>=10.0",        # 图片转换
+    "markdown>=3.5",       # Markdown → HTML
+    "html2text>=2020.1.16",  # HTML → Markdown
 ]
 
 [project.optional-dependencies]
