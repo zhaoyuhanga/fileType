@@ -87,3 +87,33 @@ def test_board_page_opens_reader_and_back(qapp: QApplication, library: Library) 
         board.close()
     finally:
         board.close()
+
+
+def test_board_mode_switch_to_online(qapp: QApplication) -> None:
+    from modu_workbench.boards.book_board import ONLINE_KEY, SHELF_KEY, BookBoardPage
+
+    board = BookBoardPage()
+    try:
+        board._show_mode(ONLINE_KEY)  # noqa: SLF001
+        assert board._stack.currentWidget() is board._online  # noqa: SLF001
+        board._show_mode(SHELF_KEY)  # noqa: SLF001
+        assert board._stack.currentWidget() is board._shelf  # noqa: SLF001
+    finally:
+        board.close()
+
+
+def test_online_page_compliance_gate(qapp: QApplication, library: Library) -> None:
+    from modu_workbench.boards.book_online import OnlineDownloadPage
+
+    page = OnlineDownloadPage(library, _toaster(qapp))
+    try:
+        # 未填 URL 时不可下载
+        assert not page._start_button.isEnabled()  # noqa: SLF001
+        page._url_input.setText("https://www.00shu.la/txt/53054/")  # noqa: SLF001
+        # 合规勾选 + 有效 URL -> 可下载
+        assert page._start_button.isEnabled()  # noqa: SLF001
+        # 取消合规勾选 -> 禁止下载
+        page._compliance.setChecked(False)  # noqa: SLF001
+        assert not page._start_button.isEnabled()  # noqa: SLF001
+    finally:
+        page.close()
