@@ -1,6 +1,0 @@
-fix(modu): mp4 视频预览恢复（嵌入式前端改调本地播放器）
-
-- 前端 DocumentViewer：检测到 window.formatFlow.openMedia 时，mp4 预览显示
-  “本地播放器播放”按钮（不再使用 Electron docstream 协议地址）
-- 桥：新增 openMedia → Python 原生 QMediaPlayer 对话框（本地文件播放/暂停/进度）
-- webfront 重建并随包；pytest 全量绿；打包自检 7 项全 true
