@@ -38,14 +38,52 @@ _INLINE_CODE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
 
 
 def highlight_code(code: str, language: str | None = None) -> str:
-    """Pygments 语法高亮，返回带内联 token 颜色的 <pre> 片段（无需外部 CSS）。"""
+    """Pygments 语法高亮，返回带内联 token 颜色的 <pre> 片段（无需外部 CSS）。
+
+    常用语言直接引用词法器类（保证 PyInstaller 能静态收集）；
+    其它语言走动态查找，失败时回退纯文本。
+    """
     from pygments import highlight as _pyg_highlight
     from pygments.formatters import HtmlFormatter
-    from pygments.lexers import TextLexer, get_lexer_by_name, guess_lexer
+    from pygments.lexers import (
+        BashLexer,
+        CssLexer,
+        HtmlLexer,
+        JavascriptLexer,
+        PythonLexer,
+        SqlLexer,
+        TextLexer,
+        XmlLexer,
+        get_lexer_by_name,
+        guess_lexer,
+    )
+    from pygments.lexers.data import JsonLexer
+    from pygments.lexers.text import YamlLexer
 
+    _KNOWN: dict[str, object] = {
+        "json": JsonLexer(),
+        "python": PythonLexer(),
+        "py": PythonLexer(),
+        "js": JavascriptLexer(),
+        "javascript": JavascriptLexer(),
+        "html": HtmlLexer(),
+        "xml": XmlLexer(),
+        "css": CssLexer(),
+        "bash": BashLexer(),
+        "sh": BashLexer(),
+        "shell": BashLexer(),
+        "sql": SqlLexer(),
+        "yaml": YamlLexer(),
+        "yml": YamlLexer(),
+    }
+    lexer = None
     try:
-        lexer = get_lexer_by_name(language) if language else guess_lexer(code)
+        lexer = _KNOWN.get((language or "").lower()) or (
+            get_lexer_by_name(language) if language else guess_lexer(code)
+        )
     except Exception:  # noqa: BLE001
+        lexer = None
+    if lexer is None:
         lexer = TextLexer()
     body = _pyg_highlight(code, lexer, HtmlFormatter(nowrap=True, noclasses=True))
     return f"<pre style=\"font-family:{_MONO};font-size:13px;line-height:1.6;\">{body}</pre>"
