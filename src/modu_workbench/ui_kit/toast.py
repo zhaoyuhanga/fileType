@@ -10,16 +10,16 @@ _T = ThemeTokens()
 
 _STYLES = {
     "success": (
-        "QLabel {{ background: {success_bg}; color: #0b7a3c; border: 1px solid {success};"
-        " border-radius: 9px; padding: 10px 18px; font-size: 13px; }}"
+        "QLabel {{ background: {success_bg}; color: #1f6b3d; border: 1px solid {success};"
+        " border-radius: 8px; padding: 10px 18px; font-size: 13px; }}"
     ),
     "info": (
-        "QLabel {{ background: {info_bg}; color: #2458b5; border: 1px solid {info};"
-        " border-radius: 9px; padding: 10px 18px; font-size: 13px; }}"
+        "QLabel {{ background: {info_bg}; color: #2f5f9e; border: 1px solid {info};"
+        " border-radius: 8px; padding: 10px 18px; font-size: 13px; }}"
     ),
     "error": (
-        "QLabel {{ background: {danger_bg}; color: #b3262b; border: 1px solid {danger};"
-        " border-radius: 9px; padding: 10px 18px; font-size: 13px; }}"
+        "QLabel {{ background: {danger_bg}; color: #a52a2a; border: 1px solid {danger};"
+        " border-radius: 8px; padding: 10px 18px; font-size: 13px; }}"
     ),
 }
 

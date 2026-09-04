@@ -35,61 +35,61 @@ from modu_workbench.core.convert.text_io import JsonFormatError, json_pretty, re
 
 _PAGE_CSS = """
 body {{
-    margin: 22px 30px 48px;
-    color: #24292f;
+    margin: 20px 28px 46px;
+    color: #26221c;
     font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
     font-size: 15px;
     line-height: 1.85;
-    background: #ffffff;
+    background: #fffdf6;
 }}
-h1, h2, h3, h4, h5, h6 {{ color: #1a1f36; line-height: 1.4; }}
-h1 {{ font-size: 1.75em; border-bottom: 1px solid #e6ebf2; padding-bottom: 8px; }}
-h2 {{ font-size: 1.45em; border-bottom: 1px solid #eef1f6; padding-bottom: 6px; }}
-h3 {{ font-size: 1.22em; }}
-h4 {{ font-size: 1.08em; }}
+h1, h2, h3, h4, h5, h6 {{ color: #3a2f1c; line-height: 1.4; }}
+h1 {{ font-size: 1.7em; border-bottom: 1px solid #e0d5c1; padding-bottom: 8px; }}
+h2 {{ font-size: 1.4em; border-bottom: 1px solid #ece2cf; padding-bottom: 6px; }}
+h3 {{ font-size: 1.18em; }}
+h4 {{ font-size: 1.05em; }}
 p {{ margin: 10px 0; }}
-a {{ color: #1f6feb; text-decoration: none; }}
+a {{ color: #8a6d1f; text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 code {{
     font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
     font-size: 13px;
-    background: #eef1f7;
-    color: #b02f60;
+    background: #f1e6d0;
+    color: #8a4b00;
     padding: 2px 6px;
     border-radius: 4px;
 }}
 pre {{
-    background: #f7f9fc;
-    border: 1px solid #e3e9f2;
+    background: #f7efdd;
+    border: 1px solid #d8cba9;
     border-radius: 8px;
-    padding: 14px 16px;
+    padding: 13px 16px;
     overflow: auto;
 }}
 pre code {{
     background: transparent;
     padding: 0;
-    color: #2a3244;
+    color: #2c2a20;
     font-size: 13px;
-    line-height: 1.65;
+    line-height: 1.7;
 }}
 blockquote {{
     margin: 12px 0;
-    padding: 4px 16px;
-    border-left: 4px solid #d0d7de;
-    color: #57606a;
-    background: #f7f9fc;
+    padding: 2px 16px;
+    border-left: 4px solid #c8b99c;
+    color: #5c5243;
+    background: #f8f1e1;
     border-radius: 0 6px 6px 0;
 }}
 table {{ border-collapse: collapse; margin: 12px 0; }}
-th, td {{ border: 1px solid #d8dfe9; padding: 7px 13px; }}
-th {{ background: #f4f7fb; }}
+th, td {{ border: 1px solid #d4c6ab; padding: 7px 13px; }}
+th {{ background: #f5ecd8; }}
 ul, ol {{ margin: 8px 0; padding-left: 26px; }}
-hr {{ border: none; border-top: 2px solid #e6ebf2; margin: 18px 0; }}
+hr {{ border: none; border-top: 2px solid #e0d5c1; margin: 18px 0; }}
 img {{ max-width: 100%; border-radius: 6px; }}
 .warn {{
-    color: #9a6700;
-    background: #fff5d6;
-    border: 1px solid #f0d27f;
+    color: #8a5b06;
+    background: #f7e7c1;
+    border: 1px solid #e0c27a;
     border-radius: 6px;
     padding: 8px 12px;
     margin: 4px 0 12px;
