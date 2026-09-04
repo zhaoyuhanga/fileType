@@ -1,6 +1,0 @@
-chore(modu): 清理无效代码并重建安装包
-
-- 移除 ui_kit/widgets.placeholder_page 死代码
-- 移除 doc_viewer.VIEWABLE_TEXT、formats.TEXT_SOURCE_FORMATS 未用常量
-- 清除旧打包产物（dist/build/out-*）后全新打包
-- pytest 全量绿；exe 自检 6 项 true、桌面启动冒烟通过
