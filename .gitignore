@@ -18,3 +18,5 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 前端最小构建临时目录.webbuild/

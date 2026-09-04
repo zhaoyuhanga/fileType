@@ -58,6 +58,18 @@ class ConvertBoardPage(QWidget):
 
     def __init__(self, output_dir: str | None = None, parent: QWidget | None = None):
         super().__init__(parent)
+        from .convert_web import WebConvertPage, web_convert_available
+        from modu_workbench.services.webfront import webfront_dir
+
+        if web_convert_available():
+            front = webfront_dir()
+            self._web_page = WebConvertPage(front, self)  # type: ignore[arg-type]
+            lay = QVBoxLayout(self)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.addWidget(self._web_page)
+            self._web_mode = True
+            return
+        self._web_mode = False
         self._toaster = Toaster(self)
         self._output_dir = output_dir or str(default_output_dir())
         self._worker: _ConvertWorker | None = None

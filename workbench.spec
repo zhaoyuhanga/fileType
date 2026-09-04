@@ -36,7 +36,7 @@ a = Analysis(
     ["src/modu_workbench/__main__.py"],
     pathex=["src"],
     binaries=[],
-    datas=[],
+    datas=[("src/modu_workbench/webfront", "modu_workbench/webfront")],
     hiddenimports=[
         "modu_workbench.boards.book_online",
         "modu_workbench.boards.book_reader",
@@ -71,7 +71,7 @@ a = Analysis(
         "pygments.formatters.html",
         # 文档预览 WebView（完整 CSS 渲染，与旧版 Web 预览一致）
         "PySide6.QtWebEngineWidgets",
-        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineCore",\n        "PySide6.QtWebChannel",\n        "modu_workbench.boards.convert_web",\n        "modu_workbench.services.web_bridge",
         "PySide6.QtWebChannel",
     ],
     hookspath=[],
