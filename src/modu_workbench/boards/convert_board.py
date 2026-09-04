@@ -89,16 +89,33 @@ class ConvertBoardPage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._table = QTableWidget(0, 6)
-        self._table.setHorizontalHeaderLabels(["", "文件名", "格式", "状态", "详情/输出", "查看"])
+        self._table.setHorizontalHeaderLabels(["选中", "文件名", "格式", "状态", "详情/输出", "查看"])
         self._table.horizontalHeader().setStretchLastSection(False)
-        self._table.setColumnWidth(0, 36)
+        self._table.setColumnWidth(0, 52)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.setColumnWidth(2, 90)
         self._table.setColumnWidth(3, 130)
         self._table.setColumnWidth(4, 240)
-        splitter.addWidget(self._table)
+
+        left = QWidget()
+        left.setObjectName("filePanel")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(14, 12, 14, 14)
+        left_layout.setSpacing(6)
+        left_header = QHBoxLayout()
+        table_title = QLabel("待处理文件")
+        table_title.setObjectName("sectionTitle")
+        self._count_label = QLabel("0 项")
+        self._count_label.setObjectName("viewerMetaLabel")
+        left_header.addWidget(table_title)
+        left_header.addStretch(1)
+        left_header.addWidget(self._count_label)
+        left_layout.addLayout(left_header)
+        left_layout.addWidget(self._table, 1)
+        splitter.addWidget(left)
 
         right = QWidget()
+        right.setObjectName("actionPanel")
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(12, 12, 12, 12)
         right_layout.setSpacing(8)
@@ -119,6 +136,7 @@ class ConvertBoardPage(QWidget):
 
         run_row = QHBoxLayout()
         self._run_button = QPushButton("开始转换")
+        self._run_button.setObjectName("primaryButton")
         self._run_button.setEnabled(False)
         self._run_button.clicked.connect(self._start)
         self._cancel_button = QPushButton("取消")
@@ -225,7 +243,8 @@ class ConvertBoardPage(QWidget):
             action.setForeground(Qt.GlobalColor.darkBlue if viewable else Qt.GlobalColor.gray)
             self._table.setItem(row_index, 5, action)
         self._table.blockSignals(False)
-        # 动作列表仅在格式/勾选变化时由调用方显式刷新（状态变化不刷新，避免重置选择）
+        if hasattr(self, "_count_label"):
+            self._count_label.setText(f"{len(self._rows)} 项")
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() != 0 or item.row() >= len(self._rows):
@@ -262,21 +281,29 @@ class ConvertBoardPage(QWidget):
         self._action_buttons: list[QPushButton] = []
         for action in actions:
             button = QPushButton(action.label)
-            button.setCheckable(True)
+            button.setObjectName("actionOption")
+            button.setProperty("active", False)
             button.clicked.connect(lambda _=False, a=action: self._select_action(a))
             self._actions_box.addWidget(button)
             self._action_buttons.append(button)
         self._selected_action = next((a for a in actions if a.id == previous_id), actions[0] if actions else None)
         if self._selected_action is not None and self._action_buttons:
-            selected = self._selected_action
             for button, candidate in zip(self._action_buttons, self._current_actions):
-                button.setChecked(candidate.id == selected.id)
+                active = candidate.id == self._selected_action.id
+                button.setProperty("active", active)
+                style = button.style()
+                style.unpolish(button)
+                style.polish(button)
         self._run_button.setEnabled(bool(actions) and self._worker is None)
 
     def _select_action(self, action: ConverterAction) -> None:
         self._selected_action = action
         for button, candidate in zip(self._action_buttons, self._current_actions):
-            button.setChecked(candidate.id == action.id)
+            active = candidate.id == action.id
+            button.setProperty("active", active)
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
 
     def _start(self) -> None:
         if self._worker is not None or self._selected_action is None:

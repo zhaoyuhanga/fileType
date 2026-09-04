@@ -75,7 +75,7 @@ def test_doc_viewer_txt_and_json(qapp: QApplication, tmp_path: Path) -> None:
     try:
         assert dialog._editor.toPlainText() == "你好"  # noqa: SLF001
         # 进入编辑
-        dialog._toggle_mode()  # noqa: SLF001
+        dialog._set_mode("edit")  # noqa: SLF001
         assert dialog._editor.isVisible()  # noqa: SLF001
     finally:
         dialog.close()

@@ -1,7 +1,7 @@
 """文档查看/编辑器（txt / md / json / mp4）。
 
 - 文本：预览只读 ↔ 编辑切换；保存 / 另存为；JSON 提供"美化"；
-- 预览渲染：优先 QtWebEngine（内嵌 Chromium，完整 CSS，与旧 Web 预览一致），
+- 预览渲染：优先 QtWebEngine（内嵌 Chromium，完整 CSS，与 main 分支 Web 预览一致），
   无头/不可用时回退 QTextBrowser；Markdown 规范排版 + 代码块语法高亮，
   JSON 语法高亮（无效黄条提示），TXT 等宽换行；
 - mp4：本地播放（QMediaPlayer），仅可另存为复制；
@@ -31,65 +31,65 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.convert.text_io import JsonFormatError, json_pretty, read_text_smart, write_text
 
-# ---------- 预览页面 CSS（完整 CSS，经 QtWebEngine 渲染） ----------
+# ---------- 预览页面 CSS（完整 CSS，经 QtWebEngine 渲染，对齐 main 分支） ----------
 
 _PAGE_CSS = """
 body {{
     margin: 20px 28px 46px;
-    color: #26221c;
+    color: #1c2333;
     font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
     font-size: 15px;
     line-height: 1.85;
-    background: #fffdf6;
+    background: #ffffff;
 }}
-h1, h2, h3, h4, h5, h6 {{ color: #3a2f1c; line-height: 1.4; }}
-h1 {{ font-size: 1.7em; border-bottom: 1px solid #e0d5c1; padding-bottom: 8px; }}
-h2 {{ font-size: 1.4em; border-bottom: 1px solid #ece2cf; padding-bottom: 6px; }}
+h1, h2, h3, h4, h5, h6 {{ color: #1c2333; line-height: 1.4; }}
+h1 {{ font-size: 1.7em; border-bottom: 1px solid #e3e8f1; padding-bottom: 8px; }}
+h2 {{ font-size: 1.4em; border-bottom: 1px solid #e3e8f1; padding-bottom: 6px; }}
 h3 {{ font-size: 1.18em; }}
 h4 {{ font-size: 1.05em; }}
 p {{ margin: 10px 0; }}
-a {{ color: #8a6d1f; text-decoration: none; }}
+a {{ color: #4f6ef7; text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 code {{
-    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    font-family: "JetBrains Mono", Consolas, "Cascadia Code", monospace;
     font-size: 13px;
-    background: #f1e6d0;
-    color: #8a4b00;
+    background: #eef1f7;
+    color: #b02f60;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: 5px;
 }}
 pre {{
-    background: #f7efdd;
-    border: 1px solid #d8cba9;
-    border-radius: 8px;
-    padding: 13px 16px;
+    background: #1e2433;
+    color: #e6e9f2;
+    border-radius: 10px;
+    padding: 14px 16px;
     overflow: auto;
 }}
 pre code {{
     background: transparent;
     padding: 0;
-    color: #2c2a20;
+    color: inherit;
     font-size: 13px;
-    line-height: 1.7;
+    line-height: 1.65;
 }}
 blockquote {{
     margin: 12px 0;
     padding: 2px 16px;
-    border-left: 4px solid #c8b99c;
-    color: #5c5243;
-    background: #f8f1e1;
+    border-left: 4px solid #4f6ef7;
+    color: #47526a;
+    background: #f7f9fd;
     border-radius: 0 6px 6px 0;
 }}
 table {{ border-collapse: collapse; margin: 12px 0; }}
-th, td {{ border: 1px solid #d4c6ab; padding: 7px 13px; }}
-th {{ background: #f5ecd8; }}
+th, td {{ border: 1px solid #e3e8f1; padding: 7px 13px; }}
+th {{ background: #f7f9fd; font-weight: 600; }}
 ul, ol {{ margin: 8px 0; padding-left: 26px; }}
-hr {{ border: none; border-top: 2px solid #e0d5c1; margin: 18px 0; }}
-img {{ max-width: 100%; border-radius: 6px; }}
+hr {{ border: none; border-top: 2px solid #e3e8f1; margin: 18px 0; }}
+img {{ max-width: 100%; border-radius: 7px; }}
 .warn {{
-    color: #8a5b06;
-    background: #f7e7c1;
-    border: 1px solid #e0c27a;
+    color: #b97f10;
+    background: #fbf2dd;
+    border: 1px solid #e9cf8b;
     border-radius: 6px;
     padding: 8px 12px;
     margin: 4px 0 12px;
@@ -155,7 +155,7 @@ def highlight_code(code: str, language: str | None = None) -> str:
 
 def _render_markdown(content: str) -> str:
     import markdown as md_lib
-    # 直接实例化扩展类（静态导入），避免打包版中按名字加载扩展失败（No module named 'extra'）。
+    # 直接实例化扩展类（静态导入），避免打包版中按名字加载扩展失败。
     from markdown.extensions.attr_list import AttrListExtension
     from markdown.extensions.def_list import DefListExtension
     from markdown.extensions.fenced_code import FencedCodeExtension
@@ -238,39 +238,100 @@ class DocViewerDialog(QDialog):
         self._dirty = False
 
         self.setWindowTitle(f"查看：{self._path.name}")
-        self.resize(960, 680)
+        self.resize(960, 700)
 
         layout = QVBoxLayout(self)
-        toolbar = QHBoxLayout()
-        self._mode_btn = QPushButton("编辑")
-        self._mode_btn.clicked.connect(self._toggle_mode)
-        self._save_btn = QPushButton("保存")
-        self._save_btn.clicked.connect(self._save)
-        self._save_as_btn = QPushButton("另存为")
-        self._save_as_btn.clicked.connect(self._save_as)
-        self._format_btn = QPushButton("JSON 美化")
-        self._format_btn.clicked.connect(self._format_json)
-        self._format_btn.setVisible(False)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        toolbar.addWidget(QLabel(self._path.name))
-        toolbar.addStretch(1)
-        toolbar.addWidget(self._format_btn)
-        toolbar.addWidget(self._mode_btn)
-        toolbar.addWidget(self._save_btn)
-        toolbar.addWidget(self._save_as_btn)
-        layout.addLayout(toolbar)
+        layout.addWidget(self._build_header())
+        layout.addWidget(self._build_meta())
 
         if self._path.suffix.lower() == ".mp4":
-            self._build_media()
+            self._build_media(layout)
         else:
-            self._build_text()
+            self._build_text(layout)
+
+        layout.addWidget(self._build_footer())
 
         self._load()
         self._refresh_title()
 
-    # ---------- 构建 ----------
+    # ---------- 结构 ----------
 
-    def _build_text(self) -> None:
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setObjectName("viewerHeader")
+        row = QHBoxLayout(header)
+        row.setContentsMargins(16, 11, 16, 11)
+        row.setSpacing(8)
+
+        self._name_label = QLabel(self._path.name)
+        self._name_label.setObjectName("viewerName")
+        row.addWidget(self._name_label)
+        row.addStretch(1)
+
+        if self._path.suffix.lower() != ".mp4":
+            segmented = QWidget()
+            segmented.setObjectName("viewerSegmented")
+            seg = QHBoxLayout(segmented)
+            seg.setContentsMargins(3, 3, 3, 3)
+            seg.setSpacing(2)
+            self._mode_btn = QPushButton("预览")
+            self._edit_btn = QPushButton("编辑")
+            for btn in (self._mode_btn, self._edit_btn):
+                btn.setObjectName("viewerTool")
+            self._mode_btn.setProperty("active", True)
+            self._edit_btn.setProperty("active", False)
+            self._mode_btn.clicked.connect(lambda: self._set_mode("preview"))
+            self._edit_btn.clicked.connect(lambda: self._set_mode("edit"))
+            seg.addWidget(self._mode_btn)
+            seg.addWidget(self._edit_btn)
+            row.addWidget(segmented)
+        else:
+            self._mode_btn = QPushButton("预览")
+            self._mode_btn.setObjectName("viewerTool")
+            self._mode_btn.setEnabled(False)
+
+        self._format_btn = QPushButton("JSON 美化")
+        self._format_btn.setObjectName("viewerTool")
+        self._format_btn.clicked.connect(self._format_json)
+        self._format_btn.setVisible(self._path.suffix.lower() == ".json")
+        row.addWidget(self._format_btn)
+
+        self._save_btn = QPushButton("保存")
+        self._save_btn.setObjectName("viewerTool")
+        self._save_btn.setProperty("primary", True)
+        self._save_btn.clicked.connect(self._save)
+        self._save_btn.setEnabled(self._path.suffix.lower() != ".mp4")
+        self._save_as_btn = QPushButton("另存为")
+        self._save_as_btn.setObjectName("viewerTool")
+        self._save_as_btn.clicked.connect(self._save_as)
+        close_btn = QPushButton("关闭")
+        close_btn.setObjectName("viewerTool")
+        close_btn.clicked.connect(self._request_close)
+        row.addWidget(self._save_btn)
+        row.addWidget(self._save_as_btn)
+        row.addWidget(close_btn)
+        return header
+
+    def _build_meta(self) -> QWidget:
+        meta = QWidget()
+        meta.setObjectName("viewerMeta")
+        row = QHBoxLayout(meta)
+        row.setContentsMargins(18, 6, 18, 6)
+        row.setSpacing(16)
+        labels = [str(self._path), "", "", ""]
+        self._meta_labels: list[QLabel] = []
+        for text in labels:
+            label = QLabel(text)
+            label.setObjectName("viewerMetaLabel")
+            self._meta_labels.append(label)
+            row.addWidget(label)
+        row.addStretch(1)
+        return meta
+
+    def _build_text(self, layout: QVBoxLayout) -> None:
         splitter = QSplitter(Qt.Orientation.Vertical)
         self._preview = _make_preview_widget(self)
         engine = getattr(self._preview, "_preview_engine", "未知")
@@ -279,26 +340,33 @@ class DocViewerDialog(QDialog):
         self._editor.textChanged.connect(self._notify_edit)
         splitter.addWidget(self._preview)
         splitter.addWidget(self._editor)
-        layout = self.layout()
         layout.addWidget(splitter, 1)
-        self._hint_label = QLabel(f"预览引擎：{engine}（预览只读；切换到「编辑」后可修改，Ctrl+S 保存）")
-        layout.addWidget(self._hint_label)
-        self._is_text = True
+        self._engine = engine
 
-    def _build_media(self) -> None:
+    def _build_media(self, layout: QVBoxLayout) -> None:
         from PySide6.QtMultimedia import QMediaPlayer
         from PySide6.QtMultimediaWidgets import QVideoWidget
 
         self._player = QMediaPlayer(self)
         self._video = QVideoWidget(self)
         self._player.setVideoOutput(self._video)
-        layout = self.layout()
         layout.addWidget(self._video, 1)
-        layout.addWidget(QLabel("本地视频预览（只读）；可用「另存为」复制该文件。"))
-        self._mode_btn.setEnabled(False)
-        self._save_btn.setEnabled(False)
-        self._format_btn.hide()
-        self._is_text = False
+        self._engine = "视频"
+
+    def _build_footer(self) -> QWidget:
+        footer = QWidget()
+        footer.setObjectName("viewerFooter")
+        row = QHBoxLayout(footer)
+        row.setContentsMargins(18, 7, 18, 7)
+        row.setSpacing(12)
+        self._dirty_label = QLabel("")
+        self._dirty_label.setObjectName("viewerDirty")
+        self._hint_label = QLabel("")
+        self._hint_label.setObjectName("viewerHint")
+        row.addWidget(self._dirty_label)
+        row.addStretch(1)
+        row.addWidget(self._hint_label)
+        return footer
 
     # ---------- 数据 ----------
 
@@ -313,15 +381,32 @@ class DocViewerDialog(QDialog):
 
                 self._player.setSource(QUrl.fromLocalFile(str(self._path)))
                 self._player.play()
+                self._hint_label.setText("本地视频预览（只读）；可用「另存为」复制该文件。")
+                self._update_meta()
                 return
             content = read_text_smart(self._path)
             self._saved = content
             self._editor.setPlainText(content)
+            self._update_meta()
             self._render_preview()
         except Exception as error:  # noqa: BLE001
             self._saved = ""
             self._editor.setPlainText("")
             self._preview.setHtml(f"<p style='color:#b3262b;'>读取失败：{error}</p>")
+
+    def _update_meta(self) -> None:
+        size = self._path.stat().st_size if self._path.exists() else 0
+
+        def fmt_size(n: int) -> str:
+            if n < 1024:
+                return f"{n} B"
+            if n < 1024 * 1024:
+                return f"{n / 1024:.1f} KB"
+            return f"{n / 1024 / 1024:.1f} MB"
+
+        texts = [str(self._path), fmt_size(size), "", ""]
+        for label, text in zip(self._meta_labels, texts):
+            label.setText(text)
 
     def _current_text(self) -> str:
         return self._editor.toPlainText() if self._editor.isVisible() else self._saved
@@ -331,22 +416,23 @@ class DocViewerDialog(QDialog):
         ext = self._path.suffix.lower()
         if ext == ".md":
             self._preview.setHtml(_render_markdown(content))
-            self._mode_btn.setVisible(True)
-            self._format_btn.setVisible(False)
         elif ext == ".json":
             self._preview.setHtml(_render_json(content))
-            self._format_btn.setVisible(True)
-            self._mode_btn.setVisible(True)
         else:
             self._preview.setHtml(_render_txt(content))
-            self._mode_btn.setVisible(True)
-            self._format_btn.setVisible(False)
+        self._hint_label.setText(
+            f"预览引擎：{self._engine}（预览只读；切换到「编辑」后可修改，Ctrl+S 保存）"
+        )
 
-    def _toggle_mode(self) -> None:
-        editing = not self._editor.isVisible()
+    def _set_mode(self, mode: str) -> None:
+        editing = mode == "edit"
         self._editor.setVisible(editing)
         self._preview.setVisible(not editing)
-        self._mode_btn.setText("预览" if editing else "编辑")
+        for btn, active in ((self._mode_btn, not editing), (self._edit_btn, editing)):
+            btn.setProperty("active", active)
+            style = btn.style()
+            style.unpolish(btn)
+            style.polish(btn)
         if editing:
             self._editor.setFocus()
 
@@ -360,7 +446,7 @@ class DocViewerDialog(QDialog):
         if pretty != raw:
             self._editor.setPlainText(pretty)
             if not self._editor.isVisible():
-                self._toggle_mode()
+                self._set_mode("edit")
             self._mark_dirty()
 
     def _save(self) -> None:
@@ -394,7 +480,19 @@ class DocViewerDialog(QDialog):
 
     def _refresh_title(self) -> None:
         marker = " *" if self._dirty else ""
+        self._name_label.setText(self._path.name + marker)
+        self._dirty_label.setText("● 未保存的修改" if self._dirty else "")
         self.setWindowTitle(f"查看：{self._path.name}{marker}")
+
+    def _request_close(self) -> None:
+        if self._dirty and self._saved != self._current_text():
+            answer = QMessageBox.question(
+                self, "未保存的修改", "当前文档有未保存的修改，关闭将丢失。是否放弃修改并关闭？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._dirty and self._saved != self._current_text():
