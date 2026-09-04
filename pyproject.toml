@@ -23,6 +23,7 @@ dependencies = [
     "openpyxl>=3.1",       # Excel(xlsx)
     "xlrd>=2.0.1",         # Excel(xls 旧版)
     "rarfile>=4.0",        # RAR 解压（需要系统 unrar/7z）
+    "Pygments>=2.17",      # 预览语法高亮（JSON / Markdown 代码块）
 ]
 
 [project.optional-dependencies]

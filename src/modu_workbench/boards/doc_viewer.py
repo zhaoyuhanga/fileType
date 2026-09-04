@@ -1,11 +1,14 @@
 """文档查看/编辑器（txt / md / json / mp4）。
 
 - 文本：预览只读 ↔ 编辑切换；保存 / 另存为；JSON 提供"美化"；
+- 预览排版：Markdown 渲染为规范文档（代码块语法高亮），JSON 语法高亮，TXT 等宽；
 - mp4：本地播放（QMediaPlayer），仅可另存为复制；
 - 未保存修改在关闭时确认。
 """
 from __future__ import annotations
 
+import html as html_mod
+import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -25,6 +28,71 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.convert.text_io import JsonFormatError, json_pretty, read_text_smart, write_text
 
+# ---------- 语法高亮与排版 ----------
+
+_MONO = "Consolas,'Cascadia Mono','Courier New',monospace"
+_CODE_FENCE = re.compile(
+    r"<pre><code(?: class=\"language-([\\w+-]+)\")?>(.*?)</code></pre>", re.DOTALL
+)
+_INLINE_CODE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
+
+
+def highlight_code(code: str, language: str | None = None) -> str:
+    """Pygments 语法高亮，返回带内联 token 颜色的 <pre> 片段（无需外部 CSS）。"""
+    from pygments import highlight as _pyg_highlight
+    from pygments.formatters import HtmlFormatter
+    from pygments.lexers import TextLexer, get_lexer_by_name, guess_lexer
+
+    try:
+        lexer = get_lexer_by_name(language) if language else guess_lexer(code)
+    except Exception:  # noqa: BLE001
+        lexer = TextLexer()
+    body = _pyg_highlight(code, lexer, HtmlFormatter(nowrap=True, noclasses=True))
+    return f"<pre style=\"font-family:{_MONO};font-size:13px;line-height:1.6;\">{body}</pre>"
+
+
+def _render_markdown(content: str) -> str:
+    import markdown as md_lib
+
+    html = md_lib.markdown(content, extensions=["extra", "sane_lists"])
+
+    def replace_block(match: re.Match) -> str:
+        language = (match.group(1) or "").strip() or None
+        raw = html_mod.unescape(match.group(2))
+        return highlight_code(raw, language)
+
+    html = _CODE_FENCE.sub(replace_block, html)
+    html = _INLINE_CODE.sub(
+        lambda m: f"<code style=\"font-family:{_MONO};color:#a0401f;\">{m.group(1)}</code>",
+        html,
+    )
+    return (
+        f"<html><body style=\"font-family:'PingFang SC','Microsoft YaHei',sans-serif;"
+        f"font-size:15px;color:#24292f;\">{html}</body></html>"
+    )
+
+
+def _render_json(content: str) -> str:
+    warn_html = ""
+    try:
+        pretty = json_pretty(content)
+    except JsonFormatError as error:
+        pretty = content
+        warn_html = (
+            f"<p style=\"color:#b76a08;background:#fdf3e3;padding:8px 12px;\">"
+            f"JSON 无效：{html_mod.escape(str(error))}</p>"
+        )
+    return f"<html><body style='color:#24292f;'>{warn_html}{highlight_code(pretty, 'json')}</body></html>"
+
+
+def _render_txt(content: str) -> str:
+    escaped = html_mod.escape(content, quote=False)
+    return (
+        f"<html><body style=\"font-family:{_MONO};font-size:13px;\">"
+        f"<pre style='white-space:pre-wrap;'>{escaped}</pre></body></html>"
+    )
+
+
 VIEWABLE_TEXT = {".txt", ".md", ".json"}
 
 
@@ -38,7 +106,7 @@ class DocViewerDialog(QDialog):
         self._dirty = False
 
         self.setWindowTitle(f"查看：{self._path.name}")
-        self.resize(900, 640)
+        self.resize(960, 660)
 
         layout = QVBoxLayout(self)
         toolbar = QHBoxLayout()
@@ -120,7 +188,7 @@ class DocViewerDialog(QDialog):
         except Exception as error:  # noqa: BLE001
             self._saved = ""
             self._editor.setPlainText("")
-            self._preview.setHtml(f"<p style='color:#d06;'>读取失败：{error}</p>")
+            self._preview.setHtml(f"<p style='color:#b3262b;'>读取失败：{error}</p>")
 
     def _current_text(self) -> str:
         return self._editor.toPlainText() if self._editor.isVisible() else self._saved
@@ -129,21 +197,17 @@ class DocViewerDialog(QDialog):
         content = self._saved
         ext = self._path.suffix.lower()
         if ext == ".md":
-            import markdown as md_lib
-
-            self._preview.setHtml(f"<body style='margin:18px;'>{md_lib.markdown(content, extensions=['extra'])}</body>")
+            self._preview.setHtml(_render_markdown(content))
             self._mode_btn.setVisible(True)
+            self._format_btn.setVisible(False)
         elif ext == ".json":
-            try:
-                pretty = json_pretty(content)
-                self._preview.setHtml(f"<pre style='font-family:monospace;'>{_escape(pretty)}</pre>")
-            except JsonFormatError as error:
-                self._preview.setHtml(
-                    f"<p style='color:#d06000;'>JSON 无效：{error}</p><pre style='font-family:monospace;'>{_escape(content)}</pre>"
-                )
+            self._preview.setHtml(_render_json(content))
             self._format_btn.setVisible(True)
+            self._mode_btn.setVisible(True)
         else:
-            self._preview.setHtml(f"<pre style='font-family:monospace;white-space:pre-wrap;'>{_escape(content)}</pre>")
+            self._preview.setHtml(_render_txt(content))
+            self._mode_btn.setVisible(True)
+            self._format_btn.setVisible(False)
 
     def _toggle_mode(self) -> None:
         editing = not self._editor.isVisible()
@@ -212,13 +276,6 @@ class DocViewerDialog(QDialog):
             self._player.stop()
         super().closeEvent(event)
 
-    # 供编辑器内容变更时外部调用
     def _notify_edit(self) -> None:
         self._dirty = True
         self._refresh_title()
-
-
-def _escape(text: str) -> str:
-    import html as html_mod
-
-    return html_mod.escape(text, quote=False)
