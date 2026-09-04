@@ -188,6 +188,46 @@ QScrollBar::handle:horizontal {{
     background: {t.border_strong}; border-radius: 5px; min-width: 30px;
 }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+
+/* ---- 输入控件与阅读器 ---- */
+QLineEdit, QComboBox, QTextBrowser, QTextEdit {{
+    background: {t.surface_2};
+    border: 1px solid {t.border};
+    border-radius: {t.radius_sm}px;
+    padding: 5px 9px;
+    color: {t.text};
+    selection-background-color: {t.accent};
+    selection-color: #1a130a;
+}}
+QLineEdit:focus, QComboBox:focus {{
+    border-color: {t.accent};
+}}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{
+    background: {t.surface};
+    color: {t.text};
+    border: 1px solid {t.border};
+    selection-background-color: {t.accent_soft};
+    selection-color: {t.text_hi};
+}}
+QTextBrowser, QTextEdit {{
+    border: none;
+    background: transparent;
+}}
+QLabel#shelfHint {{ color: {t.text_dim}; font-size: 13px; }}
+QLabel#readerTitle {{ color: {t.text_hi}; font-size: 15px; font-weight: 700; }}
+QLabel#readerStatus {{ color: {t.text_dim}; font-size: 12px; }}
+QFrame#bookReaderBar {{
+    background: {t.surface};
+    border-bottom: 1px solid {t.border};
+}}
+QProgressBar {{
+    background: {t.surface_2};
+    border: 1px solid {t.border};
+    border-radius: 5px;
+    height: 8px;
+}}
+QProgressBar::chunk {{ background: {t.accent}; border-radius: 4px; }}
 """
 
 
