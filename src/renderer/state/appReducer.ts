@@ -1,4 +1,4 @@
-import type { ConverterAction, EngineStatus, FileItem } from "../../shared/types";
+import type { ConverterAction, EngineStatus, FileItem, JobStatus, SupportedFormat } from "../../shared/types";
 
 export interface AppState {
   files: FileItem[];
@@ -8,7 +8,16 @@ export interface AppState {
   engineStatus: EngineStatus[];
   importBusy: boolean;
   runBusy: boolean;
-  errorMessage?: string;
+}
+
+export type FileOutcomeStatus = Exclude<JobStatus, "queued">;
+
+export interface FileOutcome {
+  fileId: string;
+  status: FileOutcomeStatus;
+  targetFormat?: SupportedFormat;
+  outputPath?: string;
+  message?: string;
 }
 
 export type AppAction =
@@ -22,8 +31,9 @@ export type AppAction =
   | { type: "engineStatusLoaded"; engineStatus: EngineStatus[] }
   | { type: "importBusyChanged"; importBusy: boolean }
   | { type: "runBusyChanged"; runBusy: boolean }
-  | { type: "errorRaised"; errorMessage?: string }
-  | { type: "jobResultsApplied"; results: Array<{ fileId: string; status: "succeeded" | "failed"; targetFormat?: FileItem["outputFormat"]; outputPath?: string; message?: string }> }
+  | { type: "fileUpdated"; fileId: string; update: Partial<FileItem> }
+  | { type: "jobEvent"; outcome: FileOutcome }
+  | { type: "jobResultsApplied"; results: FileOutcome[] }
   | { type: "filesCleared" };
 
 export const initialAppState: AppState = {
@@ -36,10 +46,49 @@ export const initialAppState: AppState = {
   runBusy: false
 };
 
+function applyOutcome(file: FileItem, outcome: FileOutcome): FileItem {
+  const { status, targetFormat, outputPath, message } = outcome;
+
+  if (status === "running") {
+    return {
+      ...file,
+      status,
+      errorMessage: undefined
+    };
+  }
+
+  if (status === "succeeded") {
+    return {
+      ...file,
+      status,
+      progress: 100,
+      outputPath,
+      outputFormat: targetFormat,
+      errorMessage: undefined
+    };
+  }
+
+  if (status === "cancelled") {
+    return { ...file, status, errorMessage: undefined };
+  }
+
+  return {
+    ...file,
+    status,
+    outputPath,
+    outputFormat: targetFormat,
+    errorMessage: message ?? "转换失败"
+  };
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
-    case "filesImported":
-      return { ...state, files: [...state.files, ...action.files] };
+    case "filesImported": {
+      // 相同路径重复导入时以最新条目覆盖旧条目，避免列表堆积重复行。
+      const byPath = new Map(state.files.map((file) => [file.path, file]));
+      for (const file of action.files) byPath.set(file.path, file);
+      return { ...state, files: [...byPath.values()] };
+    }
     case "filesCleared":
       return { ...state, files: [], actions: [], selectedActionId: "" };
     case "fileSelectionToggled":
@@ -71,24 +120,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, importBusy: action.importBusy };
     case "runBusyChanged":
       return { ...state, runBusy: action.runBusy };
-    case "errorRaised":
-      return { ...state, errorMessage: action.errorMessage };
-    case "jobResultsApplied":
+    case "fileUpdated":
+      return {
+        ...state,
+        files: state.files.map((file) =>
+          file.id === action.fileId ? { ...file, ...action.update } : file
+        )
+      };
+    case "jobEvent":
+      return {
+        ...state,
+        files: state.files.map((file) =>
+          file.id === action.outcome.fileId ? applyOutcome(file, action.outcome) : file
+        )
+      };
+    case "jobResultsApplied": {
+      const resultsByFile = new Map(action.results.map((result) => [result.fileId, result]));
+      if (resultsByFile.size === 0) return state;
       return {
         ...state,
         files: state.files.map((file) => {
-          const result = action.results.find((item) => item.fileId === file.id);
-          if (!result) return file;
-          return {
-            ...file,
-            status: result.status,
-            progress: result.status === "succeeded" ? 100 : file.progress,
-            outputPath: result.outputPath,
-            outputFormat: result.targetFormat,
-            errorMessage: result.message
-          };
+          const outcome = resultsByFile.get(file.id);
+          return outcome ? applyOutcome(file, outcome) : file;
         })
       };
+    }
     default:
       return state;
   }

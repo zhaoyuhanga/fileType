@@ -1,10 +1,7 @@
-import { access, readdir, stat } from "node:fs/promises";
-import { extname, join, basename } from "node:path";
+import { readdir, stat } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import { detectFormatFromPath } from "../../shared/formatDetection.js";
-import { getCategory } from "../../shared/fileTypes.js";
 import type { FileItem } from "../../shared/types.js";
-
-const FILE_ACCESS = 0;
 
 async function walkPath(targetPath: string): Promise<string[]> {
   const result = await stat(targetPath);
@@ -34,7 +31,7 @@ export async function importPaths(paths: string[]): Promise<FileItem[]> {
         name: basename(filePath),
         extension,
         format: detection.format,
-        category: detection.category ?? getCategory(detection.format),
+        category: detection.category,
         sizeBytes: info.size,
         selected: true,
         status: "queued" as const,
@@ -44,13 +41,4 @@ export async function importPaths(paths: string[]): Promise<FileItem[]> {
   );
 
   return items.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-}
-
-export async function canAccessPath(targetPath: string): Promise<boolean> {
-  try {
-    await access(targetPath, FILE_ACCESS);
-    return true;
-  } catch {
-    return false;
-  }
 }

@@ -2,8 +2,13 @@ import { app, BrowserWindow, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { registerIpcHandlers } from "./ipc.js";
+import { registerDocumentIpc } from "./services/docHandlers.js";
+import { registerDocStreamScheme, setupDocStreamProtocol } from "./services/docStream.js";
 
 const isDev = !app.isPackaged;
+
+// 必须在 app ready 前声明自定义协议特权。
+registerDocStreamScheme();
 
 function resolvePreloadPath(): string {
   return fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -11,11 +16,12 @@ function resolvePreloadPath(): string {
 
 async function createWindow(): Promise<void> {
   const win = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: 1360,
+    height: 860,
     minWidth: 1024,
     minHeight: 720,
     title: "万能格式转换器",
+    backgroundColor: "#f4f6fb",
     webPreferences: {
       preload: resolvePreloadPath(),
       contextIsolation: true,
@@ -41,7 +47,9 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(() => {
   if (!isDev) Menu.setApplicationMenu(null);
+  setupDocStreamProtocol();
   registerIpcHandlers();
+  registerDocumentIpc();
   void createWindow();
 });
 

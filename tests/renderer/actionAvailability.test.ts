@@ -1,132 +1,75 @@
 import { describe, expect, it } from "vitest";
-import { isActionAvailable } from "../../src/renderer/actionAvailability";
+import { getActionUnavailableReason, isActionAvailable } from "../../src/renderer/actionAvailability";
+import type { ConverterAction } from "../../src/shared/types";
+
+function action(partial: Partial<ConverterAction>): ConverterAction {
+  return {
+    id: "x",
+    label: "X",
+    sourceFormats: ["txt"],
+    targetFormat: "pdf",
+    category: "document",
+    engine: "text",
+    ...partial
+  };
+}
 
 describe("action availability", () => {
-  it("allows built-in text conversions without external engines", () => {
+  it("allows built-in text conversions", () => {
+    expect(isActionAvailable(action({ id: "txt-to-html", targetFormat: "html" }))).toBe(true);
+    expect(isActionAvailable(action({ id: "txt-to-pdf" }))).toBe(true);
+  });
+
+  it("allows word and spreadsheet conversions", () => {
+    expect(
+      isActionAvailable(action({ id: "doc-to-pdf", sourceFormats: ["doc"], targetFormat: "pdf", engine: "word" }))
+    ).toBe(true);
     expect(
       isActionAvailable(
-        {
-          id: "txt-to-html",
-          label: "TXT 转 HTML",
-          sourceFormats: ["txt"],
-          targetFormat: "html",
-          category: "document",
-          engine: "pandoc"
-        },
-        []
+        action({ id: "xls-to-csv", sourceFormats: ["xls"], targetFormat: "csv", engine: "sheet" })
       )
     ).toBe(true);
   });
 
   it("allows media conversions with the bundled ffmpeg runtime", () => {
     expect(
-      isActionAvailable(
-        {
-          id: "mp4-to-mov",
-          label: "MP4 转 MOV",
-          sourceFormats: ["mp4"],
-          targetFormat: "mov",
-          category: "video",
-          engine: "ffmpeg"
-        },
-        [{ name: "ffmpeg", available: false }]
-      )
+      isActionAvailable(action({ id: "mp4-to-mov", sourceFormats: ["mp4"], targetFormat: "mov", engine: "media" }))
+    ).toBe(true);
+    expect(
+      isActionAvailable(action({ id: "m4a-to-wav", sourceFormats: ["m4a"], targetFormat: "wav", engine: "media" }))
+    ).toBe(true);
+    expect(
+      isActionAvailable(action({ id: "video-to-mp3", sourceFormats: ["mp4", "mov", "avi"], targetFormat: "mp3", engine: "media" }))
     ).toBe(true);
   });
 
-  it("allows m4a to wav conversion with the bundled ffmpeg runtime", () => {
+  it("allows built-in archive actions without any external engine", () => {
     expect(
       isActionAvailable(
-        {
-          id: "m4a-to-wav",
-          label: "M4A 转 WAV",
-          sourceFormats: ["m4a"],
-          targetFormat: "wav",
-          category: "audio",
-          engine: "ffmpeg"
-        },
-        [{ name: "ffmpeg", available: false }]
+        action({ id: "compress-to-zip", sourceFormats: ["txt"], targetFormat: "zip", engine: "archive" })
       )
+    ).toBe(true);
+    expect(
+      isActionAvailable(action({ id: "zip-extract", sourceFormats: ["zip"], targetFormat: "zip", engine: "archive" }))
+    ).toBe(true);
+    expect(
+      isActionAvailable(action({ id: "tar-extract", sourceFormats: ["tar"], targetFormat: "tar", engine: "archive" }))
+    ).toBe(true);
+    expect(
+      isActionAvailable(action({ id: "rar-extract", sourceFormats: ["rar"], targetFormat: "rar", engine: "archive" }))
     ).toBe(true);
   });
 
-  it("allows built-in zip compression without any engines", () => {
+  it("marks pdf to png as not yet supported", () => {
     expect(
-      isActionAvailable(
-        {
-          id: "compress-to-zip",
-          label: "压缩为 ZIP",
-          sourceFormats: ["txt"],
-          targetFormat: "zip",
-          category: "archive",
-          engine: "zip"
-        },
-        []
-      )
-    ).toBe(true);
+      isActionAvailable(action({ id: "pdf-to-image", sourceFormats: ["pdf"], targetFormat: "png", engine: "pdf" }))
+    ).toBe(false);
+    expect(getActionUnavailableReason(action({ id: "pdf-to-image", sourceFormats: ["pdf"], targetFormat: "png", engine: "pdf" }))).toBe(
+      "PDF 转图片待增强"
+    );
   });
 
-  it("allows built-in zip extraction without any engines", () => {
-    expect(
-      isActionAvailable(
-        {
-          id: "zip-extract",
-          label: "ZIP 解压",
-          sourceFormats: ["zip"],
-          targetFormat: "zip",
-          category: "archive",
-          engine: "zip"
-        },
-        []
-      )
-    ).toBe(true);
-  });
-
-  it("allows built-in tar compression without any engines", () => {
-    expect(
-      isActionAvailable(
-        {
-          id: "compress-to-tar",
-          label: "压缩为 TAR",
-          sourceFormats: ["txt"],
-          targetFormat: "tar",
-          category: "archive",
-          engine: "zip"
-        },
-        []
-      )
-    ).toBe(true);
-  });
-
-  it("allows built-in tar extraction without any engines", () => {
-    expect(
-      isActionAvailable(
-        {
-          id: "tar-extract",
-          label: "TAR 解压",
-          sourceFormats: ["tar"],
-          targetFormat: "tar",
-          category: "archive",
-          engine: "zip"
-        },
-        []
-      )
-    ).toBe(true);
-  });
-
-  it("allows built-in rar extraction without any engines", () => {
-    expect(
-      isActionAvailable(
-        {
-          id: "rar-extract",
-          label: "RAR 解压",
-          sourceFormats: ["rar"],
-          targetFormat: "rar",
-          category: "archive",
-          engine: "zip"
-        },
-        []
-      )
-    ).toBe(true);
+  it("returns no reason for supported actions", () => {
+    expect(getActionUnavailableReason(action({ id: "txt-to-pdf" }))).toBeUndefined();
   });
 });

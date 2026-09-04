@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import ffmpegPath from "ffmpeg-static";
 import JSZip from "jszip";
 import tarStream from "tar-stream";
-import { runConversion } from "../../src/main/services/conversionService";
+import { runConversion, type ConversionInput } from "../../src/main/services/conversionService";
 
 describe("conversion service", () => {
   it("converts txt to html with the built-in converter", async () => {
@@ -17,7 +17,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "note",
         path: sourcePath,
@@ -36,7 +35,7 @@ describe("conversion service", () => {
         sourceFormats: ["txt"],
         targetFormat: "html",
         category: "document",
-        engine: "pandoc"
+        engine: "text"
       }
     });
 
@@ -53,7 +52,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "note",
         path: sourcePath,
@@ -72,7 +70,7 @@ describe("conversion service", () => {
         sourceFormats: ["txt"],
         targetFormat: "pdf",
         category: "document",
-        engine: "pandoc"
+        engine: "text"
       }
     });
 
@@ -89,7 +87,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "legacy",
         path: sourcePath,
@@ -104,11 +101,11 @@ describe("conversion service", () => {
       },
       action: {
         id: "doc-to-txt",
-        label: "DOC 杞?TXT",
+        label: "DOC 转 TXT",
         sourceFormats: ["doc"],
         targetFormat: "txt",
         category: "document",
-        engine: "libreoffice"
+        engine: "word"
       }
     });
 
@@ -138,7 +135,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "mhtml",
         path: sourcePath,
@@ -157,7 +153,7 @@ describe("conversion service", () => {
         sourceFormats: ["doc"],
         targetFormat: "txt",
         category: "document",
-        engine: "libreoffice"
+        engine: "word"
       }
     });
 
@@ -175,7 +171,6 @@ describe("conversion service", () => {
 
     const pdf = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "note",
         path: sourcePath,
@@ -194,13 +189,12 @@ describe("conversion service", () => {
         sourceFormats: ["txt"],
         targetFormat: "pdf",
         category: "document",
-        engine: "pandoc"
+        engine: "text"
       }
     });
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "pdf",
         path: pdf.outputPath!,
@@ -239,7 +233,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "tone",
         path: sourcePath,
@@ -258,7 +251,7 @@ describe("conversion service", () => {
         sourceFormats: ["m4a"],
         targetFormat: "wav",
         category: "audio",
-        engine: "ffmpeg"
+        engine: "media"
       }
     });
 
@@ -277,7 +270,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "note",
         path: sourcePath,
@@ -296,7 +288,7 @@ describe("conversion service", () => {
         sourceFormats: ["txt"],
         targetFormat: "zip",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
@@ -324,7 +316,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "bundle",
         path: sourcePath,
@@ -343,7 +334,7 @@ describe("conversion service", () => {
         sourceFormats: ["zip"],
         targetFormat: "zip",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
@@ -361,7 +352,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "bad",
         path: sourcePath,
@@ -380,7 +370,7 @@ describe("conversion service", () => {
         sourceFormats: ["zip"],
         targetFormat: "zip",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
@@ -399,7 +389,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "empty",
         path: sourcePath,
@@ -418,7 +407,7 @@ describe("conversion service", () => {
         sourceFormats: ["zip"],
         targetFormat: "zip",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
@@ -434,7 +423,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "note",
         path: sourcePath,
@@ -453,7 +441,7 @@ describe("conversion service", () => {
         sourceFormats: ["txt"],
         targetFormat: "tar",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
@@ -494,7 +482,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "bundle",
         path: sourcePath,
@@ -513,7 +500,7 @@ describe("conversion service", () => {
         sourceFormats: ["tar"],
         targetFormat: "tar",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
@@ -531,7 +518,6 @@ describe("conversion service", () => {
 
     const result = await runConversion({
       outputDir,
-      engineRoot: root,
       file: {
         id: "bad",
         path: sourcePath,
@@ -550,11 +536,146 @@ describe("conversion service", () => {
         sourceFormats: ["tar"],
         targetFormat: "tar",
         category: "archive",
-        engine: "zip"
+        engine: "archive"
       }
     });
 
     expect(result.status).toBe("failed");
+  });
+
+  it("avoids silently overwriting an existing output file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello world", "utf8");
+
+    const buildInput = (): ConversionInput => ({
+      outputDir,
+      file: {
+        id: `note-${Math.random()}`,
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 11,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "txt-to-pdf",
+        label: "TXT 转 PDF",
+        sourceFormats: ["txt"],
+        targetFormat: "pdf",
+        category: "document",
+        engine: "text"
+      }
+    });
+
+    const first = await runConversion(buildInput());
+    const second = await runConversion(buildInput());
+
+    expect(first.status).toBe("succeeded");
+    expect(second.status).toBe("succeeded");
+    expect(first.outputPath).not.toBe(second.outputPath);
+    expect(second.outputPath).toMatch(/ \(2\)\.pdf$/);
+  });
+
+  it("rejects a tar archive that tries to escape the target directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "evil.tar");
+    const outputDir = join(root, "out");
+
+    const pack = tarStream.pack();
+    pack.entry({ name: "ok.txt" }, "safe content");
+    pack.entry({ name: "../escape.txt" }, "should never be written");
+    pack.finalize();
+    const tarBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      pack.on("data", (chunk: Buffer) => chunks.push(chunk));
+      pack.on("end", () => resolve(Buffer.concat(chunks)));
+      pack.on("error", reject);
+    });
+    await writeFile(sourcePath, tarBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "evil",
+        path: sourcePath,
+        name: "evil.tar",
+        extension: "tar",
+        format: "tar",
+        category: "archive",
+        sizeBytes: tarBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "tar-extract",
+        label: "TAR 解压",
+        sourceFormats: ["tar"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("越界路径");
+    await expect(stat(join(root, "escape.txt"))).rejects.toBeTruthy();
+  });
+
+  it("converts a png to bmp without corrupting pixel colors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "red.png");
+    const outputDir = join(root, "out");
+
+    const sharp = require("sharp") as typeof import("sharp");
+    const bmpJs = require("bmp-js") as {
+      decode: (data: Buffer) => { data: Buffer };
+    };
+    const png = await sharp({
+      create: { width: 1, height: 1, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } }
+    })
+      .png()
+      .toBuffer();
+    await writeFile(sourcePath, png);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "red",
+        path: sourcePath,
+        name: "red.png",
+        extension: "png",
+        format: "png",
+        category: "image",
+        sizeBytes: png.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "png-to-bmp",
+        label: "PNG 转 BMP",
+        sourceFormats: ["png"],
+        targetFormat: "bmp",
+        category: "image",
+        engine: "image"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toMatch(/\.bmp$/);
+
+    // bmp-js 解码输出布局为 [0, B, G, R]。
+    const decoded = bmpJs.decode(await readFile(result.outputPath!)).data;
+    expect(decoded[1]).toBe(0); // B
+    expect(decoded[2]).toBe(0); // G
+    expect(decoded[3]).toBe(255); // R
   });
 
 function runFfmpeg(args: string[]): Promise<void> {

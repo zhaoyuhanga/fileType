@@ -1,10 +1,20 @@
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { dirname, extname, join, parse } from "node:path";
+import { dirname, extname, isAbsolute, join, parse, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import type { ConverterAction, FileItem, SupportedFormat } from "../../shared/types.js";
 import { buildOutputPath } from "../../shared/outputPaths.js";
+import {
+  imageFormats,
+  mediaFormats,
+  spreadsheetFormats,
+  spreadsheetTargets,
+  textFormats,
+  textTargets,
+  wordFormats,
+  wordTargets
+} from "../../shared/converterCapabilities.js";
 import { runCommand } from "./jobRunner.js";
 
 const require = createRequire(import.meta.url);
@@ -29,7 +39,8 @@ export interface ConversionInput {
   action: ConverterAction;
   file: FileItem;
   outputDir: string;
-  engineRoot: string;
+  /** 批次取消信号；已传递给 ffmpeg / Office 等子进程执行路径。 */
+  signal?: AbortSignal;
 }
 
 export interface ConversionResult {
@@ -45,24 +56,14 @@ type PdfParserConstructor = new (options: { data: Buffer | Uint8Array }) => {
   destroy: () => Promise<void>;
 };
 
-const builtInTextFormats = new Set(["txt", "markdown", "html"]);
-const wordFormats = new Set(["doc", "docx"]);
-const spreadsheetFormats = new Set(["xls", "xlsx", "csv"]);
-const imageFormats = new Set(["jpg", "png", "webp", "bmp", "gif"]);
-const mediaFormats = new Set(["m4a", "mp3", "wav", "mp4", "mov", "avi"]);
-
 export async function runConversion(input: ConversionInput): Promise<ConversionResult> {
-  const outputPath = buildOutputPath({
-    sourcePath: input.file.path,
-    outputDir: input.outputDir,
-    targetFormat: input.action.targetFormat
-  });
+  const outputPath = resolveAvailableOutputPath(input.file.path, input.outputDir, input.action.targetFormat);
 
   await mkdir(dirname(outputPath), { recursive: true });
 
   if (canRunBuiltInWordConversion(input)) {
     if (input.action.targetFormat === "pdf") {
-      if (await tryOfficeWordToPdf(input.file.path, outputPath)) {
+      if (await tryOfficeWordToPdf(input.file.path, outputPath, input.signal)) {
         return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath };
       }
 
@@ -93,7 +94,7 @@ export async function runConversion(input: ConversionInput): Promise<ConversionR
   }
 
   if (canRunBuiltInMediaConversion(input)) {
-    await runMediaConversion(input.file.path, outputPath, input.action.targetFormat);
+    await runMediaConversion(input.file.path, outputPath, input.action.targetFormat, input.signal);
     return { fileId: input.file.id, status: "succeeded", targetFormat: input.action.targetFormat, outputPath };
   }
 
@@ -183,24 +184,40 @@ export async function runConversion(input: ConversionInput): Promise<ConversionR
   };
 }
 
+/**
+ * 目标文件已存在时自动追加 " (2)"、" (3)"… 序号，避免静默覆盖同名输出。
+ */
+function resolveAvailableOutputPath(sourcePath: string, outputDir: string, targetFormat: SupportedFormat): string {
+  let collisionIndex = 0;
+  for (;;) {
+    const candidate = buildOutputPath({ sourcePath, outputDir, targetFormat, collisionIndex });
+    if (!existsSync(candidate)) return candidate;
+    collisionIndex += 1;
+  }
+}
+
+function isKnownFormat(input: ConversionInput): input is ConversionInput & { file: { format: SupportedFormat } } {
+  return input.file.format !== "unknown";
+}
+
 function canRunBuiltInTextConversion(input: ConversionInput): boolean {
-  return builtInTextFormats.has(input.file.format) && [...builtInTextFormats, "pdf"].includes(input.action.targetFormat);
+  return isKnownFormat(input) && textFormats.has(input.file.format) && textTargets.has(input.action.targetFormat);
 }
 
 function canRunBuiltInWordConversion(input: ConversionInput): boolean {
-  return wordFormats.has(input.file.format) && ["pdf", "html", "markdown", "txt"].includes(input.action.targetFormat);
+  return isKnownFormat(input) && wordFormats.has(input.file.format) && wordTargets.has(input.action.targetFormat);
 }
 
 function canRunBuiltInSpreadsheetConversion(input: ConversionInput): boolean {
-  return spreadsheetFormats.has(input.file.format) && ["pdf", "html", "txt", "csv"].includes(input.action.targetFormat);
+  return isKnownFormat(input) && spreadsheetFormats.has(input.file.format) && spreadsheetTargets.has(input.action.targetFormat);
 }
 
 function canRunBuiltInImageConversion(input: ConversionInput): boolean {
-  return imageFormats.has(input.file.format) && imageFormats.has(input.action.targetFormat);
+  return isKnownFormat(input) && imageFormats.has(input.file.format) && imageFormats.has(input.action.targetFormat);
 }
 
 function canRunBuiltInMediaConversion(input: ConversionInput): boolean {
-  return Boolean(ffmpegPath) && mediaFormats.has(input.file.format) && mediaFormats.has(input.action.targetFormat);
+  return Boolean(ffmpegPath) && isKnownFormat(input) && mediaFormats.has(input.file.format) && mediaFormats.has(input.action.targetFormat);
 }
 
 function canRunBuiltInZipCompression(input: ConversionInput): boolean {
@@ -277,7 +294,7 @@ async function extractPdfText(filePath: string): Promise<string> {
   }
 }
 
-async function tryOfficeWordToPdf(sourcePath: string, outputPath: string): Promise<boolean> {
+async function tryOfficeWordToPdf(sourcePath: string, outputPath: string, signal?: AbortSignal): Promise<boolean> {
   if (process.platform !== "win32") return false;
 
   const tempWorkDir = join(tmpdir(), `filetype-office-${process.pid}-${Date.now()}`);
@@ -296,7 +313,6 @@ async function tryOfficeWordToPdf(sourcePath: string, outputPath: string): Promi
     "    try { $word = New-Object -ComObject $progId; break } catch { $word = $null }",
     "  }",
     "  if ($null -eq $word) { throw 'No Word/WPS COM application found' }",
-    "  if ($word -eq $null) { throw '未找到 Microsoft Word 或 WPS 的本机转换接口' }",
     "  $word.Visible = $false",
     "  try { $word.DisplayAlerts = 0 } catch {}",
     "  $doc = $word.Documents.Open($source)",
@@ -321,7 +337,8 @@ async function tryOfficeWordToPdf(sourcePath: string, outputPath: string): Promi
         executable: "powershell.exe",
         args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]
       },
-      timeoutMs: 2 * 60 * 1000
+      timeoutMs: 2 * 60 * 1000,
+      signal
     });
 
     if (result.exitCode !== 0) return false;
@@ -606,7 +623,7 @@ async function runSpreadsheetConversion(file: FileItem, targetFormat: SupportedF
 async function runImageConversion(sourcePath: string, targetFormat: SupportedFormat, outputPath: string): Promise<void> {
   if (targetFormat === "bmp") {
     const { data, info } = await sharp(sourcePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    await writeFile(outputPath, bmp.encode({ data, width: info.width, height: info.height }).data);
+    await writeFile(outputPath, encodeBmp(data, info.width, info.height));
     return;
   }
 
@@ -618,7 +635,32 @@ async function runImageConversion(sourcePath: string, targetFormat: SupportedFor
   else await pipeline.toFile(outputPath);
 }
 
-async function runMediaConversion(sourcePath: string, outputPath: string, targetFormat: SupportedFormat): Promise<void> {
+/**
+ * sharp raw() 输出为 RGBA（R 在前）。bmp-js 的 24 位编码器按 [?, B, G, R]
+ * 读取输入（第 1 个字节被丢弃，随后的三字节依次落到 B/G/R 槽位），
+ * 因此需要先把每个像素的 RGBA 重排为 [A, B, G, R]，否则输出的 BMP 颜色错乱。
+ */
+function encodeBmp(rgba: Buffer, width: number, height: number): Buffer {
+  const prepared = Buffer.from(rgba);
+  for (let offset = 0; offset + 3 < prepared.length; offset += 4) {
+    const red = prepared[offset];
+    const green = prepared[offset + 1];
+    const blue = prepared[offset + 2];
+    const alpha = prepared[offset + 3];
+    prepared[offset] = alpha;
+    prepared[offset + 1] = blue;
+    prepared[offset + 2] = green;
+    prepared[offset + 3] = red;
+  }
+  return bmp.encode({ data: prepared, width, height }).data;
+}
+
+async function runMediaConversion(
+  sourcePath: string,
+  outputPath: string,
+  targetFormat: SupportedFormat,
+  signal?: AbortSignal
+): Promise<void> {
   if (!ffmpegPath) throw new Error("ffmpeg 内置二进制缺失");
 
   const executable = ffmpegPath.replace("app.asar", "app.asar.unpacked");
@@ -628,8 +670,28 @@ async function runMediaConversion(sourcePath: string, outputPath: string, target
   if (targetFormat === "m4a") args.push("-c:a", "aac");
   args.push(outputPath);
 
-  const result = await runCommand({ plan: { executable, args }, timeoutMs: 10 * 60 * 1000 });
+  const result = await runCommand({ plan: { executable, args }, timeoutMs: 10 * 60 * 1000, signal });
   if (result.exitCode !== 0) throw new Error(result.stderr || `ffmpeg 退出码 ${result.exitCode}`);
+}
+
+/**
+ * 防止 zip-slip / 路径穿越：只允许归档条目落在 rootDir 之下。
+ * 返回可安全写入的完整路径，遇到越界条目直接抛错中止解压。
+ */
+function resolveSafeArchivePath(rootDir: string, entryName: string): string {
+  const normalized = entryName.replace(/\\/g, "/");
+  if (normalized.startsWith("/")) throw new Error(`归档包含绝对路径项，已拒绝写入：${entryName}`);
+  const segments = normalized.split("/").filter((segment) => segment !== "" && segment !== ".");
+  if (segments.length === 0) throw new Error(`归档包含空路径项，已拒绝写入：${entryName}`);
+  if (/^[a-zA-Z]:/.test(segments[0])) throw new Error(`归档包含盘符路径项，已拒绝写入：${entryName}`);
+  if (segments.some((segment) => segment === "..")) throw new Error(`归档包含越界路径（..），已拒绝写入：${entryName}`);
+
+  const target = join(rootDir, ...segments);
+  const rel = relative(rootDir, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`归档路径越出目标目录，已拒绝写入：${entryName}`);
+  }
+  return target;
 }
 
 async function runZipCompression(file: FileItem, outputPath: string): Promise<void> {
@@ -669,7 +731,7 @@ async function runZipExtraction(file: FileItem, outputDir: string): Promise<void
   await mkdir(outputDir, { recursive: true });
 
   for (const zipEntry of fileEntries) {
-    const fullPath = join(outputDir, zipEntry.name);
+    const fullPath = resolveSafeArchivePath(outputDir, zipEntry.name);
     await mkdir(dirname(fullPath), { recursive: true });
     const content = await zipEntry.async("nodebuffer");
     await writeFile(fullPath, content);
@@ -700,7 +762,9 @@ async function runTarExtraction(file: FileItem, outputDir: string): Promise<void
       const chunks: Buffer[] = [];
       stream.on("data", (chunk: Buffer) => chunks.push(chunk));
       stream.on("end", () => {
-        entries.push({ name: header.name, data: Buffer.concat(chunks) });
+        if (!header.name.endsWith("/")) {
+          entries.push({ name: header.name, data: Buffer.concat(chunks) });
+        }
         next();
       });
       stream.on("error", reject);
@@ -715,8 +779,7 @@ async function runTarExtraction(file: FileItem, outputDir: string): Promise<void
 
   await mkdir(outputDir, { recursive: true });
   for (const entry of entries) {
-    if (entry.name.endsWith("/")) continue;
-    const fullPath = join(outputDir, entry.name);
+    const fullPath = resolveSafeArchivePath(outputDir, entry.name);
     await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, entry.data);
   }
@@ -746,7 +809,7 @@ async function runRarExtraction(file: FileItem, outputDir: string): Promise<void
 
   await mkdir(outputDir, { recursive: true });
   for (const f of fileEntries) {
-    const fullPath = join(outputDir, f.fileHeader.name);
+    const fullPath = resolveSafeArchivePath(outputDir, f.fileHeader.name);
     await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, Buffer.from(f.extraction!));
   }
@@ -787,23 +850,37 @@ function applyPdfFont(doc: any): void {
       doc.font(font);
       return;
     } catch {
-      // Some Windows font files, especially variable fonts, are not accepted by PDFKit.
+      // 部分系统字体（尤其可变字体 / TTC 集合）可能不被 PDFKit 接受，尝试下一个。
     }
   }
 
   doc.font("Helvetica");
 }
 
+/**
+ * 按平台优先列出常见中文字体：Windows / macOS / Linux，
+ * 保证"文本/表格/Word 转 PDF"在非 Windows 上也能渲染中文，
+ * 而不是静默回退到不含中文字形的 Helvetica。
+ */
 function findPdfFontCandidates(): string[] {
-  const candidates = [
+  return [
+    // Windows
     "C:/Windows/Fonts/simhei.ttf",
     "C:/Windows/Fonts/Deng.ttf",
     "C:/Windows/Fonts/simsun.ttc",
     "C:/Windows/Fonts/msyh.ttc",
+    // macOS
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/Supplemental/Songti.ttc",
+    // Linux
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    // 兜底
     "C:/Windows/Fonts/arial.ttf"
   ];
-
-  return candidates;
 }
 
 function textToHtml(text: string, title: string): string {

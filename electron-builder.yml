@@ -10,9 +10,6 @@ asarUnpack:
   - node_modules/sharp/**/*
   - node_modules/@img/**/*
   - node_modules/@napi-rs/**/*
-extraResources:
-  - from: resources/engines
-    to: engines
 win:
   signAndEditExecutable: false
   target:

@@ -23,6 +23,13 @@ describe("format detection", () => {
     });
   });
 
+  it("detects json documents", () => {
+    expect(detectFormatFromPath("config.json")).toMatchObject({
+      format: "json",
+      category: "document"
+    });
+  });
+
   it("falls back to unknown", () => {
     expect(detectFormatFromPath("archive.xyz")).toMatchObject({
       format: "unknown",

@@ -6,6 +6,7 @@ export const formatCategories: Record<SupportedFormat, FormatCategory> = {
   pdf: "document",
   markdown: "document",
   html: "document",
+  json: "document",
   txt: "document",
   xlsx: "document",
   xls: "document",

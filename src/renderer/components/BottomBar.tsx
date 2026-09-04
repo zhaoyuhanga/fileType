@@ -28,8 +28,10 @@ export function BottomBar({ outputDir, engineStatus, onPickOutputDir, onOpenOutp
         打开目录
       </button>
       <div className="bottom-bar__group bottom-bar__group--right">
-        <span className="bottom-bar__label">本地引擎</span>
-        <span className="bottom-bar__value">{availableCount}/{engineStatus.length} 可用</span>
+        <span className="bottom-bar__label">转换引擎</span>
+        <span className="bottom-bar__value" title={engineStatus.map((engine) => engine.name).join("、")}>
+          {availableCount}/{engineStatus.length} 可用
+        </span>
       </div>
     </footer>
   );

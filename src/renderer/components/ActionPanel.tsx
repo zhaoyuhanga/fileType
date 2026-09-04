@@ -1,4 +1,4 @@
-import { FileOutput } from "lucide-react";
+import { FileOutput, LoaderCircle, X } from "lucide-react";
 import type { ConverterAction } from "../../shared/types.js";
 
 export interface ActionViewModel {
@@ -11,10 +11,11 @@ interface ActionPanelProps {
   selectedActionId: string;
   onActionSelected: (action: ConverterAction) => void;
   onRun: () => void;
+  onCancel: () => void;
   runBusy?: boolean;
 }
 
-export function ActionPanel({ actions, selectedActionId, onActionSelected, onRun, runBusy }: ActionPanelProps) {
+export function ActionPanel({ actions, selectedActionId, onActionSelected, onRun, onCancel, runBusy }: ActionPanelProps) {
   return (
     <aside className="panel action-panel">
       <div className="panel__header">
@@ -42,9 +43,29 @@ export function ActionPanel({ actions, selectedActionId, onActionSelected, onRun
           ))
         )}
       </div>
-      <button type="button" className="primary-button action-panel__run" onClick={onRun} disabled={runBusy || !selectedActionId}>
-        {runBusy ? "转换中..." : "开始转换"}
-      </button>
+      <div className="action-panel__actions">
+        {runBusy ? (
+          <button type="button" className="action-panel__cancel" onClick={onCancel}>
+            <X size={16} />
+            取消
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`primary-button action-panel__run${runBusy ? " action-panel__run--busy" : ""}`}
+          onClick={onRun}
+          disabled={runBusy || !selectedActionId}
+        >
+          {runBusy ? (
+            <>
+              <LoaderCircle size={14} className="spin" />
+              转换中...
+            </>
+          ) : (
+            "开始转换"
+          )}
+        </button>
+      </div>
     </aside>
   );
 }

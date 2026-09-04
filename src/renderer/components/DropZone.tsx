@@ -6,6 +6,14 @@ interface DropZoneProps {
   onDropPaths: (paths: string[]) => void;
 }
 
+function collectDroppedPaths(files: FileList): string[] {
+  const getPathForFile = window.formatFlow?.getPathForFile;
+  if (!getPathForFile) return [];
+  return Array.from(files)
+    .map((file) => getPathForFile(file))
+    .filter((path): path is string => Boolean(path));
+}
+
 export function DropZone({ onPickFiles, onPickFolders, onDropPaths }: DropZoneProps) {
   return (
     <section
@@ -13,9 +21,7 @@ export function DropZone({ onPickFiles, onPickFolders, onDropPaths }: DropZonePr
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
-        const paths = Array.from(event.dataTransfer.files)
-          .map((file) => (file as File & { path?: string }).path)
-          .filter((path): path is string => Boolean(path));
+        const paths = collectDroppedPaths(event.dataTransfer.files);
         if (paths.length > 0) onDropPaths(paths);
       }}
     >
@@ -24,7 +30,7 @@ export function DropZone({ onPickFiles, onPickFolders, onDropPaths }: DropZonePr
       </div>
       <div className="drop-zone__copy">
         <strong>拖入文件或文件夹</strong>
-        <span>支持批量导入，识别后会自动生成可执行动作</span>
+        <span>支持批量转换；双击或行内按钮可查看 / 编辑 txt、md、json、mp4</span>
       </div>
       <div className="drop-zone__actions">
         <button type="button" className="primary-button" onClick={onPickFiles}>

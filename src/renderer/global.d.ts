@@ -1,4 +1,12 @@
-import type { ConverterAction, EngineStatus, FileItem, SupportedFormat } from "../shared/types";
+import type {
+  ConverterAction,
+  DocumentReadResult,
+  DocumentSaveResult,
+  EngineStatus,
+  FileItem,
+  JobProgressEvent,
+  SupportedFormat
+} from "../shared/types";
 
 declare global {
   interface Window {
@@ -10,13 +18,31 @@ declare global {
       pickOutputDirectory: () => Promise<string>;
       getDefaultOutputDir: () => Promise<string>;
       openOutputDirectory: (outputDir: string) => Promise<string>;
-      getActionsForFormats: (formats: SupportedFormat[]) => Promise<ConverterAction[]>;
       getEngineStatus: () => Promise<EngineStatus[]>;
+      getPathForFile: (file: File) => string;
+      onJobsEvent: (callback: (event: JobProgressEvent) => void) => () => void;
+      cancelJobs: (batchId: string) => void;
       startJobs: (
+        batchId: string,
         actionId: string,
         files: FileItem[],
         outputDir: string
-      ) => Promise<Array<{ fileId: string; status: "succeeded" | "failed"; targetFormat?: SupportedFormat; outputPath?: string; message?: string }>>;
+      ) => Promise<
+        Array<{
+          fileId: string;
+          status: "succeeded" | "failed" | "cancelled";
+          targetFormat?: SupportedFormat;
+          outputPath?: string;
+          message?: string;
+        }>
+      >;
+      readDoc: (filePath: string) => Promise<DocumentReadResult>;
+      saveDoc: (filePath: string, content: string) => Promise<DocumentSaveResult>;
+      saveDocAs: (
+        sourcePath: string,
+        suggestedName: string,
+        content: string | null
+      ) => Promise<DocumentSaveResult>;
     };
   }
 }
