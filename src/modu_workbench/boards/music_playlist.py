@@ -23,6 +23,7 @@ from modu_workbench.core.music import (
     Track,
     format_duration,
 )
+from modu_workbench.services import app_context
 from modu_workbench.services.config import music_download_dir
 from modu_workbench.ui_kit.toast import Toaster
 
@@ -308,7 +309,10 @@ class MusicPlaylistPage(QWidget):
         if rows:
             remotes = [remotes[row] for row in sorted(rows) if row < len(remotes)]
         dest = str(music_download_dir_pref())
-        self._download = DownloadWorker(remotes, dest, parent=self)
+        self._download = DownloadWorker(
+            remotes, dest, parent=self,
+            registry=app_context.music_registry(), allow_cross_source=True,
+        )
         self._download.progressed.connect(self._on_progress)
         self._download.finishedAll.connect(self._on_downloaded)
         self._download.failed.connect(lambda msg: self._toaster.error(f"下载失败：{msg}"))

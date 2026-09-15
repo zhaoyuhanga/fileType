@@ -28,12 +28,17 @@
 
 ## 墨读音乐设计要点
 
-- **音源抽象**：`MusicSource` 接口 + 注册表（`netease` / `itunes` / `jamendo` / `url`），
-  搜索结果统一为 `RemoteTrack`，下载地址解析与歌词获取由音源实现，便于后续接入新音源。
-- **数据模型**：`music.db` 存 `tracks` / `playlists` / `playlist_items` / `playlist_remotes`（歌单内待下载项）/ `history` / `settings`。
+- **音源层独立成包**（`core/music/sources/`）：`MusicSource` 接口 + `MusicRegistry` 编排，
+  内置 netease / kuwo / audius / archive / ccmixter / itunes / jamendo / direct 八个音源；
+  新增音源只需实现 `search()` 与 `download_url()` 并在 `providers/__init__.py` 注册。
+- **三重容错**：① HTTP 层退避重试（DNS/连接抖动）；② 注册表熔断——连续失败 3 次的音源临时降级，
+  聚合搜索自动跳过；③ 跨源兜底——解析或下载失败时按「曲名 + 歌手 + 时长」到其他音源匹配同一首歌继续尝试，
+  下载后仍会校验文件确为音频（避免把版权提示页当成歌曲入库）。
+- **数据模型**：`music.db` 存 `tracks` / `playlists` / `playlist_items` / `playlist_remotes`（歌单内待下载项）/ `history` / `settings`；
+  音源启用状态、优先级与凭据保存在 `settings` 表（`sources/*`）。
 - **歌单与收藏**：`playlists.kind = favorite` 即「我的收藏」，收藏标记与歌单成员双向同步；分类以 `tracks.category` 承载。
 - **播放器**：`MusicPlayer` 独立于界面（应用级单例），队列 + 顺序/列表循环/单曲循环/随机；
-  无音频后端或测试环境自动进入静默模式（仅维护状态，不阻塞 UI 与测试）。
+  在线试听复用同一播放条（进度/错误可见）；无音频后端或测试环境自动进入静默模式。
 - **后台任务**：搜索 / 下载 / 转换均为 `QThread` 工作线程，支持取消，进度与结果经信号回主线程。
 
 ## 行为对齐清单（fileType → Python）
@@ -60,5 +65,5 @@
 - ebooklib(AGPL-3.0) 仅用于本地阅读解析，无网络服务分发场景，保留依赖与声明；
 - ffmpeg 静态二进制为 GPL 构建，内部/个人使用，对外分发需替换或声明；
 - 在线书源（00shu 等）默认开启，提供一键关闭 + “个人学习用途”声明。
-- 在线音乐音源（网易云 / iTunes / Jamendo）仅供个人学习、试听与自有内容备份，
-  界面默认开启合规声明勾选；请遵守各平台条款与版权要求，勿传播受版权保护的内容。
+- 在线音乐音源（网易云 / 酷我 / Audius / Internet Archive / ccMixter / iTunes / Jamendo）仅供个人学习、
+  试听与自有内容备份，界面默认开启合规声明勾选；请遵守各平台条款与版权要求，勿传播受版权保护的内容。

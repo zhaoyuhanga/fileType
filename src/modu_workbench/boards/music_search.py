@@ -1,7 +1,6 @@
 """墨读音乐：在线搜索与下载页（支持按歌曲/歌手/专辑/类型检索，批量下载或加入歌单）。"""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -48,20 +47,9 @@ from .music_widgets import (
     select_all,
 )
 
-def _similar(left: str, right: str) -> bool:
-    """曲名大致匹配（去括号/空格后互为包含），避免兜底下载下错歌。"""
-    def normalize(text: str) -> str:
-        text = re.sub(r"[（(].*?[)）]", "", text or "")
-        return re.sub(r"[\s\-_·、,，.。'\"!！?？]", "", text).lower()
-
-    a, b = normalize(left), normalize(right)
-    if not a or not b:
-        return False
-    return a in b or b in a
-
 
 class _PreviewResolver(SearchWorker):
-    """复用线程基类：把「解析直链」当作一次搜索来跑。"""
+    """复用线程基类：把「解析试听直链」当作一次搜索来跑（含跨源兜底）。"""
 
     def __init__(self, remote, parent=None):  # noqa: ANN001
         super().__init__("", "song", "url", 1, parent)
@@ -69,8 +57,9 @@ class _PreviewResolver(SearchWorker):
 
     def run(self) -> None:  # noqa: D102
         try:
-            url = get_source(self._remote.source).download_url(self._remote)
-            self.finishedResults.emit(url, self._remote)
+            registry = app_context.music_registry()
+            resolved = registry.resolve(self._remote, allow_cross_source=True)
+            self.finishedResults.emit(resolved.url, resolved.track if resolved.switched else self._remote)
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
 
@@ -90,7 +79,6 @@ class MusicSearchPage(QWidget):
         self._worker: SearchWorker | None = None
         self._download: DownloadWorker | None = None
         self._preview_worker: _PreviewResolver | None = None
-        self._fallback_running = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 18, 24, 12)
@@ -120,10 +108,10 @@ class MusicSearchPage(QWidget):
         self._kind.setToolTip("检索方式：歌曲=按歌名，歌手=该歌手热门曲目，专辑=整张专辑，类型=风格歌单")
 
         self._source = QComboBox()
-        self._source.addItem("全部音源", "all")
-        for info in list_sources():
-            self._source.addItem(info.label, info.key)
-        self._source.setToolTip("音源说明：\n" + "\n".join(f"· {i.label}：{i.note}" for i in list_sources()))
+        self.reload_sources()
+        self._source.setToolTip("音源说明：\n" + "\n".join(
+            f"· {info.label}（{info.kind_label}）：{info.note}" for info in list_sources()
+        ))
 
         self._search_button = QPushButton("搜索")
         self._search_button.setObjectName("primaryButton")
@@ -192,9 +180,9 @@ class MusicSearchPage(QWidget):
         self._compliance.toggled.connect(self._update_buttons)
         layout.addWidget(self._compliance)
 
-        self._fallback = QCheckBox("网易云下载失败时自动改用 iTunes 试听源（30 秒片段，网络受限时的兜底）")
-        self._fallback.setChecked(True)
-        layout.addWidget(self._fallback)
+        self._auto_switch = QCheckBox("下载/试听失败时自动换源重试（推荐：某音源失效或会员受限时改用其他音源）")
+        self._auto_switch.setChecked(True)
+        layout.addWidget(self._auto_switch)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
@@ -210,6 +198,23 @@ class MusicSearchPage(QWidget):
 
         # 试听错误（解码失败/网络中断）同步到本页状态栏
         app_context.music_player().errorOccurred.connect(self._on_preview_error)
+
+    # ---------- 音源 ----------
+
+    def reload_sources(self) -> None:
+        """按注册表刷新音源下拉（含启用状态、能力类型与健康度）。"""
+        registry = app_context.music_registry()
+        current = self._source.currentData()
+        self._source.blockSignals(True)
+        self._source.clear()
+        enabled = [info for info in registry.infos() if registry.is_enabled(info.key)]
+        self._source.addItem(f"全部音源（自动，{len(enabled)} 个）", "all")
+        for info in registry.infos():
+            status = registry.status_text(info.key)
+            self._source.addItem(f"{info.label} · {info.kind_label}（{status}）", info.key)
+        index = self._source.findData(current)
+        self._source.setCurrentIndex(index if index >= 0 else 0)
+        self._source.blockSignals(False)
 
     # ---------- 搜索 ----------
 
@@ -329,7 +334,11 @@ class MusicSearchPage(QWidget):
             self._toaster.error("请选择下载目录")
             return
         Path(dest).mkdir(parents=True, exist_ok=True)
-        self._download = DownloadWorker(remotes, dest, parent=self)
+        self._download = DownloadWorker(
+            remotes, dest, parent=self,
+            registry=app_context.music_registry(),
+            allow_cross_source=self._auto_switch.isChecked(),
+        )
         self._download.progressed.connect(self._on_download_progress)
         self._download.finishedAll.connect(self._on_download_finished)
         self._download.failed.connect(self._on_download_failed)
@@ -351,58 +360,18 @@ class MusicSearchPage(QWidget):
         self._status.setText(message)
 
     def _on_download_finished(self, results: list) -> None:
+        self._report_download_result(results)
+
+    def _report_download_result(self, results: list) -> None:
         ok = [r for r in results if r.ok]
         failed = [r for r in results if not r.ok]
-        if failed and self._fallback.isChecked() and not self._fallback_running:
-            alternatives = self._fallback_remotes(failed)
-            if alternatives:
-                self._fallback_running = True
-                self._status.setText(
-                    f"有 {len(failed)} 首在原音源下载失败，正在改用 iTunes 试听源重试…"
-                )
-                self._toaster.info(f"改用 iTunes 试听源重试 {len(alternatives)} 首（30 秒片段）")
-                self._download = DownloadWorker(alternatives, self._dir.text().strip() or music_download_dir_pref(),
-                                                parent=self)
-                self._download.progressed.connect(self._on_download_progress)
-                self._download.finishedAll.connect(lambda more: self._on_download_fallback_done(ok, failed, more))
-                self._download.failed.connect(self._on_download_failed)
-                self._download.finished.connect(self._on_download_thread_finished)
-                self._download.start()
-                return
-        self._report_download_result(ok, failed)
-
-    def _fallback_remotes(self, failed: list) -> list:
-        """为下载失败的曲目在 iTunes 上找同名试听（网络受限时的兜底方案）。"""
-        alternatives = []
-        for result in failed:
-            track = result.track
-            if track.source == "itunes":
-                continue
-            keyword = f"{track.artist} {track.title}".strip() or track.title
-            if not keyword:
-                continue
-            try:
-                hits = get_source("itunes").search(keyword, kind="song", limit=3)
-            except Exception:  # noqa: BLE001
-                continue
-            for hit in hits:
-                # 曲名需大致匹配，避免下错歌
-                if _similar(hit.title, track.title):
-                    hit.artist = hit.artist or track.artist
-                    hit.category = "iTunes 试听（30 秒）"
-                    hit.extra["fallback_from"] = track.source
-                    alternatives.append(hit)
-                    break
-        return alternatives
-
-    def _on_download_fallback_done(self, ok: list, failed: list, more: list) -> None:
-        self._fallback_running = False
-        self._report_download_result(ok + [r for r in more if r.ok], failed)
-
-    def _report_download_result(self, ok: list, failed: list) -> None:
+        switched = [r for r in ok if r.switched_from]
         imported: list[Track] = self._library.import_download_results(ok)
         self._progress.setValue(100)
         summary = f"下载完成：成功 {len(ok)}，失败 {len(failed)}；已入库 {len(imported)} 首"
+        if switched:
+            pairs = "，".join(f"{r.track.title}→{r.source}" for r in switched[:3])
+            summary += f"；其中 {len(switched)} 首自动换源（{pairs}）"
         if failed:
             reasons = []
             for result in failed[:3]:
@@ -414,7 +383,7 @@ class MusicSearchPage(QWidget):
             self._toaster.success(f"已下载 {len(ok)} 首，入库 {len(imported)} 首")
             self.tracksImported.emit(imported)
         else:
-            self._toaster.error("全部下载失败：请检查网络/DNS，或把音源切换为 iTunes / 直链")
+            self._toaster.error("全部下载失败：可在设置里调整音源顺序/启用项，或改用「音频直链」")
 
     def _on_download_failed(self, message: str) -> None:
         self._status.setText(f"下载失败：{message}")

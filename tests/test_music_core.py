@@ -18,13 +18,20 @@ from modu_workbench.core.music import (
     safe_filename,
     scan_audio_files,
 )
-from modu_workbench.core.music import sources as music_sources
 from modu_workbench.core.music.downloader import download_track, guess_extension, unique_path
 from modu_workbench.core.music.sources import (
+    ArchiveOrgSource,
+    AudiusSource,
+    CcmixterSource,
     DirectUrlSource,
     ItunesSource,
+    KuwoSource,
+    MusicRegistry,
     NeteaseSource,
     SourceError,
+    best_match,
+    describe_network_error,
+    match_score,
     search_all,
 )
 
@@ -230,37 +237,102 @@ ITUNES_PAYLOAD = {
 }
 
 
-def test_itunes_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: dict = {}
+# --------------------------------------------------------------- 测试替身
 
-    def fake_request(url, params=None, headers=None, timeout=12.0, data=None):  # noqa: ANN001
-        calls.update({"url": url, "params": params})
-        return ITUNES_PAYLOAD
+class FakeResponse:
+    def __init__(self, *, payload=None, text: str = "", url: str = "https://x/",
+                 headers: dict | None = None):
+        self._payload = payload
+        self.text = text
+        self.url = url
+        self.headers = headers or {"Content-Type": "application/json"}
+        self.status_code = 200
+        if payload is not None and not text:
+            import json as _json
+            self.text = _json.dumps(payload, ensure_ascii=False)
 
-    monkeypatch.setattr(music_sources, "_request_json", fake_request)
-    tracks = ItunesSource().search("周杰伦", kind="artist", limit=10)
-    assert [t.title for t in tracks] == ["晴天"]  # 无 previewUrl 的结果被跳过
+    def json(self):  # noqa: ANN201
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self):  # noqa: ANN204
+        return self
+
+    def __exit__(self, *args) -> None:  # noqa: ANN002
+        return None
+
+
+class FakeHttp:
+    """替身 HttpClient：按 (method, url 片段) 返回预设响应，并记录调用。"""
+
+    def __init__(self, routes: dict, default: FakeResponse | None = None):
+        self.routes = routes
+        self.default = default
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def _route(self, method: str, url: str, kwargs: dict) -> FakeResponse:
+        self.calls.append((method, url, kwargs))
+        for (want_method, fragment), response in self.routes.items():
+            if want_method in (method, "*") and fragment in url:
+                return response
+        if self.default is not None:
+            return self.default
+        raise SourceError(f"未预设的请求：{method} {url}")
+
+    def request(self, method: str, url: str, **kwargs) -> FakeResponse:
+        return self._route(method.upper(), url, kwargs)
+
+    def get(self, url: str, **kwargs) -> FakeResponse:
+        return self._route("GET", url, kwargs)
+
+    def post(self, url: str, **kwargs) -> FakeResponse:
+        return self._route("POST", url, kwargs)
+
+    def get_json(self, url: str, **kwargs):  # noqa: ANN201
+        return self.get(url, **kwargs).json()
+
+    def get_text(self, url: str, **kwargs) -> str:
+        return self.get(url, **kwargs).text
+
+
+# --------------------------------------------------------------- iTunes
+
+def test_itunes_search() -> None:
+    http = FakeHttp({("GET", "/search"): FakeResponse(payload=ITUNES_PAYLOAD)})
+    tracks = ItunesSource(http=http).search("周杰伦", kind="artist", limit=10)
+    assert [t.title for t in tracks] == ["晴天"]      # 无 previewUrl 的结果被跳过
     assert tracks[0].artist == "周杰伦"
     assert tracks[0].category == "国语流行"
-    assert calls["params"]["attribute"] == "artistTerm"
-    assert "country" not in calls["params"]  # 默认不限定商店（CN 商店检索为空）
+    params = http.calls[0][2].get("params") or {}
+    assert params["attribute"] == "artistTerm"
+    assert "country" not in params                     # 默认不限定商店
 
 
 def test_itunes_search_falls_back_without_country(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list = []
-
-    def fake_request(url, params=None, headers=None, timeout=12.0, data=None):  # noqa: ANN001
-        seen.append(dict(params or {}))
-        if params and params.get("country"):
-            return {"results": []}
-        return ITUNES_PAYLOAD
-
     monkeypatch.setenv("MODU_ITUNES_COUNTRY", "CN")
-    monkeypatch.setattr(music_sources, "_request_json", fake_request)
-    tracks = ItunesSource().search("周杰伦", kind="song", limit=5)
-    assert [t.title for t in tracks] == ["晴天"]
-    assert seen[0].get("country") == "CN" and "country" not in seen[1]
+    http = FakeHttp({})
+    responses = [FakeResponse(payload={"results": []}), FakeResponse(payload=ITUNES_PAYLOAD)]
 
+    # 第一次带 country 返回空 → 去掉 country 再查一次
+    def route(url, **kwargs):  # noqa: ANN001
+        http.calls.append(("GET", url, kwargs))
+        return responses[min(len(http.calls) - 1, 1)]
+
+    http.get = route  # type: ignore[assignment]
+    tracks = ItunesSource(http=http).search("周杰伦", kind="song", limit=5)
+    assert [t.title for t in tracks] == ["晴天"]
+    assert http.calls[0][2]["params"].get("country") == "CN"
+    assert "country" not in http.calls[1][2]["params"]
+
+
+# --------------------------------------------------------------- 网易云
 
 NETEASE_SEARCH = {"result": {"songs": [
     {"id": 11, "name": "稻香", "artists": [{"name": "周杰伦"}],
@@ -268,95 +340,126 @@ NETEASE_SEARCH = {"result": {"songs": [
 ]}}
 
 
-def test_netease_search_and_download_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_request(url, params=None, headers=None, timeout=12.0, data=None):  # noqa: ANN001
-        if "search/get" in url:
-            return NETEASE_SEARCH
-        return {}
-
-    monkeypatch.setattr(music_sources, "_request_json", fake_request)
-    tracks = NeteaseSource().search("稻香", kind="song", limit=5)
+def test_netease_search_and_download_url() -> None:
+    http = FakeHttp({
+        ("POST", "/api/search/get/web"): FakeResponse(payload=NETEASE_SEARCH),
+        ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": "https://m7.music.126.net/real.mp3"}]}),
+    })
+    source = NeteaseSource(http=http)
+    tracks = source.search("稻香", kind="song", limit=5)
     assert len(tracks) == 1
     assert tracks[0].remote_id == "11"
     assert "outer/url?id=11" in tracks[0].url
-
-    class FakeResponse:
-        status_code = 200
-        url = "https://m7.music.126.net/real.mp3"
-        headers = {"Content-Type": "audio/mpeg"}
-
-        def json(self) -> dict:
-            return {"data": [{"url": "https://m7.music.126.net/real.mp3"}]}
-
-        def close(self) -> None:
-            pass
-
-        def __enter__(self):  # noqa: ANN204
-            return self
-
-        def __exit__(self, *args) -> None:  # noqa: ANN002
-            return None
-
-    monkeypatch.setattr(
-        music_sources, "_request_with_retry", lambda *a, **k: FakeResponse()
-    )
-    resolved = NeteaseSource().download_url(tracks[0])
-    assert resolved.endswith("real.mp3")
+    assert source.download_url(tracks[0]).endswith("real.mp3")
 
 
-def test_netease_download_url_falls_back_to_outer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_netease_download_url_falls_back_to_outer() -> None:
     """播放地址接口拿不到 URL 时，回退到 outer 直链跳转结果。"""
-    calls: list[str] = []
-
-    class NoUrl:
-        headers = {"Content-Type": "application/json"}
-        url = "https://music.163.com/api/song/enhance/player/url"
-
-        def json(self) -> dict:
-            return {"data": [{"url": None}]}
-
-        def __enter__(self):  # noqa: ANN204
-            return self
-
-        def __exit__(self, *args) -> None:  # noqa: ANN002
-            return None
-
-    class Redirected:
-        headers = {"Content-Type": "audio/mpeg"}
-        url = "http://m701.music.126.net/2026/xyz/jdymusic/obj/w5.mp3"
-
-        def json(self) -> dict:
-            return {}
-
-        def __enter__(self):  # noqa: ANN204
-            return self
-
-        def __exit__(self, *args) -> None:  # noqa: ANN002
-            return None
-
-    def fake(method, url, **kwargs):  # noqa: ANN001
-        calls.append(method)
-        return NoUrl() if method == "POST" else Redirected()
-
-    monkeypatch.setattr(music_sources, "_request_with_retry", fake)
+    http = FakeHttp({
+        ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": None}]}),
+        ("GET", "outer/url"): FakeResponse(
+            payload=None, url="http://m701.music.126.net/2026/xyz/jdymusic/obj/w5.mp3",
+            headers={"Content-Type": "audio/mpeg", "Content-Length": str(3 * 1024 * 1024)},
+        ),
+    })
     remote = RemoteTrack(source="netease", remote_id="11", title="x")
-    assert NeteaseSource().download_url(remote).endswith(".mp3")
-    assert calls == ["POST", "GET"]
+    assert NeteaseSource(http=http).download_url(remote).endswith(".mp3")
+    assert [call[0] for call in http.calls] == ["POST", "GET"]
 
 
-def test_netease_download_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    def always_fail(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise SourceError("无法解析 music.163.com 的域名（DNS/网络问题）")
+def test_netease_download_blocked() -> None:
+    http = FakeHttp({
+        ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": None}]}),
+        ("GET", "outer/url"): FakeResponse(payload=None, text="", url="https://music.163.com/404",
+                                           headers={"Content-Type": "text/html"}),
+    })
+    with pytest.raises(SourceError):
+        NeteaseSource(http=http).download_url(RemoteTrack(source="netease", remote_id="1", title="x"))
 
-    monkeypatch.setattr(music_sources, "_request_with_retry", always_fail)
-    with pytest.raises(SourceError) as exc:
-        NeteaseSource().download_url(RemoteTrack(source="netease", remote_id="1", title="x"))
-    assert "DNS" in str(exc.value)
+
+# --------------------------------------------------------------- 酷我
+
+KUWO_SEARCH_TEXT = (
+    "{'abslist':[{'MUSICRID':'MUSIC_474678847','NAME':'花海','ARTIST':'周杰伦','ALBUM':'魔杰座',"
+    "'DURATION':'210','web_albumpic_short':'120/86/x.jpg'}]}"
+)
+
+
+def test_kuwo_search_and_download_url() -> None:
+    http = FakeHttp({
+        ("GET", "search.kuwo.cn"): FakeResponse(payload=None, text=KUWO_SEARCH_TEXT),
+        ("GET", "antiserver.kuwo.cn"): FakeResponse(payload=None, text="https://kw-bj.kuwo.cn/a/b/song.mp3"),
+    })
+    source = KuwoSource(http=http)
+    tracks = source.search("周杰伦 花海", limit=5)
+    assert len(tracks) == 1
+    assert tracks[0].remote_id == "MUSIC_474678847"
+    assert tracks[0].title == "花海"
+    assert tracks[0].duration_ms == 210_000
+    assert tracks[0].cover_url.endswith("120/86/x.jpg")
+    assert source.download_url(tracks[0]).endswith("song.mp3")
+
+
+def test_kuwo_rejects_empty_resolution() -> None:
+    http = FakeHttp({
+        ("GET", "antiserver.kuwo.cn"): FakeResponse(payload=None, text=""),
+    })
+    with pytest.raises(SourceError):
+        KuwoSource(http=http).download_url(RemoteTrack(source="kuwo", remote_id="MUSIC_1", title="x"))
+
+
+# --------------------------------------------------------------- Audius / Archive / ccMixter
+
+def test_audius_search_and_stream() -> None:
+    http = FakeHttp({
+        ("GET", "api.audius.co"): FakeResponse(payload={"data": ["https://node.audius.co"]}),
+        ("GET", "/v1/tracks/search"): FakeResponse(payload={"data": [
+            {"id": "abc", "title": "Piano Fala", "duration": 180, "genre": "Electronic",
+             "user": {"name": "wn6"}, "artwork": {"480x480": "https://x/cover.jpg"}},
+        ]}),
+    })
+    source = AudiusSource(http=http)
+    tracks = source.search("piano", limit=5)
+    assert tracks[0].remote_id == "abc"
+    assert tracks[0].artist == "wn6"
+    assert tracks[0].duration_ms == 180_000
+    assert source.download_url(tracks[0]).startswith("https://node.audius.co/v1/tracks/abc/stream")
+
+
+def test_archive_search_and_download() -> None:
+    http = FakeHttp({
+        ("GET", "advancedsearch"): FakeResponse(payload={"response": {"docs": [
+            {"identifier": "concert-2026", "title": "Live 2026", "creator": "Someband"},
+        ]}}),
+        ("GET", "/metadata/concert-2026"): FakeResponse(payload={"files": [
+            {"name": "cover.jpg", "format": "JPEG"},
+            {"name": "track01.ogg", "format": "Ogg Vorbis"},
+            {"name": "track01_vbr.mp3", "format": "VBR MP3"},
+        ]}),
+    })
+    source = ArchiveOrgSource(http=http)
+    tracks = source.search("live", limit=3)
+    assert tracks[0].remote_id == "concert-2026"
+    assert tracks[0].artist == "Someband"
+    assert source.download_url(tracks[0]).endswith("track01_vbr.mp3")
+
+
+def test_ccmixter_search_and_download() -> None:
+    http = FakeHttp({
+        ("GET", "ccmixter.org/api/query"): FakeResponse(payload=[{
+            "upload_id": "42", "upload_name": "Lost Roamin'", "user_name": "speck",
+            "license_name": "cc-by",
+            "files": [{"download_url": "https://ccmixter.org/content/speck/x.mp3", "file_rawsize": "100"}],
+        }]),
+    })
+    source = CcmixterSource(http=http)
+    tracks = source.search("piano", limit=3)
+    assert tracks[0].title == "Lost Roamin'"
+    assert tracks[0].artist == "speck"
+    assert source.download_url(tracks[0]).endswith("x.mp3")
 
 
 def test_describe_network_error_is_actionable() -> None:
-    from modu_workbench.core.music.sources import describe_network_error
-
     dns = describe_network_error(
         Exception("HTTPSConnectionPool(host='music.163.com', port=443): Max retries exceeded "
                   "(Caused by NameResolutionError(getaddrinfo failed))"),
@@ -377,14 +480,105 @@ def test_direct_url_source() -> None:
         DirectUrlSource().search("not-a-url")
 
 
-def test_search_all_collects_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(keyword, kind="song", limit=20):  # noqa: ANN001
-        raise SourceError("接口不可用")
+# --------------------------------------------------------------- 注册表：多源 / 重试 / 熔断 / 换源
 
-    monkeypatch.setattr(music_sources.get_source("itunes"), "search", boom)
-    tracks, errors = search_all("x", sources=["itunes", "url"])
+def build_registry(**routes) -> MusicRegistry:  # noqa: ANN003
+    netease = NeteaseSource(http=FakeHttp(routes.get("netease", {})))
+    kuwo = KuwoSource(http=FakeHttp(routes.get("kuwo", {})))
+    itunes = ItunesSource(http=FakeHttp({("GET", "/search"): FakeResponse(payload=ITUNES_PAYLOAD)}))
+    registry = MusicRegistry([netease, kuwo, itunes])
+    return registry
+
+
+def test_registry_search_all_collects_errors() -> None:
+    registry = MusicRegistry([ItunesSource(http=FakeHttp({})), DirectUrlSource()])
+    tracks, errors = registry.search_all("x", sources=["itunes", "url"])
     assert tracks == []
-    assert errors and "接口不可用" in errors[0]
+    assert errors and "iTunes" in errors[0]
+
+
+def test_registry_health_degrades_after_repeated_failures() -> None:
+    registry = MusicRegistry([ItunesSource(http=FakeHttp({}))])
+    for _ in range(3):
+        registry.search_all("x", sources=["itunes"])
+    assert "itunes" in registry.degraded_keys()
+    assert registry.status_text("itunes") == "临时降级"
+    # 降级源在自动模式下被跳过
+    tracks, errors = registry.search_all("x")
+    assert tracks == [] and errors == []
+    # 显式指定仍会尝试（用户主动选择）
+    _, errors = registry.search_all("x", sources=["itunes"])
+    assert errors
+
+
+def test_registry_cross_source_fallback() -> None:
+    """网易云解析失败 → 自动改用酷我同一首歌。"""
+    netease_http = FakeHttp({
+        ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": None}]}),
+        ("GET", "outer/url"): FakeResponse(payload=None, text="", url="https://music.163.com/404",
+                                           headers={"Content-Type": "text/html"}),
+    })
+    kuwo_http = FakeHttp({
+        ("GET", "search.kuwo.cn"): FakeResponse(payload=None, text=KUWO_SEARCH_TEXT),
+        ("GET", "antiserver.kuwo.cn"): FakeResponse(payload=None, text="https://kw-bj.kuwo.cn/song.mp3"),
+    })
+    registry = MusicRegistry([NeteaseSource(http=netease_http), KuwoSource(http=kuwo_http)])
+    original = RemoteTrack(source="netease", remote_id="1", title="花海", artist="周杰伦", duration_ms=210_000)
+
+    resolved = registry.resolve(original)
+    assert resolved.source == "kuwo"
+    assert resolved.switched_from == "netease"
+    assert "酷我" in resolved.note
+    assert resolved.url.endswith("song.mp3")
+
+
+def test_registry_cross_source_no_match_reports_reasons() -> None:
+    netease_http = FakeHttp({
+        ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": None}]}),
+        ("GET", "outer/url"): FakeResponse(payload=None, text="", url="https://music.163.com/404",
+                                           headers={"Content-Type": "text/html"}),
+    })
+    kuwo_http = FakeHttp({
+        ("GET", "search.kuwo.cn"): FakeResponse(payload=None, text=KUWO_SEARCH_TEXT),
+    })
+    registry = MusicRegistry([NeteaseSource(http=netease_http), KuwoSource(http=kuwo_http)])
+    other = RemoteTrack(source="netease", remote_id="2", title="完全不同的歌", artist="某人")
+    with pytest.raises(SourceError) as exc:
+        registry.resolve(other)
+    assert "netease" in str(exc.value) or "酷我" in str(exc.value)
+
+
+def test_registry_exclude_prevents_looping_back() -> None:
+    """下载失败后换源时，must 不再回到刚失败的音源。"""
+    netease_http = FakeHttp({
+        ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": "https://m7.music.126.net/a.mp3"}]}),
+    })
+    registry = MusicRegistry([NeteaseSource(http=netease_http)])
+    track = RemoteTrack(source="netease", remote_id="1", title="x")
+    with pytest.raises(SourceError):
+        registry.resolve(track, exclude=["netease"])
+
+
+def test_registry_settings_roundtrip(storage: MusicStorage) -> None:
+    registry = MusicRegistry([NeteaseSource(http=FakeHttp({})), KuwoSource(http=FakeHttp({}))])
+    registry.set_enabled("netease", False)
+    registry.set_order(["kuwo", "netease"])
+    registry.save_settings(storage)
+
+    restored = MusicRegistry([NeteaseSource(http=FakeHttp({})), KuwoSource(http=FakeHttp({}))])
+    restored.load_settings(storage)
+    assert restored.is_enabled("netease") is False
+    assert restored.order[:2] == ["kuwo", "netease"]
+
+
+def test_matcher_scores_and_best_match() -> None:
+    base = RemoteTrack(source="netease", remote_id="1", title="屋顶", artist="周杰伦", duration_ms=319_000)
+    same = RemoteTrack(source="kuwo", remote_id="2", title="屋顶 (Live)", artist="周杰伦、温岚", duration_ms=317_000)
+    other = RemoteTrack(source="kuwo", remote_id="3", title="稻香", artist="周杰伦", duration_ms=223_000)
+    assert match_score(base, same) > match_score(base, other)
+    assert best_match(base, [other, same]) is same
+    assert best_match(base, [other], threshold=0.9) is None
+    assert best_match(base, []) is None
 
 
 # --------------------------------------------------------------- 下载
@@ -431,10 +625,11 @@ def test_download_track_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     progress: list[tuple[int, int, str]] = []
     remote = RemoteTrack(source="url", remote_id="https://cdn/song.mp3", title="测试曲",
                          artist="歌手", url="https://cdn/song.mp3")
-    path = download_track(remote, tmp_path, on_progress=lambda w, t, m: progress.append((w, t, m)),
-                          save_cover=False, save_lyrics=False)
+    path, resolved = download_track(remote, tmp_path, on_progress=lambda w, t, m: progress.append((w, t, m)),
+                                    save_cover=False, save_lyrics=False)
     assert path.name == "歌手 - 测试曲.mp3"
     assert path.read_bytes() == audio
+    assert resolved.source == "url"
     assert progress[-1][0] == len(audio)
 
 
@@ -482,7 +677,7 @@ def test_download_track_retries_transient_network_error(monkeypatch: pytest.Monk
     monkeypatch.setattr("modu_workbench.core.music.downloader.requests.get", flaky_get)
     monkeypatch.setattr("modu_workbench.core.music.downloader.time.sleep", lambda _s: None)
     remote = RemoteTrack(source="url", remote_id="https://cdn/song.mp3", title="重试曲", url="https://cdn/song.mp3")
-    path = download_track(remote, tmp_path, save_cover=False, save_lyrics=False)
+    path, _resolved = download_track(remote, tmp_path, save_cover=False, save_lyrics=False)
     assert attempts["count"] == 3
     assert path.read_bytes() == audio
 

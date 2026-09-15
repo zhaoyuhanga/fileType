@@ -71,6 +71,8 @@ class DownloadResult:
     path: str = ""
     ok: bool = False
     message: str = ""
+    source: str = ""          # 实际使用的音源（可能是跨源兜底后的）
+    switched_from: str = ""   # 原音源（发生换源时填写）
 
 
 def unique_path(directory: Path, filename: str) -> Path:
@@ -107,17 +109,67 @@ def download_track(
     save_cover: bool = True,
     save_lyrics: bool = True,
     timeout: float = 20.0,
-) -> Path:
-    """下载单曲到 dest_dir，返回保存路径。失败抛出 SourceError / RuntimeError。"""
-    source = source or get_source(track.source)
+    registry=None,  # noqa: ANN001  MusicRegistry：提供跨源兜底
+    allow_cross_source: bool = True,
+    resolved: "ResolvedAudio | None" = None,
+) -> tuple[Path, "ResolvedAudio"]:
+    """下载单曲到 dest_dir，返回 (保存路径, 解析结果)。
+
+    解析地址时优先使用原音源；失败（接口变更 / VIP / 网络）时由 registry 换源搜索
+    同一首歌继续尝试，因此调用方无需关心“某个音源挂掉”。
+    """
+    from .sources import ResolvedAudio
 
     if on_progress:
         on_progress(0, 0, f"解析直链：{track.display()}")
 
-    url = source.download_url(track)
+    if resolved is None:
+        if registry is not None:
+            resolved = registry.resolve(track, allow_cross_source=allow_cross_source)
+        else:
+            active = source or get_source(track.source)
+            resolved = ResolvedAudio(url=active.download_url(track), source=active.key, track=track)
+    if resolved.switched and on_progress:
+        on_progress(0, 0, resolved.note)
+
+    tried: list[str] = [resolved.source]
+    while True:
+        try:
+            path = _download_resolved(resolved, dest_dir, track=track, on_progress=on_progress,
+                                      cancel=cancel, save_cover=save_cover,
+                                      save_lyrics=save_lyrics, timeout=timeout)
+            return path, resolved
+        except RuntimeError:
+            raise                      # 用户取消
+        except SourceError as error:
+            if registry is None or not allow_cross_source:
+                raise
+            if on_progress:
+                on_progress(0, 0, f"{_label_of(registry, resolved.source)} 下载失败，尝试换源…")
+            try:
+                resolved = registry.resolve(track, allow_cross_source=True, exclude=tried)
+            except SourceError:
+                raise error from None
+            tried.append(resolved.source)
+            if on_progress:
+                on_progress(0, 0, resolved.note or f"改用 {_label_of(registry, resolved.source)}")
+
+
+def _download_resolved(
+    resolved: "ResolvedAudio",
+    dest_dir: str | Path,
+    *,
+    track: RemoteTrack,
+    on_progress: ProgressFn | None,
+    cancel: threading.Event | None,
+    save_cover: bool,
+    save_lyrics: bool,
+    timeout: float,
+) -> Path:
+    """按已解析地址下载并校验音频（失败抛 SourceError，供换源重试）。"""
+    url = resolved.url
     if not url:
         raise SourceError("该曲目没有可用的下载地址")
-
     dest = Path(dest_dir)
     response = None
     last_error: Exception | None = None
@@ -178,7 +230,7 @@ def download_track(
         _try_save_cover(track.cover_url, target)
     if save_lyrics:
         try:
-            text = clean_lyrics(source.lyrics(track))
+            text = clean_lyrics(resolved.lyrics) if resolved.lyrics else ""
         except Exception:  # noqa: BLE001
             text = ""
         if text:
@@ -187,6 +239,11 @@ def download_track(
     if on_progress:
         on_progress(written, total or written, f"完成：{target.name}")
     return target
+
+
+def _label_of(registry, key: str) -> str:  # noqa: ANN001
+    provider = registry.get(key) if registry is not None else None
+    return provider.label if provider is not None else key
 
 
 def _default_headers(url: str) -> dict:
@@ -227,8 +284,10 @@ def download_many(
     cancel: threading.Event | None = None,
     save_cover: bool = True,
     save_lyrics: bool = True,
+    registry=None,  # noqa: ANN001  MusicRegistry：跨源兜底
+    allow_cross_source: bool = True,
 ) -> List[DownloadResult]:
-    """批量下载：单曲失败不影响后续，返回每首的结果。"""
+    """批量下载：单曲失败不影响后续，返回每首的结果（含实际使用的音源）。"""
     tracks = list(tracks)
     results: List[DownloadResult] = []
     for index, track in enumerate(tracks, start=1):
@@ -237,9 +296,16 @@ def download_many(
         if on_progress:
             on_progress(index - 1, len(tracks), f"[{index}/{len(tracks)}] {track.display()}")
         try:
-            path = download_track(track, dest_dir, on_progress=on_progress, cancel=cancel,
-                                  save_cover=save_cover, save_lyrics=save_lyrics)
-            result = DownloadResult(track=track, path=str(path), ok=True, message="完成")
+            path, resolved = download_track(
+                track, dest_dir, on_progress=on_progress, cancel=cancel,
+                save_cover=save_cover, save_lyrics=save_lyrics,
+                registry=registry, allow_cross_source=allow_cross_source,
+            )
+            result = DownloadResult(
+                track=track, path=str(path), ok=True,
+                message=resolved.note or "完成",
+                source=resolved.source, switched_from=resolved.switched_from,
+            )
         except (SourceError, RuntimeError, OSError) as error:
             result = DownloadResult(track=track, ok=False, message=str(error))
         results.append(result)

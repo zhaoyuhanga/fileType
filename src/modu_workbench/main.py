@@ -176,11 +176,11 @@ def _run_dependency_check(output_path: str) -> int:
                     pass
 
     def check_music_core() -> bool:
-        """音乐库存储可建表并完成一轮增删（验证 sqlite 表结构与打包模块完整）。"""
+        """音乐库存储可建表并完成一轮增删 + 音源注册表完整（验证打包模块齐全）。"""
         import tempfile
         from pathlib import Path as _Path
 
-        from modu_workbench.core.music import MUSIC_TARGETS, MusicStorage, Track
+        from modu_workbench.core.music import MUSIC_TARGETS, MusicStorage, RemoteTrack, Track, registry
 
         with tempfile.TemporaryDirectory() as folder:
             store = MusicStorage(str(_Path(folder) / "music.db"))
@@ -188,13 +188,27 @@ def _run_dependency_check(output_path: str) -> int:
                 track_id = store.upsert_track(Track(path=str(_Path(folder) / "a.mp3"), title="t", format="mp3"))
                 playlist_id = store.create_playlist("自检歌单")
                 store.add_to_playlist(playlist_id, [track_id])
-                return (
+                ok = (
                     store.get_track(track_id) is not None
                     and store.get_playlist(playlist_id).track_count == 1
                     and len(MUSIC_TARGETS) >= 8
                 )
             finally:
                 store.close()
+
+        reg = registry()
+        providers = reg.order
+        expected = {"netease", "kuwo", "audius", "archive", "ccmixter", "itunes", "jamendo", "url"}
+        match_ok = False
+        try:
+            from modu_workbench.core.music.sources import best_match
+
+            base = RemoteTrack(source="netease", remote_id="1", title="屋顶", artist="周杰伦", duration_ms=319_000)
+            same = RemoteTrack(source="kuwo", remote_id="2", title="屋顶 Live", artist="周杰伦", duration_ms=317_000)
+            match_ok = best_match(base, [same]) is same
+        except Exception:  # noqa: BLE001
+            match_ok = False
+        return bool(ok and expected.issubset(set(providers)) and match_ok)
 
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)

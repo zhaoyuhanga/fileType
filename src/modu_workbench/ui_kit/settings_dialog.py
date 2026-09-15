@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.convert.media_io import find_ffmpeg
 from modu_workbench.core.convert.office_io import find_soffice
-from modu_workbench.services import config
+from modu_workbench.services import app_context, config
 
 
 class SettingsDialog(QDialog):
@@ -58,6 +58,20 @@ class SettingsDialog(QDialog):
         self._jamendo = QLineEdit(self._settings.value("music/jamendo_client_id", "", type=str))
         self._jamendo.setPlaceholderText("可选：Jamendo 免费 client_id，用于完整曲目下载")
         form.addRow("Jamendo ID", self._jamendo)
+
+        # ---- 音源管理（启用/停用 + 健康状态） ----
+        layout.addWidget(QLabel("音乐音源（停用后不参与搜索与自动换源；顺序即跨源兜底优先级）"))
+        self._source_box = QVBoxLayout()
+        self._source_checks: dict[str, QCheckBox] = {}
+        registry = app_context.music_registry()
+        for info in registry.infos():
+            check = QCheckBox(f"{info.label} · {info.kind_label} — {info.note}（当前：{registry.status_text(info.key)}）")
+            check.setChecked(registry.is_enabled(info.key))
+            check.setEnabled(not info.needs_key or bool(self._jamendo.text().strip()))
+            self._source_checks[info.key] = check
+            self._source_box.addWidget(check)
+        layout.addLayout(self._source_box)
+        self._jamendo.textChanged.connect(self._sync_source_enabled)
 
         music_dir = QLabel(str(config.music_dir()))
         music_dir.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -102,8 +116,29 @@ class SettingsDialog(QDialog):
         if folder:
             self._music_dir.setText(folder)
 
+    def _sync_source_enabled(self) -> None:
+        """Jamendo 需要 client_id 才能勾选。"""
+        has_key = bool(self._jamendo.text().strip())
+        check = self._source_checks.get("jamendo")
+        if check is not None:
+            check.setEnabled(has_key)
+            if not has_key:
+                check.setChecked(False)
+
     def _save(self) -> None:
         self._settings.setValue("music/download_dir", self._music_dir.text().strip())
         self._settings.setValue("music/jamendo_client_id", self._jamendo.text().strip())
         self._settings.sync()
+
+        # 音源启用状态与凭据写回注册表（持久化到 music.db settings）
+        registry = app_context.music_registry()
+        for key, check in self._source_checks.items():
+            registry.set_enabled(key, check.isChecked())
+        provider = registry.get("jamendo")
+        if provider is not None:
+            provider.set_credential(self._jamendo.text().strip())
+        try:
+            registry.save_settings(app_context.music_storage())
+        except Exception:  # noqa: BLE001
+            pass
         self.accept()

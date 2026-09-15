@@ -336,37 +336,60 @@ def test_search_single_row_download_and_menu(qapp: QApplication, storage: MusicS
     page.shutdown()
 
 
-def test_search_fallback_to_itunes_on_network_failure(qapp: QApplication, storage: MusicStorage,
-                                                      library: MusicLibrary,
-                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    """网易云因 DNS/网络失败时，应能自动改用 iTunes 试听源（同名才兜底）。"""
-    import types
-
+def test_search_download_uses_registry_and_reports_switch(qapp: QApplication, storage: MusicStorage,
+                                                         library: MusicLibrary,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """下载必须带上音源注册表（跨源兜底），并在结果里说明“已自动换源”。"""
     from modu_workbench.core.music import DownloadResult
 
+    from PySide6.QtCore import QObject, Signal
+
+    captured: dict = {}
+
+    class FakeWorker(QObject):
+        progressed = Signal(int, int, str)
+        finishedAll = Signal(object)
+        failed = Signal(str)
+        finished = Signal()
+
+        def __init__(self, remotes, dest, *args, **kwargs):  # noqa: ANN002, ANN003
+            super().__init__()
+            captured["remotes"] = list(remotes)
+            captured["registry"] = kwargs.get("registry")
+            captured["cross"] = kwargs.get("allow_cross_source")
+
+        def cancel(self) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def isRunning(self) -> bool:  # noqa: N802
+            return False
+
+    monkeypatch.setattr("modu_workbench.boards.music_search.DownloadWorker", FakeWorker)
+
     page = MusicSearchPage(library, storage, toaster())
-    fake_source = types.SimpleNamespace(
-        search=lambda kw, kind="song", limit=3: [
-            RemoteTrack(source="itunes", remote_id="9", title="屋顶 (Live)", artist="周杰伦", url="http://x/9.m4a")
-        ]
-    )
-    monkeypatch.setattr("modu_workbench.boards.music_search.get_source", lambda _key: fake_source)
+    page._on_results([RemoteTrack(source="netease", remote_id="1", title="屋顶",
+                                  artist="周杰伦", url="http://x/1.mp3")], [])
+    from modu_workbench.boards.music_widgets import select_all
 
-    fallback = page._fallback_remotes([
+    select_all(page._table, True)
+    page._start_download()
+
+    assert captured["remotes"][0].title == "屋顶"
+    assert captured["registry"] is not None            # 传入了注册表 → 可换源
+    assert captured["cross"] is True                   # 默认开启自动换源
+
+    # 换源成功的结果要能在状态栏说明
+    page._on_download_thread_finished()
+    page._report_download_result([
         DownloadResult(track=RemoteTrack(source="netease", remote_id="1", title="屋顶", artist="周杰伦"),
-                       ok=False, message="无法解析 music.163.com 的域名（DNS/网络问题）"),
-        DownloadResult(track=RemoteTrack(source="netease", remote_id="2", title="完全不同的歌", artist="某人"),
-                       ok=False, message="网络错误"),
+                       path=str(library.music_dir / "x.mp3"), ok=True,
+                       message="网易云音乐 不可用，已改用酷我音乐", source="kuwo", switched_from="netease"),
     ])
-    assert len(fallback) == 1
-    assert fallback[0].source == "itunes"
-    assert fallback[0].category.startswith("iTunes")
-    assert fallback[0].extra["fallback_from"] == "netease"
-
-    # iTunes 结果自己失败时不再兜底（避免死循环）
-    assert page._fallback_remotes([
-        DownloadResult(track=RemoteTrack(source="itunes", remote_id="3", title="屋顶"), ok=False),
-    ]) == []
+    assert "自动换源" in page._status.text()
+    page.shutdown()
 
 
 def test_preview_uses_shared_player_bar(qapp: QApplication, storage: MusicStorage, library: MusicLibrary,

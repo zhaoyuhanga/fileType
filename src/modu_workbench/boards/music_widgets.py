@@ -352,7 +352,7 @@ class SearchWorker(QThread):
 
 
 class DownloadWorker(QThread):
-    """批量下载在线曲目（支持取消）。"""
+    """批量下载在线曲目（支持取消；可选跨源兜底）。"""
 
     progressed = Signal(int, int, str)
     trackDone = Signal(object)      # DownloadResult
@@ -360,12 +360,14 @@ class DownloadWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, remotes: Iterable[RemoteTrack], dest_dir: str, save_cover: bool = True,
-                 save_lyrics: bool = True, parent=None):
+                 save_lyrics: bool = True, registry=None, allow_cross_source: bool = True, parent=None):
         super().__init__(parent)
         self._remotes = list(remotes)
         self._dest = dest_dir
         self._save_cover = save_cover
         self._save_lyrics = save_lyrics
+        self._registry = registry
+        self._cross = allow_cross_source
         self._cancel = threading.Event()
 
     def cancel(self) -> None:
@@ -381,6 +383,8 @@ class DownloadWorker(QThread):
                 cancel=self._cancel,
                 save_cover=self._save_cover,
                 save_lyrics=self._save_lyrics,
+                registry=self._registry,
+                allow_cross_source=self._cross,
             )
             self.finishedAll.emit(results)
         except Exception as error:  # noqa: BLE001

@@ -25,13 +25,21 @@ Electron 主进程代码仅作参考，不再构建维护。
 
 ### 墨读音乐使用说明
 
-- **音源**（可插拔，见 `core/music/sources.py`）：
-  | 音源 | 说明 | 需要密钥 |
-  |---|---|---|
-  | 网易云音乐 | 公开 Web 接口检索，`outer` 直链下载非 VIP 曲目 | 否 |
-  | iTunes 试听 | Apple 公开接口，30 秒试听片段 + 完整元数据 | 否 |
-  | Jamendo | CC 授权完整曲目（自由音乐） | 是（免费 client_id，设置里填写或 `MODU_JAMENDO_CLIENT_ID`） |
-  | 音频直链 | 粘贴 http(s) 音频直链直接下载 | 否 |
+- **音源**（可插拔多音源，见 `core/music/sources/`，全部免费、本地直连、无需登录）：
+  | 音源 | 能力 | 说明 | 密钥 |
+  |---|---|---|---|
+  | 网易云音乐 | 完整曲目 | 公开 Web 接口；非 VIP 曲目可下载 | 否 |
+  | 酷我音乐 | 完整曲目 | 公开检索 + antiserver 直链，通常可下完整曲目 | 否 |
+  | Audius | 自由授权 | 去中心化平台 API，完整播放/下载 | 否 |
+  | Internet Archive | 公共领域 | 现场录音、老唱片、自由音乐 | 否 |
+  | ccMixter | CC 授权 | 混音 / 器乐 / 伴奏社区 | 否 |
+  | iTunes 试听 | 30 秒片段 | Apple 公开接口，元数据完整，稳定兜底 | 否 |
+  | Jamendo | CC 完整曲目 | 需免费 client_id（设置里填写） | 是（免费） |
+  | 音频直链 | 直链 | 自建或已授权地址 | 否 |
+- **多源容错**：每个音源 HTTP 层带退避重试；某音源连续失败会被临时降级（熔断），聚合搜索自动跳过；
+  解析/下载失败时自动到其他音源按「曲名 + 歌手 + 时长」匹配同一首歌继续尝试（可在搜索页关闭），
+  因此单个平台接口变更或会员限制不会让功能整体不可用；实际使用的音源会在结果里标明。
+- **音源管理**：设置里可启用/停用音源、填写 Jamendo ID；停用的音源不参与搜索与自动换源。
 - **批量流程**：选择「歌手 / 类型」检索 → 结果列表勾选 → 一键「下载（单条或批量）」或先「加入歌单」（歌单内显示为「待下载」，之后可整单下载）。
   只选中一行时即下载该首；右键结果行还有「试听这首 / 下载这首 / 加入歌单」；
   试听按钮可再次点击停止。
@@ -129,10 +137,15 @@ src/modu_workbench/
 ├── core/music/                # 音乐引擎
 │   ├── models.py              # 曲目/在线结果/歌单/历史模型
 │   ├── storage.py             # SQLite：曲库/歌单/待下载项/历史/设置
-│   ├── sources.py             # 在线音源（网易云/iTunes/Jamendo/直链）
-│   ├── downloader.py          # 流式下载（进度/取消/封面/歌词）
+│   ├── sources/               # ★ 音源层（多源 + 重试 + 熔断 + 跨源兜底）
+│   │   ├── base.py            # MusicSource 基类 / SourceInfo / 健康度
+│   │   ├── http.py            # 带退避重试的 HTTP 客户端 + 网络错误翻译
+│   │   ├── matcher.py         # 曲名/歌手/时长匹配（跨源找同一首歌）
+│   │   ├── registry.py        # 注册表：聚合搜索 / 熔断 / 换源解析 / 配置持久化
+│   │   └── providers/         # netease / kuwo / audius / archive / ccmixter / itunes / jamendo / direct
+│   ├── downloader.py          # 流式下载（进度/取消/封面/歌词/换源重试/音频校验）
 │   ├── library.py             # 本地曲库：导入/时长探测/转换入口
-│   └── player.py              # 播放器：队列/循环/随机/进度/音量
+│   └── player.py              # 播放器：队列/循环/随机/进度/音量/在线试听
 ├── core/convert/              # 转换引擎
 │   ├── registry.py / engine.py / formats.py / text_io.py
 │   ├── pdf_out.py / image_io.py / archive_io.py

@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from modu_workbench.core.music import MusicLibrary, MusicStorage, MusicPlayer
+from modu_workbench.core.music import MusicLibrary, MusicRegistry, MusicPlayer, MusicStorage, registry
 from modu_workbench.core.reader import Library, Storage
 
 from .config import ensure_legacy_migration, music_db_path, music_dir
@@ -15,6 +15,7 @@ _library: Library | None = None
 _music_storage: MusicStorage | None = None
 _music_library: MusicLibrary | None = None
 _music_player: MusicPlayer | None = None
+_music_registry: MusicRegistry | None = None
 
 
 def storage() -> Storage:
@@ -43,6 +44,14 @@ def music_library() -> MusicLibrary:
     if _music_library is None:
         _music_library = MusicLibrary(music_storage(), music_dir())
     return _music_library
+
+
+def music_registry() -> MusicRegistry:
+    """应用级音源注册表（读取用户启用/优先级配置）。"""
+    global _music_registry
+    if _music_registry is None:
+        _music_registry = registry()
+    return _music_registry
 
 
 def music_player() -> MusicPlayer:
