@@ -2,13 +2,13 @@
 
 - 仅监听 127.0.0.1 随机端口，随应用懒启动（守护线程）；
 - 支持 Range 请求（拖动进度条）；
-- 只服务本机绝对路径且扩展名在媒体白名单内的文件。
+- 只服务本机绝对路径且扩展名在媒体白名单内的文件；
+- URL 内含每次运行随机生成的令牌，避免同机其他进程枚举读取任意媒体文件。
 """
 from __future__ import annotations
 
-import os
+import secrets
 import threading
-from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
@@ -19,6 +19,9 @@ _MIME = {
     ".webm": "video/webm", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
     ".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
 }
+
+_TOKEN = secrets.token_urlsafe(18)
+_PREFIX = f"/{_TOKEN}/media/"
 
 _lock = threading.Lock()
 _server: ThreadingHTTPServer | None = None
@@ -36,10 +39,10 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
         def _serve(self, head_only: bool = False) -> None:
             try:
                 path = unquote(urlsplit(self.path).path)
-                if not path.startswith("/media/"):
+                if not path.startswith(_PREFIX):
                     self.send_error(404)
                     return
-                file_path = Path(path[len("/media/"):])
+                file_path = Path(path[len(_PREFIX):])
                 ext = file_path.suffix.lower()
                 if ext not in _MEDIA_EXTS or not file_path.is_file():
                     self.send_error(404)
@@ -106,7 +109,7 @@ def ensure_server() -> str:
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         port = server.server_address[1]
         _server = server
-        _base_url = f"http://127.0.0.1:{port}/media/"
+        _base_url = f"http://127.0.0.1:{port}{_PREFIX}"
         thread = threading.Thread(target=server.serve_forever, name="modu-media-server", daemon=True)
         thread.start()
         return _base_url

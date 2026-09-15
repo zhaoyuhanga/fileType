@@ -33,3 +33,20 @@ def test_media_server_rejects_other_files(tmp_path: Path) -> None:
         raise AssertionError("应当拒绝非媒体文件")
     except Exception as exc:  # noqa: BLE001
         assert "HTTP Error 404" in str(exc)
+
+
+def test_media_server_requires_session_token(tmp_path: Path) -> None:
+    """无令牌的 /media/ 路径必须 404（防止同机进程枚举读取）。"""
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"0123456789")
+    url = media_url(str(video))
+    # 去掉令牌后的裸路径：http://127.0.0.1:port/media/<path>
+    host = url.split("/media/", 1)[0].rsplit("/", 1)[0]
+    tail = url.split("/media/", 1)[1]
+    forged = f"{host}/media/{tail}"
+    assert forged != url
+    try:
+        urlopen(forged)
+        raise AssertionError("缺少令牌时不应可访问")
+    except Exception as exc:  # noqa: BLE001
+        assert "HTTP Error 404" in str(exc)
