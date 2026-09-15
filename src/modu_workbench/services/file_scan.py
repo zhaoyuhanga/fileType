@@ -8,7 +8,7 @@ SUPPORTED_IMPORT_EXTENSIONS = (
     ".txt", ".md", ".html", ".json",
     ".docx", ".doc", ".xlsx", ".xls", ".csv",
     ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif",
-    ".mp4", ".mov", ".avi", ".m4a", ".mp3", ".wav",
+    ".mp4", ".mov", ".avi", ".m4a", ".mp3", ".wav", ".flac", ".aac", ".ogg", ".opus", ".wma",
     ".zip", ".tar", ".rar",
 )
 

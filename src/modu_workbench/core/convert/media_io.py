@@ -12,7 +12,20 @@ import threading
 import time
 from pathlib import Path
 
-AUDIO_TARGETS = {"m4a", "mp3", "wav"}
+AUDIO_TARGETS = {"m4a", "mp3", "wav", "flac", "aac", "ogg", "opus", "wma"}
+
+# 目标音频格式 → ffmpeg 编码器（未列出者使用 ffmpeg 默认编码器）
+AUDIO_CODECS = {
+    "mp3": "libmp3lame",
+    "m4a": "aac",
+    "aac": "aac",
+    "flac": "flac",
+    "ogg": "libvorbis",
+    "opus": "libopus",
+    "wma": "wmav2",
+}
+# 需要显式指定容器（避免 ffmpeg 猜错）
+CONTAINER_FORMATS = {"aac": "adts"}
 
 
 def find_ffmpeg() -> str | None:
@@ -32,8 +45,11 @@ def convert_media(source_path: str | Path, target_format: str, output_path: str 
     args = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source_path)]
     if target_format in AUDIO_TARGETS:
         args.append("-vn")
-    if target_format == "m4a":
-        args += ["-c:a", "aac"]
+    codec = AUDIO_CODECS.get(target_format)
+    if codec:
+        args += ["-c:a", codec]
+    if target_format in CONTAINER_FORMATS:
+        args += ["-f", CONTAINER_FORMATS[target_format]]
     args.append(str(output_path))
 
     process = subprocess.Popen(

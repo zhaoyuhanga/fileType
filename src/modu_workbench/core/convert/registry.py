@@ -26,6 +26,7 @@ FMT_NAMES = {
     "docx": "Word", "doc": "Word", "xlsx": "Excel", "xls": "Excel",
     "jpg": "JPG", "png": "PNG", "webp": "WEBP", "bmp": "BMP", "gif": "GIF",
     "mp4": "MP4", "mov": "MOV", "avi": "AVI", "m4a": "M4A", "mp3": "MP3", "wav": "WAV",
+    "flac": "FLAC", "aac": "AAC", "ogg": "OGG", "opus": "OPUS", "wma": "WMA",
 }
 
 

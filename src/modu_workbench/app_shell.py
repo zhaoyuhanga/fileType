@@ -100,6 +100,23 @@ class AppShell(QMainWindow):
         self.current_key = key
         for nav_key, button in self._nav_buttons.items():
             set_nav_active(button, nav_key == key)
+        # 板块可选实现 on_shown()：进入时刷新数据（例如音乐板块曲库/歌单）
+        page = self._stack.currentWidget()
+        hook = getattr(page, "on_shown", None)
+        if callable(hook):
+            hook()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """退出前停止各板块的后台线程与播放。"""
+        for index in range(self._stack.count()):
+            page = self._stack.widget(index)
+            hook = getattr(page, "shutdown", None)
+            if callable(hook):
+                try:
+                    hook()
+                except Exception:  # noqa: BLE001
+                    pass
+        super().closeEvent(event)
 
     def current_page(self) -> QWidget:
         return self._stack.currentWidget()

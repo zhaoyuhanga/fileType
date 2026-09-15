@@ -48,7 +48,7 @@ def _category(fmt: str) -> str:
         return "image"
     if fmt in ("mp4", "mov", "avi"):
         return "video"
-    if fmt in ("m4a", "mp3", "wav"):
+    if fmt in ("m4a", "mp3", "wav", "flac", "aac", "ogg", "opus", "wma"):
         return "audio"
     if fmt in ("zip", "rar", "tar"):
         return "archive"

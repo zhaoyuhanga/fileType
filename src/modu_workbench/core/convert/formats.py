@@ -7,7 +7,7 @@ WORD_FORMATS = ("docx", "doc")
 SHEET_FORMATS = ("xlsx", "xls", "csv")
 IMAGE_FORMATS = ("jpg", "png", "webp", "bmp", "gif")
 VIDEO_FORMATS = ("mp4", "mov", "avi")
-AUDIO_FORMATS = ("m4a", "mp3", "wav")
+AUDIO_FORMATS = ("m4a", "mp3", "wav", "flac", "aac", "ogg", "opus", "wma")
 MEDIA_FORMATS = VIDEO_FORMATS + AUDIO_FORMATS
 ARCHIVE_FORMATS = ("zip", "tar", "rar")
 
@@ -33,6 +33,11 @@ TARGET_EXTENSION = {
     "m4a": ".m4a",
     "mp3": ".mp3",
     "wav": ".wav",
+    "flac": ".flac",
+    "aac": ".aac",
+    "ogg": ".ogg",
+    "opus": ".opus",
+    "wma": ".wma",
     "zip": ".zip",
     "tar": ".tar",
 }

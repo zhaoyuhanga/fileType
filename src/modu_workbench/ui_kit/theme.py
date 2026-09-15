@@ -404,6 +404,64 @@ QPushButton#actionOption[active="true"] {{
     background: {t.accent_soft};
     color: {t.accent_strong};
 }}
+
+/* ---------- 墨读音乐：播放条与控件 ---------- */
+QFrame#musicPlayerBar {{
+    background: {t.surface};
+    border-top: 1px solid {t.border};
+}}
+QLabel#musicTitle {{ color: {t.text_hi}; font-size: 14px; font-weight: 700; }}
+QLabel#musicMeta {{ color: {t.text_dim}; font-size: 12px; }}
+QPushButton#playerButton, QPushButton#playerButtonPrimary {{
+    background: {t.surface_2};
+    border: 1px solid {t.border};
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: {t.text};
+}}
+QPushButton#playerButton:hover {{ background: {t.surface_hover}; border-color: {t.border_strong}; }}
+QPushButton#playerButtonPrimary {{
+    background: {t.accent};
+    border-color: {t.accent};
+    color: #ffffff;
+    font-weight: 700;
+}}
+QPushButton#playerButtonPrimary:hover {{ background: {t.accent_hover}; }}
+QSlider::groove:horizontal {{
+    height: 4px;
+    background: {t.border};
+    border-radius: 2px;
+}}
+QSlider::sub-page:horizontal {{
+    background: {t.accent};
+    border-radius: 2px;
+}}
+QSlider::handle:horizontal {{
+    background: #ffffff;
+    border: 2px solid {t.accent};
+    width: 12px;
+    height: 12px;
+    margin: -5px 0;
+    border-radius: 7px;
+}}
+QSlider::handle:horizontal:hover {{ border-color: {t.accent_hover}; }}
+QListWidget {{
+    background: {t.surface};
+    border: 1px solid {t.border};
+    border-radius: {t.radius_sm}px;
+    padding: 4px;
+    outline: none;
+}}
+QListWidget::item {{
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: {t.text};
+}}
+QListWidget::item:selected {{
+    background: {t.accent_soft};
+    color: {t.accent_strong};
+}}
+QListWidget::item:hover {{ background: {t.surface_hover}; }}
 """
 
 

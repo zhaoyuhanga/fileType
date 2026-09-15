@@ -1,7 +1,7 @@
 """板块注册表：墨读·工作台当前可用板块。"""
 from __future__ import annotations
 
-from . import book_board, convert_board
+from . import book_board, convert_board, music_board
 from .base import BoardSpec
 
 BOOK_BOARD = BoardSpec(
@@ -24,8 +24,18 @@ CONVERT_BOARD = BoardSpec(
     page=convert_board.ConvertBoardPage,
 )
 
+MUSIC_BOARD = BoardSpec(
+    key="music",
+    title="墨读音乐",
+    tagline="在线搜索 · 本地曲库 · 歌单播放",
+    description="联网搜索并下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史与音频格式转换。",
+    icon="🎧",
+    phase="可用",
+    page=music_board.MusicBoardPage,
+)
+
 # 首页卡片与顶栏导航顺序
-ACTIVE_BOARDS: tuple[BoardSpec, ...] = (BOOK_BOARD, CONVERT_BOARD)
+ACTIVE_BOARDS: tuple[BoardSpec, ...] = (BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD)
 
 
 def get_board(key: str) -> BoardSpec | None:

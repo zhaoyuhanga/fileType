@@ -102,6 +102,38 @@ def _run_dependency_check(output_path: str) -> int:
             return False
         return (front / "index.html").is_file() and (front / "bridge_shim.js").is_file()
 
+    def check_multimedia() -> bool:
+        """墨读音乐播放依赖 QtMultimedia（打包必须带上）。"""
+        try:
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer  # noqa: F401
+
+            from modu_workbench.core.music import MULTIMEDIA_AVAILABLE
+
+            return bool(MULTIMEDIA_AVAILABLE)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def check_music_core() -> bool:
+        """音乐库存储可建表并完成一轮增删（验证 sqlite 表结构与打包模块完整）。"""
+        import tempfile
+        from pathlib import Path as _Path
+
+        from modu_workbench.core.music import MUSIC_TARGETS, MusicStorage, Track
+
+        with tempfile.TemporaryDirectory() as folder:
+            store = MusicStorage(str(_Path(folder) / "music.db"))
+            try:
+                track_id = store.upsert_track(Track(path=str(_Path(folder) / "a.mp3"), title="t", format="mp3"))
+                playlist_id = store.create_playlist("自检歌单")
+                store.add_to_playlist(playlist_id, [track_id])
+                return (
+                    store.get_track(track_id) is not None
+                    and store.get_playlist(playlist_id).track_count == 1
+                    and len(MUSIC_TARGETS) >= 8
+                )
+            finally:
+                store.close()
+
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
@@ -109,6 +141,8 @@ def _run_dependency_check(output_path: str) -> int:
     record("webengine_import", check_webengine_import)
     record("webengine_render", check_webengine_render)
     record("webfront_present", check_webfront_present)
+    record("multimedia", check_multimedia)
+    record("music_core", check_music_core)
 
     try:
         with open(output_path, "w", encoding="utf-8") as fp:

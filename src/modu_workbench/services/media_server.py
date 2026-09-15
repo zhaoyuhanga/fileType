@@ -13,11 +13,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 
-_MEDIA_EXTS = {".mp4", ".mov", ".avi", ".m4a", ".mp3", ".wav", ".webm", ".mkv", ".m4v"}
+_MEDIA_EXTS = {
+    ".mp4", ".mov", ".avi", ".m4a", ".mp3", ".wav", ".webm", ".mkv", ".m4v",
+    ".flac", ".aac", ".ogg", ".opus", ".wma",
+}
 _MIME = {
     ".mp4": "video/mp4", ".m4v": "video/x-m4v", ".mov": "video/quicktime",
     ".webm": "video/webm", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
     ".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+    ".flac": "audio/flac", ".aac": "audio/aac", ".ogg": "audio/ogg",
+    ".opus": "audio/opus", ".wma": "audio/x-ms-wma",
 }
 
 _TOKEN = secrets.token_urlsafe(18)
