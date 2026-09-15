@@ -19,4 +19,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# 前端最小构建临时目录.webbuild/
+# 前端构建临时目录（最小 npm 依赖 + Vite 输出）
+.webbuild/
+.webfront-build/
+
+# PyInstaller 中转输出（打包后交换进 dist/）
+out-dist/
+out-build/

@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import random
 import re
 import time
 import html as html_mod
@@ -30,11 +31,16 @@ except Exception:  # noqa: BLE001
     _ua = None
 
 
+# 无 fake-useragent 时使用内置 UA 池轮换（离线可用，避免额外依赖）
+FALLBACK_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+]
+
 HEADERS_FALLBACK = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": FALLBACK_USER_AGENTS[0],
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 
@@ -44,9 +50,9 @@ def _get_headers() -> dict:
         try:
             ua = _ua.random
         except Exception:  # noqa: BLE001
-            ua = HEADERS_FALLBACK["User-Agent"]
+            ua = random.choice(FALLBACK_USER_AGENTS)
     else:
-        ua = HEADERS_FALLBACK["User-Agent"]
+        ua = random.choice(FALLBACK_USER_AGENTS)
     return {**HEADERS_FALLBACK, "User-Agent": ua}
 
 

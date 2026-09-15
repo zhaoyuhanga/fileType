@@ -69,7 +69,8 @@
 
   /* —— 同步暴露 —— */
   window.formatFlow = {
-    version: "0.2.0",
+    /* 版本由 web_prepare 注入的 window.__MODU_VERSION__ 提供（单一来源：modu_workbench.__version__） */
+    version: (typeof window !== "undefined" && window.__MODU_VERSION__) || "0.0.0-dev",
     importPaths: function (paths) { return call("importPaths", paths); },
     pickFiles: function () { return call("pickFiles"); },
     pickFolders: function () { return call("pickFolders"); },

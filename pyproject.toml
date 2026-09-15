@@ -30,6 +30,10 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+# 在线书源可选的 UA 伪装依赖；未安装时自动回退到内置 UA 池（见 core/reader/online.py）
+online = [
+    "fake-useragent>=1.5",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

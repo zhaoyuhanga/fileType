@@ -19,13 +19,7 @@ from modu_workbench.core.convert import engine as convert_engine
 from modu_workbench.core.convert.formats import format_from_extension
 from modu_workbench.core.convert.registry import get_action
 from modu_workbench.core.convert.text_io import read_text_smart, write_text
-from modu_workbench.services import config
-
-SUPPORTED_IMPORT_EXTENSIONS = (
-    ".txt", ".md", ".html", ".json", ".docx", ".doc", ".xlsx", ".xls", ".csv",
-    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".mp4", ".mov", ".avi",
-    ".m4a", ".mp3", ".wav", ".zip", ".tar", ".rar",
-)
+from modu_workbench.services.file_scan import scan_paths
 
 
 def file_item_json(file_path: str, index: int) -> dict:
@@ -77,24 +71,36 @@ class _BatchWorker(QThread):
 
     def run(self) -> None:  # noqa: D102
         results: list[dict] = []
-        for file in self._files:
-            if self._bridge.is_cancelled(self._batch):
-                outcome = {"fileId": file["id"], "status": "cancelled", "message": "已取消"}
+        try:
+            for file in self._files:
+                try:
+                    if self._bridge.is_cancelled(self._batch):
+                        outcome = {"fileId": file.get("id", ""), "status": "cancelled", "message": "已取消"}
+                        results.append(outcome)
+                        self.event_signal.emit(json.dumps(outcome))
+                        continue
+                    self.event_signal.emit(json.dumps({"fileId": file.get("id", ""), "status": "running"}))
+                    result = resolve_and_run(
+                        self._action_id, file, self._output, self._bridge.cancel_event(self._batch)
+                    )
+                    outcome = {
+                        "fileId": file.get("id", ""),
+                        "status": result.status,
+                        "targetFormat": result.target_format,
+                        "outputPath": result.output_path,
+                        "message": result.message,
+                    }
+                except Exception as error:  # noqa: BLE001
+                    outcome = {
+                        "fileId": file.get("id", "") if isinstance(file, dict) else "",
+                        "status": "failed",
+                        "message": f"转换异常：{error}",
+                    }
                 results.append(outcome)
                 self.event_signal.emit(json.dumps(outcome))
-                continue
-            self.event_signal.emit(json.dumps({"fileId": file["id"], "status": "running"}))
-            result = resolve_and_run(self._action_id, file, self._output, self._bridge.cancel_event(self._batch))
-            outcome = {
-                "fileId": file["id"],
-                "status": result.status,
-                "targetFormat": result.target_format,
-                "outputPath": result.output_path,
-                "message": result.message,
-            }
-            results.append(outcome)
-            self.event_signal.emit(json.dumps(outcome))
-        self.done_signal.emit(json.dumps(results))
+        finally:
+            # 无论发生什么都要回传结果，避免前端 startJobs 永久 pending
+            self.done_signal.emit(json.dumps(results))
 
 
 def resolve_and_run(action_id: str, file: dict, output_dir: str, cancel) -> convert_engine.ConversionResult:
@@ -169,19 +175,7 @@ class WebBridge(QObject):
     # ---- 桥能力实现 ----
 
     def handle_importPaths(self, paths: list[str]) -> list[dict]:
-        files = config.walk_book_files(paths)  # 复用递归扫描
-        if not files:
-            files = []
-        collected: list[str] = []
-        for raw in paths:
-            p = Path(raw)
-            if p.is_dir():
-                for child in p.rglob("*"):
-                    if child.is_file() and child.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS:
-                        collected.append(str(child))
-            elif p.is_file() and p.suffix.lower() in SUPPORTED_IMPORT_EXTENSIONS:
-                collected.append(str(p))
-        collected = list(dict.fromkeys(collected + files))
+        collected = scan_paths(paths)
         return [file_item_json(p, i) for i, p in enumerate(collected)]
 
     def handle_pickFiles(self) -> list[dict]:
