@@ -130,7 +130,7 @@ class MusicPlayerBar(QFrame):
         parts = [track.artist or "未知歌手"]
         if track.album:
             parts.append(track.album)
-        parts.append(PLAY_MODE_LABELS.get(self._player.mode, ""))
+        parts.append("在线试听" if not getattr(track, "id", 0) else PLAY_MODE_LABELS.get(self._player.mode, ""))
         self._meta.setText(" · ".join(p for p in parts if p))
         self._favorite.setText("★ 已收藏" if track.favorited else "☆ 收藏")
 
@@ -154,6 +154,12 @@ class MusicPlayerBar(QFrame):
         """由板块转发播放错误（含曲名，便于定位是哪个文件有问题）。"""
         self._meta.setText(f"⚠ {message}")
         self._title.setToolTip(message)
+
+    def set_preview_mode(self, preview: bool) -> None:
+        """在线试听时禁用收藏（试听曲目尚未入库）。"""
+        self._favorite.setEnabled(not preview)
+        if preview:
+            self._favorite.setText("☆ 试听中")
 
     # ---------- 控件 ----------
 
@@ -296,6 +302,10 @@ class MusicBoardPage(QWidget):
     def _on_track_changed(self, track) -> None:  # noqa: ANN001
         if track is None:
             return
+        is_preview = self._player.is_preview or not getattr(track, "id", 0)
+        self._bar.set_preview_mode(bool(is_preview))
+        if is_preview:
+            return   # 在线试听不入库、不记历史
         try:
             self._library.record_play(track.id)
         except Exception:  # noqa: BLE001

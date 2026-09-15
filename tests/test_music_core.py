@@ -586,6 +586,42 @@ def test_player_play_track_and_favorite_state(tmp_path: Path) -> None:
     assert player.state in {"paused", "playing"}
 
 
+def test_player_play_url_preview(tmp_path: Path) -> None:
+    """在线试听：不进入队列，进度与错误仍由播放器统一上报。"""
+    player = MusicPlayer(silent=True)
+    changes: list = []
+    player.trackChanged.connect(changes.append)
+
+    track = player.play_url("https://cdn.example.com/a/song.m4a", title="试听曲", artist="歌手",
+                            album="专辑", duration_ms=30_000)
+    assert track is not None
+    assert track.id == 0
+    assert track.title == "试听曲"
+    assert player.is_preview is True
+    assert player.state == "playing"
+    assert changes and changes[-1].title == "试听曲"
+    assert player.queue == []          # 试听不污染播放队列
+
+    player.stop_preview()
+    assert player.is_preview is False
+    assert player.state == "stopped"
+
+    assert player.play_url("") is None  # 空地址直接报错
+
+
+def test_player_preview_error_is_reported() -> None:
+    player = MusicPlayer(silent=True)
+    errors: list[str] = []
+    player.errorOccurred.connect(errors.append)
+    player.play_url("https://cdn.example.com/a/song.m4a", title="试听曲", artist="歌手")
+
+    player._on_error(None, "boom")   # noqa: SLF001  模拟解码失败
+    assert errors and "试听失败" in errors[0] and "试听曲" in errors[0]
+    assert player.state == "error"
+    assert player.is_preview is False
+    assert player.queue == []
+
+
 def test_player_error_skips_bad_track(tmp_path: Path) -> None:
     """坏文件必须报出曲名并自动跳到下一首，单曲队列才进入 error 状态。"""
     player = MusicPlayer(silent=True)

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 import random
 from typing import Iterable, List
 
@@ -44,6 +45,8 @@ class MusicPlayer(QObject):
         self._silent = silent
         self._failed_ids: set[int] = set()   # 播放失败过的曲目（避免无限跳歌）
         self._reported_duration: set[int] = set()
+        self._preview_active = False
+        self._preview_track: Track | None = None
 
         self._player = None
         self._audio = None
@@ -91,6 +94,44 @@ class MusicPlayer(QObject):
     def volume(self) -> int:
         return self._volume
 
+    @property
+    def is_preview(self) -> bool:
+        """当前是否在试听在线地址（未下载的曲目）。"""
+        return self._preview_active
+
+    # ---------- 在线试听 ----------
+
+    def play_url(self, url: str, *, title: str = "", artist: str = "",
+                 album: str = "", duration_ms: int = 0) -> Track | None:
+        """直接播放网络音频（试听）：不进入队列，进度/错误仍走播放条统一展示。"""
+        if not url:
+            self.errorOccurred.emit("试听地址为空，无法播放")
+            return None
+        name = title or os.path.basename(url.split("?", 1)[0]) or "在线试听"
+        track = Track(
+            id=0, path=url, title=name, artist=artist, album=album,
+            duration_ms=duration_ms, format=os.path.splitext(url.split("?", 1)[0])[1].lstrip(".").lower(),
+            source="preview",
+        )
+        self._preview_active = True
+        self._preview_track = track
+        self.trackChanged.emit(track)
+        if self._player is not None:
+            self._player.setSource(QUrl(url, QUrl.ParsingMode.TolerantMode))
+            self._player.play()
+        self._set_state("playing")
+        self.positionChanged.emit(0, duration_ms)
+        return track
+
+    def stop_preview(self) -> None:
+        if not self._preview_active:
+            return
+        self._preview_active = False
+        self._preview_track = None
+        if self._player is not None:
+            self._player.stop()
+        self._set_state("stopped")
+
     # ---------- 队列 ----------
 
     def set_queue(self, tracks: Iterable[Track], start_index: int = 0, autoplay: bool = True) -> None:
@@ -134,6 +175,8 @@ class MusicPlayer(QObject):
     def play_index(self, index: int) -> None:
         if not (0 <= index < len(self._queue)):
             return
+        self._preview_active = False
+        self._preview_track = None
         self._index = index
         track = self._queue[index]
         if not track.exists:
@@ -187,6 +230,8 @@ class MusicPlayer(QObject):
         self._set_state("playing")
 
     def stop(self) -> None:
+        self._preview_active = False
+        self._preview_track = None
         if self._player is not None:
             self._player.stop()
         self._set_state("stopped")
@@ -266,6 +311,8 @@ class MusicPlayer(QObject):
 
     def _on_duration(self, duration: int) -> None:
         self.positionChanged.emit(int(self._player.position()) if self._player else 0, int(duration))
+        if self._preview_active:
+            return
         track = self.current
         if track is not None and duration > 0 and track.id not in self._reported_duration:
             self._reported_duration.add(track.id)
@@ -287,6 +334,10 @@ class MusicPlayer(QObject):
         if QMediaPlayer is None:
             return
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            if self._preview_active:
+                self._preview_active = False
+                self._set_state("stopped")
+                return
             if self._mode == "loop-one" and self._index >= 0:
                 self.play_index(self._index)
             else:
@@ -298,6 +349,15 @@ class MusicPlayer(QObject):
         track = self.current
         name = track.display() if track is not None else "当前曲目"
         detail = message or "缺少解码器或文件损坏"
+        if self._preview_active:
+            # 试听失败：明确报错，不影响队列
+            preview = self._preview_track
+            self._preview_active = False
+            self._preview_track = None
+            self._set_state("error")
+            label = preview.display() if preview is not None else name
+            self.errorOccurred.emit(f"试听失败（{label}）：{detail}。可尝试直接下载后再播放。")
+            return
         self.errorOccurred.emit(f"{name} 无法播放：{detail}")
         if track is not None:
             self._skip_after_error(self._index)

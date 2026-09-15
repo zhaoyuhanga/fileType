@@ -368,6 +368,51 @@ def test_search_fallback_to_itunes_on_network_failure(qapp: QApplication, storag
     ]) == []
 
 
+def test_preview_uses_shared_player_bar(qapp: QApplication, storage: MusicStorage, library: MusicLibrary,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """试听必须走底部播放条：进度/时长/错误都在那里显示，而不是静默无反应。"""
+    from PySide6.QtCore import QObject, Signal
+
+    from modu_workbench.core.music import MusicPlayer as Player
+
+    fake_player = Player(silent=True)
+    monkeypatch.setattr("modu_workbench.services.app_context.music_player", lambda: fake_player)
+
+    class FakeResolver(QObject):
+        finishedResults = Signal(object, object)
+        failed = Signal(str)
+
+        def __init__(self, remote, parent=None):  # noqa: ANN001
+            super().__init__(parent)
+            self._remote = remote
+
+        def start(self) -> None:
+            self.finishedResults.emit("https://cdn.example.com/song.m4a", self._remote)
+
+    monkeypatch.setattr("modu_workbench.boards.music_search._PreviewResolver", FakeResolver)
+
+    page = MusicSearchPage(library, storage, toaster())
+    page._on_results([RemoteTrack(source="itunes", remote_id="1", title="晴天",
+                                  artist="周杰伦", duration_ms=30_000, url="http://x/1.m4a")], [])
+    page._table.selectRow(0)
+    page._preview_selected()
+
+    assert fake_player.is_preview is True
+    assert page._preview_button.text() == "停止试听"
+    assert "播放条" in page._status.text()
+
+    # 解码失败时状态栏必须给出原因
+    fake_player._on_error(None, "boom")   # noqa: SLF001
+    assert "试听失败" in page._status.text()
+
+    # 再次点击 ＝ 停止试听
+    fake_player.play_url("https://cdn.example.com/song.m4a", title="晴天")
+    page._preview_selected()
+    assert fake_player.is_preview is False
+    assert page._preview_button.text() == "试听选中"
+    page.shutdown()
+
+
 def test_search_page_empty_selection_warns(qapp: QApplication, storage: MusicStorage,
                                            library: MusicLibrary) -> None:
     page = MusicSearchPage(library, storage, toaster())

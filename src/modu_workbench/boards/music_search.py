@@ -30,6 +30,7 @@ from modu_workbench.core.music import (
     get_source,
     list_sources,
 )
+from modu_workbench.services import app_context
 from modu_workbench.ui_kit.toast import Toaster
 
 from .music_widgets import (
@@ -45,13 +46,6 @@ from .music_widgets import (
     row_remote,
     select_all,
 )
-
-try:  # 试听用播放器（不可用时按钮自动禁用）
-    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-except Exception:  # noqa: BLE001
-    QAudioOutput = None  # type: ignore[assignment]
-    QMediaPlayer = None  # type: ignore[assignment]
-
 
 def _similar(left: str, right: str) -> bool:
     """曲名大致匹配（去括号/空格后互为包含），避免兜底下载下错歌。"""
@@ -95,8 +89,6 @@ class MusicSearchPage(QWidget):
         self._worker: SearchWorker | None = None
         self._download: DownloadWorker | None = None
         self._preview_worker: _PreviewResolver | None = None
-        self._preview_player = None
-        self._preview_audio = None
         self._fallback_running = False
 
         layout = QVBoxLayout(self)
@@ -215,6 +207,9 @@ class MusicSearchPage(QWidget):
 
         self._update_buttons()
 
+        # 试听错误（解码失败/网络中断）同步到本页状态栏
+        app_context.music_player().errorOccurred.connect(self._on_preview_error)
+
     # ---------- 搜索 ----------
 
     def _start_search(self) -> None:
@@ -271,6 +266,13 @@ class MusicSearchPage(QWidget):
         ]
 
     def _preview_selected(self) -> None:
+        player = app_context.music_player()
+        # 已在试听：再次点击即停止
+        if player.is_preview:
+            player.stop_preview()
+            self._preview_button.setText("试听选中")
+            self._status.setText("已停止试听")
+            return
         remotes = action_remotes(self._table)
         if not remotes:
             self._toaster.info("请先勾选或选中一条结果")
@@ -281,21 +283,32 @@ class MusicSearchPage(QWidget):
         self._status.setText(f"解析试听地址：{remote.display()}…")
         self._preview_worker = _PreviewResolver(remote, self)
         self._preview_worker.finishedResults.connect(self._play_preview)
-        self._preview_worker.failed.connect(lambda msg: self._toaster.error(f"试听失败：{msg}"))
+        self._preview_worker.failed.connect(self._on_preview_failed)
         self._preview_worker.start()
 
+    def _on_preview_failed(self, message: str) -> None:
+        self._preview_button.setText("试听选中")
+        self._status.setText(f"试听失败：{message}")
+        self._toaster.error(f"试听失败：{message}")
+
+    def _on_preview_error(self, message: str) -> None:
+        """来自播放条的试听错误（解码失败等）同步到本页状态栏。"""
+        if self._preview_button.text() == "停止试听":
+            self._preview_button.setText("试听选中")
+        self._status.setText(message)
+
     def _play_preview(self, url: str, remote) -> None:  # noqa: ANN001
-        if not MULTIMEDIA_AVAILABLE or QMediaPlayer is None:
-            self._toaster.info("当前环境不支持内嵌试听，可直接下载后播放")
+        """试听统一走底部播放条（与本地播放共用进度/错误/音量）。"""
+        player = app_context.music_player()
+        track = player.play_url(
+            url, title=remote.title, artist=remote.artist,
+            album=remote.album, duration_ms=remote.duration_ms,
+        )
+        if track is None:
+            self._toaster.error("试听地址无效，可直接下载后再播放")
             return
-        if self._preview_player is None:
-            self._preview_player = QMediaPlayer(self)
-            self._preview_audio = QAudioOutput(self)
-            self._preview_audio.setVolume(0.8)
-            self._preview_player.setAudioOutput(self._preview_audio)
-        self._preview_player.setSource(QUrl(url))
-        self._preview_player.play()
-        self._status.setText(f"试听中：{remote.display()}")
+        self._preview_button.setText("停止试听")
+        self._status.setText(f"试听中（进度见底部播放条）：{remote.display()}")
 
     # ---------- 下载 ----------
 
@@ -466,10 +479,12 @@ class MusicSearchPage(QWidget):
 
     def shutdown(self) -> None:
         """板块销毁前停止后台线程与试听。"""
-        if self._preview_player is not None:
-            self._preview_player.stop()
+        player = app_context.music_player()
+        if player.is_preview:
+            player.stop_preview()
         for worker in (self._worker, self._download, self._preview_worker):
-            if worker is not None and worker.isRunning():
+            running = getattr(worker, "isRunning", None)
+            if worker is not None and callable(running) and running():
                 if isinstance(worker, DownloadWorker):
                     worker.cancel()
                 worker.wait(3000)
