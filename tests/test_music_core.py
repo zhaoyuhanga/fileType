@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 import pytest
+import requests
 
 from modu_workbench.core.music import (
     MusicLibrary,
@@ -282,26 +283,89 @@ def test_netease_search_and_download_url(monkeypatch: pytest.MonkeyPatch) -> Non
     class FakeResponse:
         status_code = 200
         url = "https://m7.music.126.net/real.mp3"
+        headers = {"Content-Type": "audio/mpeg"}
+
+        def json(self) -> dict:
+            return {"data": [{"url": "https://m7.music.126.net/real.mp3"}]}
 
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr(music_sources.requests, "get", lambda *a, **k: FakeResponse())
+        def __enter__(self):  # noqa: ANN204
+            return self
+
+        def __exit__(self, *args) -> None:  # noqa: ANN002
+            return None
+
+    monkeypatch.setattr(
+        music_sources, "_request_with_retry", lambda *a, **k: FakeResponse()
+    )
     resolved = NeteaseSource().download_url(tracks[0])
     assert resolved.endswith("real.mp3")
 
 
+def test_netease_download_url_falls_back_to_outer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """播放地址接口拿不到 URL 时，回退到 outer 直链跳转结果。"""
+    calls: list[str] = []
+
+    class NoUrl:
+        headers = {"Content-Type": "application/json"}
+        url = "https://music.163.com/api/song/enhance/player/url"
+
+        def json(self) -> dict:
+            return {"data": [{"url": None}]}
+
+        def __enter__(self):  # noqa: ANN204
+            return self
+
+        def __exit__(self, *args) -> None:  # noqa: ANN002
+            return None
+
+    class Redirected:
+        headers = {"Content-Type": "audio/mpeg"}
+        url = "http://m701.music.126.net/2026/xyz/jdymusic/obj/w5.mp3"
+
+        def json(self) -> dict:
+            return {}
+
+        def __enter__(self):  # noqa: ANN204
+            return self
+
+        def __exit__(self, *args) -> None:  # noqa: ANN002
+            return None
+
+    def fake(method, url, **kwargs):  # noqa: ANN001
+        calls.append(method)
+        return NoUrl() if method == "POST" else Redirected()
+
+    monkeypatch.setattr(music_sources, "_request_with_retry", fake)
+    remote = RemoteTrack(source="netease", remote_id="11", title="x")
+    assert NeteaseSource().download_url(remote).endswith(".mp3")
+    assert calls == ["POST", "GET"]
+
+
 def test_netease_download_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Blocked:
-        status_code = 404
-        url = ""
+    def always_fail(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise SourceError("无法解析 music.163.com 的域名（DNS/网络问题）")
 
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(music_sources.requests, "get", lambda *a, **k: Blocked())
-    with pytest.raises(SourceError):
+    monkeypatch.setattr(music_sources, "_request_with_retry", always_fail)
+    with pytest.raises(SourceError) as exc:
         NeteaseSource().download_url(RemoteTrack(source="netease", remote_id="1", title="x"))
+    assert "DNS" in str(exc.value)
+
+
+def test_describe_network_error_is_actionable() -> None:
+    from modu_workbench.core.music.sources import describe_network_error
+
+    dns = describe_network_error(
+        Exception("HTTPSConnectionPool(host='music.163.com', port=443): Max retries exceeded "
+                  "(Caused by NameResolutionError(getaddrinfo failed))"),
+        "music.163.com",
+    )
+    assert "无法解析" in dns and "music.163.com" in dns and "其他音源" in dns
+
+    timeout = describe_network_error(Exception("HTTPSConnectionPool: Read timed out"), "x.com")
+    assert "超时" in timeout
 
 
 def test_direct_url_source() -> None:
@@ -402,6 +466,37 @@ def test_download_track_rejects_html_error_page(monkeypatch: pytest.MonkeyPatch,
         download_track(remote, tmp_path, save_cover=False, save_lyrics=False)
     assert "不是有效音频" in str(exc.value)
     assert not list(tmp_path.glob("*.mp3"))
+
+
+def test_download_track_retries_transient_network_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """网络抖动（DNS/连接重置）应自动重试，而不是直接失败。"""
+    audio = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"a" * 20000
+    attempts = {"count": 0}
+
+    def flaky_get(*args, **kwargs):  # noqa: ANN002, ANN003
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise requests.ConnectionError("getaddrinfo failed")
+        return _FakeStream([audio], url="https://cdn/song.mp3")
+
+    monkeypatch.setattr("modu_workbench.core.music.downloader.requests.get", flaky_get)
+    monkeypatch.setattr("modu_workbench.core.music.downloader.time.sleep", lambda _s: None)
+    remote = RemoteTrack(source="url", remote_id="https://cdn/song.mp3", title="重试曲", url="https://cdn/song.mp3")
+    path = download_track(remote, tmp_path, save_cover=False, save_lyrics=False)
+    assert attempts["count"] == 3
+    assert path.read_bytes() == audio
+
+
+def test_download_track_reports_dns_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def always_fail(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise requests.ConnectionError("Max retries exceeded with NameResolutionError(getaddrinfo failed)")
+
+    monkeypatch.setattr("modu_workbench.core.music.downloader.requests.get", always_fail)
+    monkeypatch.setattr("modu_workbench.core.music.downloader.time.sleep", lambda _s: None)
+    remote = RemoteTrack(source="url", remote_id="https://music.163.com/song.mp3", title="x", url="https://music.163.com/song.mp3")
+    with pytest.raises(SourceError) as exc:
+        download_track(remote, tmp_path, save_cover=False, save_lyrics=False)
+    assert "无法解析" in str(exc.value)
 
 
 def test_download_track_cancel_and_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

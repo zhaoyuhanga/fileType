@@ -6,16 +6,25 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
+from urllib.parse import urlsplit
 
 import requests
 
 from .models import RemoteTrack, safe_filename
-from .sources import MusicSource, SourceError, get_source, clean_lyrics
+from .sources import MusicSource, SourceError, clean_lyrics, describe_network_error, get_source
 
 ProgressFn = Callable[[int, int, str], None]  # written, total, message
+
+
+def host_of(url: str) -> str:
+    try:
+        return urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
 
 _AUDIO_MIME_EXT = {
     "audio/mpeg": ".mp3",
@@ -110,11 +119,25 @@ def download_track(
         raise SourceError("该曲目没有可用的下载地址")
 
     dest = Path(dest_dir)
-    try:
-        response = requests.get(url, headers=_default_headers(url), stream=True, timeout=timeout)
-        response.raise_for_status()
-    except requests.RequestException as error:
-        raise SourceError(f"下载失败：{error}") from error
+    response = None
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        if cancel is not None and cancel.is_set():
+            raise RuntimeError("下载已取消")
+        try:
+            response = requests.get(url, headers=_default_headers(url), stream=True, timeout=timeout)
+            response.raise_for_status()
+            break
+        except requests.RequestException as error:
+            last_error = error
+            if response is not None:
+                response.close()
+            if attempt < 3:
+                if on_progress:
+                    on_progress(0, 0, f"网络抖动，重试 {attempt}/2：{track.display()}")
+                time.sleep(0.8 * attempt)
+    if response is None:
+        raise SourceError(describe_network_error(last_error or Exception("未知网络错误"), host_of(url)))
 
     with response:
         extension = guess_extension(response.url or url, dict(response.headers))

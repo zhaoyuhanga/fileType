@@ -335,6 +335,39 @@ def test_search_single_row_download_and_menu(qapp: QApplication, storage: MusicS
     page.shutdown()
 
 
+def test_search_fallback_to_itunes_on_network_failure(qapp: QApplication, storage: MusicStorage,
+                                                      library: MusicLibrary,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """网易云因 DNS/网络失败时，应能自动改用 iTunes 试听源（同名才兜底）。"""
+    import types
+
+    from modu_workbench.core.music import DownloadResult
+
+    page = MusicSearchPage(library, storage, toaster())
+    fake_source = types.SimpleNamespace(
+        search=lambda kw, kind="song", limit=3: [
+            RemoteTrack(source="itunes", remote_id="9", title="屋顶 (Live)", artist="周杰伦", url="http://x/9.m4a")
+        ]
+    )
+    monkeypatch.setattr("modu_workbench.boards.music_search.get_source", lambda _key: fake_source)
+
+    fallback = page._fallback_remotes([
+        DownloadResult(track=RemoteTrack(source="netease", remote_id="1", title="屋顶", artist="周杰伦"),
+                       ok=False, message="无法解析 music.163.com 的域名（DNS/网络问题）"),
+        DownloadResult(track=RemoteTrack(source="netease", remote_id="2", title="完全不同的歌", artist="某人"),
+                       ok=False, message="网络错误"),
+    ])
+    assert len(fallback) == 1
+    assert fallback[0].source == "itunes"
+    assert fallback[0].category.startswith("iTunes")
+    assert fallback[0].extra["fallback_from"] == "netease"
+
+    # iTunes 结果自己失败时不再兜底（避免死循环）
+    assert page._fallback_remotes([
+        DownloadResult(track=RemoteTrack(source="itunes", remote_id="3", title="屋顶"), ok=False),
+    ]) == []
+
+
 def test_search_page_empty_selection_warns(qapp: QApplication, storage: MusicStorage,
                                            library: MusicLibrary) -> None:
     page = MusicSearchPage(library, storage, toaster())

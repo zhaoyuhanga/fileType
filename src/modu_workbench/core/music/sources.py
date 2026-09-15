@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Iterable, List
+from urllib.parse import urlsplit
 
 import requests
 
@@ -77,16 +79,55 @@ class MusicSource:
         return ""
 
 
+def describe_network_error(error: Exception, host: str = "") -> str:
+    """把网络异常翻译成用户看得懂的说明（DNS/连接/超时/被拦截）。"""
+    text = str(error)
+    lowered = text.lower()
+    name = host or "目标站点"
+    if "getaddrinfo" in lowered or "name or service not known" in lowered or "nodename" in lowered:
+        return (
+            f"无法解析 {name} 的域名（DNS/网络问题）。"
+            "请检查网络或 DNS，或改用其他音源（iTunes / Jamendo / 直链）。"
+        )
+    if "timed out" in lowered or "timeout" in lowered:
+        return f"连接 {name} 超时，请稍后重试或改用其他音源。"
+    if "connection" in lowered or "max retries" in lowered:
+        return f"无法连接 {name}（连接被重置/拒绝），请检查网络或改用其他音源。"
+    return f"{name} 请求失败：{text[:200]}"
+
+
+def _request_with_retry(method: str, url: str, *, attempts: int = 3, backoff: float = 0.8, **kwargs):
+    """带退避重试的 HTTP 请求：DNS/连接抖动是常见故障，重试能显著提高成功率。"""
+    last_error: Exception | None = None
+    response = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            response = requests.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as error:
+            last_error = error
+            if attempt < attempts:
+                time.sleep(backoff * attempt)
+    host = ""
+    try:
+        host = urlsplit(url).hostname or ""
+    except Exception:  # noqa: BLE001
+        host = ""
+    raise SourceError(describe_network_error(last_error or Exception("未知网络错误"), host))
+    return response
+
+
 def _request_json(url: str, *, params: dict | None = None, headers: dict | None = None,
                    timeout: float = 12.0, data: dict | None = None) -> dict:
     try:
-        response = requests.post(url, data=data, params=params, headers=headers or UA_HEADERS,
-                                 timeout=timeout) if data else requests.get(
-            url, params=params, headers=headers or UA_HEADERS, timeout=timeout)
-        response.raise_for_status()
+        response = _request_with_retry(
+            "POST" if data else "GET", url, params=params, data=data,
+            headers=headers or UA_HEADERS, timeout=timeout,
+        )
         return response.json()
-    except requests.RequestException as error:
-        raise SourceError(f"网络请求失败：{error}") from error
+    except SourceError:
+        raise
     except ValueError as error:
         raise SourceError("接口返回内容不是有效 JSON") from error
 
@@ -208,16 +249,60 @@ class NeteaseSource(MusicSource):
         return tracks
 
     def download_url(self, track: RemoteTrack) -> str:
-        url = track.url or f"{self.BASE}/song/media/outer/url?id={track.remote_id}.mp3"
-        # outer 链接会 302 到真实音频；校验是否被平台降级为 404/试听限制
-        try:
-            response = requests.get(url, headers=NETEASE_HEADERS, timeout=15, stream=True, allow_redirects=True)
-            if response.status_code >= 400:
-                raise SourceError("该曲目暂不可下载（可能为 VIP 或已下架）")
-            response.close()
-            return response.url or url
-        except requests.RequestException as error:
-            raise SourceError(f"解析下载地址失败：{error}") from error
+        """按多个候选接口解析真实音频地址（网络抖动时自动重试，逐个候选回退）。"""
+        song_id = track.remote_id
+        candidates: list[tuple[str, str, dict]] = []
+        # 1) 播放地址接口：直接给出 CDN 地址（最稳，不再依赖 302 跳转）
+        if song_id:
+            candidates.append((
+                "POST", f"{self.BASE}/api/song/enhance/player/url",
+                {"data": {"ids": f"[{song_id}]", "br": "320000", "id": song_id}},
+            ))
+        # 2) outer 直链（https / http 各试一次）
+        outer = f"{self.BASE}/song/media/outer/url?id={song_id or track.remote_id}.mp3"
+        candidates.append(("GET", outer, {}))
+        candidates.append(("GET", outer.replace("https://", "http://", 1), {}))
+
+        network_errors: list[str] = []
+        for method, url, extra in candidates:
+            try:
+                response = _request_with_retry(
+                    method, url, headers=NETEASE_HEADERS, timeout=15,
+                    stream=True, allow_redirects=True, **extra,
+                )
+            except SourceError as error:
+                network_errors.append(str(error))
+                continue
+            with response:
+                resolved = self._resolved_from(response, url, method)
+                if resolved:
+                    return resolved
+        if network_errors:
+            raise SourceError(network_errors[0])
+        raise SourceError("该曲目暂不可下载（可能为 VIP、需付费或已下架）")
+
+    def _resolved_from(self, response, fallback: str, method: str) -> str:
+        """从响应里取出可用音频地址：JSON 接口取 data[0].url，直链取跳转后的 URL。"""
+        if method == "POST":
+            try:
+                payload = response.json()
+            except ValueError:
+                return ""
+            items = payload.get("data") or []
+            if isinstance(items, dict):
+                items = [items]
+            for item in items:
+                if isinstance(item, dict) and item.get("url"):
+                    return str(item["url"])
+            return ""
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if "audio" in content_type or response.url != fallback:
+            return response.url or fallback
+        # outer 接口对不可用曲目会返回 200 + 空内容
+        length = int(response.headers.get("Content-Length") or 0)
+        if length and length < 1024:
+            return ""
+        return response.url or fallback
 
     def lyrics(self, track: RemoteTrack) -> str:
         try:
