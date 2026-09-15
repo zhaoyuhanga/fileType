@@ -43,7 +43,7 @@ class BoardCard(QFrame):
         self.setObjectName("boardCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumSize(320, 176)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)

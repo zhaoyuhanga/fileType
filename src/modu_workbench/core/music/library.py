@@ -193,6 +193,17 @@ class MusicLibrary:
         self.storage.mark_played(track_id)
         self.storage.add_history(track_id, "play")
 
+    def update_duration(self, track_id: int, duration_ms: int) -> bool:
+        """播放时由播放器补全时长（无 ffprobe 也能拿到准确时长）。"""
+        if duration_ms <= 0:
+            return False
+        track = self.storage.get_track(track_id)
+        if track is None or track.duration_ms == duration_ms:
+            return False
+        track.duration_ms = int(duration_ms)
+        self.storage.upsert_track(track)
+        return True
+
     # ---------- 收藏 / 分类 ----------
 
     def toggle_favorite(self, track_id: int) -> bool:

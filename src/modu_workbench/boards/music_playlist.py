@@ -29,11 +29,17 @@ from modu_workbench.ui_kit.toast import Toaster
 from .music_widgets import (
     DownloadWorker,
     ask_text,
+    attach_context_menu,
     configure_table,
     fill_remote_row,
     fill_track_row,
+    music_download_dir_pref,
+    row_track_id,
     selected_track_ids,
 )
+
+# 曲目表列序（用于「收藏」列点击）
+FAVORITE_COLUMN = 5
 
 
 class MusicPlaylistPage(QWidget):
@@ -95,6 +101,8 @@ class MusicPlaylistPage(QWidget):
 
         self._table = configure_table(QTableWidget(), ["曲名", "歌手", "专辑", "时长", "格式", "收藏"])
         self._table.doubleClicked.connect(lambda _i: self._play(0, "order"))
+        self._table.itemClicked.connect(self._on_track_clicked)
+        attach_context_menu(self._table, self._row_menu)
         right_layout.addWidget(self._table, 2)
 
         self._pending_label = QLabel("待下载（0）")
@@ -299,7 +307,7 @@ class MusicPlaylistPage(QWidget):
         rows = {index.row() for index in self._pending.selectionModel().selectedRows()}
         if rows:
             remotes = [remotes[row] for row in sorted(rows) if row < len(remotes)]
-        dest = str(music_download_dir())
+        dest = str(music_download_dir_pref())
         self._download = DownloadWorker(remotes, dest, parent=self)
         self._download.progressed.connect(self._on_progress)
         self._download.finishedAll.connect(self._on_downloaded)
@@ -329,6 +337,48 @@ class MusicPlaylistPage(QWidget):
         self._download = None
 
     # ---------- 播放 ----------
+
+    def _on_track_clicked(self, item) -> None:  # noqa: ANN001
+        """点击「收藏」列：单独切换该曲目收藏（并同步歌单外的收藏状态）。"""
+        if item.column() != FAVORITE_COLUMN:
+            return
+        track_id = row_track_id(self._table, item.row())
+        if track_id is None:
+            return
+        favorited = self._library.toggle_favorite(track_id)
+        self._render()
+        self.libraryChanged.emit()
+        self._toaster.success("已收藏" if favorited else "已取消收藏")
+
+    def _row_menu(self, row: int) -> list[tuple[str, object]]:
+        track_id = row_track_id(self._table, row)
+        if track_id is None:
+            return []
+        return [
+            ("▶ 播放这首", lambda: self._play_row(track_id)),
+            ("☆ 切换收藏", lambda: self._toggle_favorite_row(track_id)),
+            ("从歌单移除", lambda: self._remove_rows([row])),
+        ]
+
+    def _play_row(self, track_id: int) -> None:
+        for index, track in enumerate(self._tracks):
+            if track.id == track_id:
+                self._play(index, self._player.mode)
+                return
+
+    def _toggle_favorite_row(self, track_id: int) -> None:
+        favorited = self._library.toggle_favorite(track_id)
+        self._render()
+        self.libraryChanged.emit()
+        self._toaster.success("已收藏" if favorited else "已取消收藏")
+
+    def _remove_rows(self, rows: list[int]) -> None:
+        if self._playlist_id is None or not rows:
+            return
+        ids = [track.id for index, track in enumerate(self._tracks) if index in rows]
+        self._storage.remove_from_playlist(self._playlist_id, ids)
+        self._render()
+        self.libraryChanged.emit()
 
     def _play(self, start_index: int, mode: str) -> None:
         if not self._tracks:

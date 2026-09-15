@@ -45,6 +45,7 @@ class MusicPlayerBar(QFrame):
         self._player = player
         self._current: Track | None = None
         self._dragging = False
+        self._duration_ms = 0
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
@@ -134,9 +135,11 @@ class MusicPlayerBar(QFrame):
         self._favorite.setText("★ 已收藏" if track.favorited else "☆ 收藏")
 
     def _on_position(self, position: int, duration: int) -> None:
+        if duration:
+            self._duration_ms = duration
         if not self._dragging:
-            self._position.setValue(int(position * 1000 / duration) if duration else 0)
-        self._time.setText(f"{format_duration(position)} / {format_duration(duration)}")
+            self._position.setValue(int(position * 1000 / self._duration_ms) if self._duration_ms else 0)
+        self._time.setText(f"{format_duration(position)} / {format_duration(self._duration_ms)}")
 
     def _on_state(self, state: str) -> None:
         self._play.setText("⏸" if state == "playing" else "▶")
@@ -147,6 +150,11 @@ class MusicPlayerBar(QFrame):
     def _on_error(self, message: str) -> None:
         self._meta.setText(f"⚠ {message}")
 
+    def show_error(self, message: str) -> None:
+        """由板块转发播放错误（含曲名，便于定位是哪个文件有问题）。"""
+        self._meta.setText(f"⚠ {message}")
+        self._title.setToolTip(message)
+
     # ---------- 控件 ----------
 
     def _on_slider_pressed(self) -> None:
@@ -154,14 +162,14 @@ class MusicPlayerBar(QFrame):
 
     def _on_slider_released(self) -> None:
         self._dragging = False
-        duration = self._player.current.duration_ms if self._player.current else 0
-        if duration:
-            self._player.seek(int(self._position.value() * duration / 1000))
+        if self._duration_ms:
+            self._player.seek(int(self._position.value() * self._duration_ms / 1000))
 
     def _on_slider_moved(self, value: int) -> None:
-        duration = self._player.current.duration_ms if self._player.current else 0
-        if duration:
-            self._time.setText(f"{format_duration(int(value * duration / 1000))} / {format_duration(duration)}")
+        if self._duration_ms:
+            self._time.setText(
+                f"{format_duration(int(value * self._duration_ms / 1000))} / {format_duration(self._duration_ms)}"
+            )
 
     def _cycle_mode(self) -> None:
         self._player.cycle_mode()
@@ -236,7 +244,8 @@ class MusicBoardPage(QWidget):
         self._playlist_page.libraryChanged.connect(self._refresh_all)
         self._history_page.playRequested.connect(self._play_tracks)
         self._player.trackChanged.connect(self._on_track_changed)
-        self._player.errorOccurred.connect(lambda message: self._toaster.error(message))
+        self._player.durationKnown.connect(self._on_duration_known)
+        self._player.errorOccurred.connect(self._on_player_error)
 
         self.show_page(SEARCH_KEY)
 
@@ -292,6 +301,16 @@ class MusicBoardPage(QWidget):
         except Exception:  # noqa: BLE001
             pass
         self._history_page.reload()
+        self._bar.refresh_favorite(track.favorited)
+
+    def _on_duration_known(self, track_id: int, duration_ms: int) -> None:
+        """播放器补全缺失时长后写回曲库（导入的本地文件也能显示正确时长）。"""
+        if self._library.update_duration(track_id, duration_ms):
+            self._library_page.reload()
+
+    def _on_player_error(self, message: str) -> None:
+        self._toaster.error(message)
+        self._bar.show_error(message)
 
     def _toggle_current_favorite(self) -> None:
         track = self._player.current

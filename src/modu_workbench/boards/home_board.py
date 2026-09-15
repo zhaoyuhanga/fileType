@@ -71,7 +71,13 @@ class HomePage(QWidget):
             card_header.addWidget(make_chip(spec.phase, ready=False))
             grid.addWidget(card, index // 2, index % 2)
 
-        grid.addWidget(make_ghost_card("已预留注册机制：后续板块（如 PDF 批注、素材管理）可直接加入注册表自动出现在此。"), (len(ACTIVE_BOARDS)) // 2, 0)
+        # 幽灵卡放在所有板块卡之后的下一个空格（此前固定第 0 列会与第三张卡重叠）
+        ghost_index = len(ACTIVE_BOARDS)
+        grid.addWidget(
+            make_ghost_card("已预留注册机制：后续板块（如 PDF 批注、素材管理）可直接加入注册表自动出现在此。"),
+            ghost_index // 2,
+            ghost_index % 2,
+        )
 
         layout.addStretch(1)
 

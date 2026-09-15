@@ -35,11 +35,13 @@ from .music_widgets import (
     DownloadWorker,
     PlaylistPicker,
     SearchWorker,
-    checked_remotes,
+    action_remotes,
+    attach_context_menu,
     configure_table,
     fill_remote_row,
     jamendo_client_id_pref,
     music_download_dir_pref,
+    row_remote,
     select_all,
 )
 
@@ -131,6 +133,7 @@ class MusicSearchPage(QWidget):
             QTableWidget(), ["曲名", "歌手", "专辑", "时长", "音源"]
         )
         self._table.doubleClicked.connect(lambda _index: self._preview_selected())
+        attach_context_menu(self._table, self._row_menu)
         layout.addWidget(self._table, 1)
 
         # ---- 操作栏 ----
@@ -142,10 +145,12 @@ class MusicSearchPage(QWidget):
         self._preview_button = QPushButton("试听选中")
         self._preview_button.clicked.connect(self._preview_selected)
         self._preview_button.setEnabled(bool(MULTIMEDIA_AVAILABLE))
-        self._download_button = QPushButton("批量下载")
+        self._download_button = QPushButton("下载（单条或批量）")
         self._download_button.setObjectName("primaryButton")
+        self._download_button.setToolTip("勾选多首=批量下载；只选中一行=下载该首")
         self._download_button.clicked.connect(self._start_download)
         self._playlist_button = QPushButton("加入歌单")
+        self._playlist_button.setToolTip("勾选或选中一行后加入歌单（稍后可整单下载）")
         self._playlist_button.clicked.connect(self._add_to_playlist)
         self._cancel_button = QPushButton("取消下载")
         self._cancel_button.setObjectName("dangerButton")
@@ -234,15 +239,24 @@ class MusicSearchPage(QWidget):
 
     # ---------- 试听 ----------
 
+    def _row_menu(self, row: int) -> list[tuple[str, object]]:
+        remote = row_remote(self._table, row)
+        if remote is None:
+            return []
+        return [
+            ("▶ 试听这首", lambda: self._preview(remote)),
+            ("⬇ 下载这首", lambda: self._start_download([remote])),
+            ("加入歌单…", lambda: self._add_to_playlist([remote])),
+        ]
+
     def _preview_selected(self) -> None:
-        remotes = checked_remotes(self._table)
-        if not remotes:
-            rows = {index.row() for index in self._table.selectionModel().selectedRows()}
-            remotes = [self._results[row] for row in sorted(rows) if 0 <= row < len(self._results)]
+        remotes = action_remotes(self._table)
         if not remotes:
             self._toaster.info("请先勾选或选中一条结果")
             return
-        remote = remotes[0]
+        self._preview(remotes[0])
+
+    def _preview(self, remote) -> None:  # noqa: ANN001
         self._status.setText(f"解析试听地址：{remote.display()}…")
         self._preview_worker = _PreviewResolver(remote, self)
         self._preview_worker.finishedResults.connect(self._play_preview)
@@ -264,10 +278,11 @@ class MusicSearchPage(QWidget):
 
     # ---------- 下载 ----------
 
-    def _start_download(self) -> None:
-        remotes = checked_remotes(self._table)
+    def _start_download(self, remotes: list | None = None) -> None:
+        if remotes is None:
+            remotes = action_remotes(self._table)
         if not remotes:
-            self._toaster.info("请先勾选要下载的曲目")
+            self._toaster.info("请先勾选（可多选）或选中要下载的曲目")
             return
         if not self._compliance.isChecked():
             self._toaster.error("请先确认合规声明")
@@ -324,10 +339,11 @@ class MusicSearchPage(QWidget):
 
     # ---------- 加入歌单 ----------
 
-    def _add_to_playlist(self) -> None:
-        remotes = checked_remotes(self._table)
+    def _add_to_playlist(self, remotes: list | None = None) -> None:
+        if remotes is None:
+            remotes = action_remotes(self._table)
         if not remotes:
-            self._toaster.info("请先勾选曲目")
+            self._toaster.info("请先勾选或选中曲目")
             return
         picker = PlaylistPicker(self._storage, self, "添加在线曲目到歌单")
         if picker.exec() != QDialog.DialogCode.Accepted:

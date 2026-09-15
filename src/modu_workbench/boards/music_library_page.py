@@ -31,12 +31,17 @@ from modu_workbench.ui_kit.toast import Toaster
 from .music_widgets import (
     ConvertWorker,
     PlaylistPicker,
+    action_ids,
     ask_text,
-    checked_track_ids,
+    attach_context_menu,
     configure_table,
     fill_track_row,
+    row_track_id,
     selected_track_ids,
 )
+
+# 曲目表列序（用于「收藏」列点击）
+FAVORITE_COLUMN = 6
 
 
 class MusicLibraryPage(QWidget):
@@ -97,6 +102,9 @@ class MusicLibraryPage(QWidget):
             QTableWidget(), ["曲名", "歌手", "专辑", "时长", "格式", "分类", "收藏", "播放次数"]
         )
         self._table.doubleClicked.connect(lambda _index: self.play_selected())
+        # 点击「收藏」列即可单独切换该曲目收藏（无需先选中再点按钮）
+        self._table.itemClicked.connect(self._on_item_clicked)
+        attach_context_menu(self._table, self._row_menu)
         layout.addWidget(self._table, 1)
 
         # ---- 操作栏 ----
@@ -226,11 +234,9 @@ class MusicLibraryPage(QWidget):
         self._status.setText(f"已导入 {len(tracks)} 首（共扫描 {len(files)} 个文件）")
 
     def _toggle_favorite(self) -> None:
-        ids = checked_track_ids(self._table) or selected_track_ids(self._table)
+        ids = action_ids(self._table)
         if not ids:
-            ids = [t.id for t in self._tracks]
-        if not ids:
-            self._toaster.info("曲库为空")
+            self._toaster.info("请先选择（或勾选）要收藏的曲目")
             return
         track = self._storage.get_track(ids[0])
         if track is None:
@@ -238,17 +244,72 @@ class MusicLibraryPage(QWidget):
         target = not track.favorited
         self._storage.set_favorite(ids, target)
         if not target:
-            fav_id = self._storage.favorite_playlist_id
-            self._storage.remove_from_playlist(fav_id, ids)
+            self._storage.remove_from_playlist(self._storage.favorite_playlist_id, ids)
         self.reload()
         self.libraryChanged.emit()
         self._toaster.success(("已收藏 " if target else "已取消收藏 ") + f"{len(ids)} 首")
 
-    def _set_category(self) -> None:
-        ids = selected_track_ids(self._table) or checked_track_ids(self._table)
-        if not ids:
-            self._toaster.info("请先选择曲目")
+    def _toggle_favorite_one(self, track_id: int, favorited: bool | None = None) -> None:
+        """切换单曲收藏（收藏列点击 / 右键菜单）。"""
+        track = self._storage.get_track(track_id)
+        if track is None:
             return
+        target = (not track.favorited) if favorited is None else favorited
+        self._storage.set_favorite([track_id], target)
+        if not target:
+            self._storage.remove_from_playlist(self._storage.favorite_playlist_id, [track_id])
+        self.reload()
+        self.libraryChanged.emit()
+        self._toaster.success(f"{'已收藏' if target else '已取消收藏'}：{track.display()}")
+
+    def _on_item_clicked(self, item) -> None:  # noqa: ANN001
+        if item.column() != FAVORITE_COLUMN:
+            return
+        track_id = row_track_id(self._table, item.row())
+        if track_id is not None:
+            self._toggle_favorite_one(track_id)
+
+    def _row_menu(self, row: int) -> list[tuple[str, object]]:
+        track_id = row_track_id(self._table, row)
+        if track_id is None:
+            return []
+        track = self._storage.get_track(track_id)
+        if track is None:
+            return []
+        return [
+            ("▶ 播放这首", lambda: self._play_one(track_id)),
+            ("★ 取消收藏" if track.favorited else "☆ 收藏这首",
+             lambda: self._toggle_favorite_one(track_id)),
+            ("设置分类…", lambda: self._set_category_for([track_id])),
+            ("加入歌单…", lambda: self._add_to_playlist_for([track_id])),
+            ("从库中移除", lambda: self._remove_tracks_for([track_id])),
+            ("打开文件位置", lambda: self._open_file_location(track.path)),
+        ]
+
+    def _play_one(self, track_id: int) -> None:
+        track = self._storage.get_track(track_id)
+        if track is None:
+            return
+        if not track.exists:
+            self._toaster.error(f"文件已丢失：{track.path}")
+            return
+        self.playRequested.emit([track], 0)
+
+    def _open_file_location(self, path: str) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        target = Path(path)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.parent if target.parent.exists() else Path.home())))
+
+    def _set_category(self) -> None:
+        ids = action_ids(self._table)
+        if not ids:
+            self._toaster.info("请先选择要设置分类的曲目")
+            return
+        self._set_category_for(ids)
+
+    def _set_category_for(self, ids: list[int]) -> None:
         categories = [name for name, _count in self._storage.list_categories()]
         current = categories[0] if categories else ""
         category = ask_text(self, "设置分类", "分类名称（如：流行 / 古典 / 通勤）：", current)
@@ -260,10 +321,13 @@ class MusicLibraryPage(QWidget):
         self._toaster.success(f"已为 {count} 首设置分类「{category}」")
 
     def _add_to_playlist(self) -> None:
-        ids = selected_track_ids(self._table) or checked_track_ids(self._table)
+        ids = action_ids(self._table)
         if not ids:
-            self._toaster.info("请先选择曲目")
+            self._toaster.info("请先选择要加入歌单的曲目")
             return
+        self._add_to_playlist_for(ids)
+
+    def _add_to_playlist_for(self, ids: list[int]) -> None:
         picker = PlaylistPicker(self._storage, self, "加入歌单")
         from PySide6.QtWidgets import QDialog
 
@@ -279,10 +343,13 @@ class MusicLibraryPage(QWidget):
         self._toaster.success(f"已加入「{name}」：新增 {added} 首")
 
     def _remove_tracks(self) -> None:
-        ids = selected_track_ids(self._table)
+        ids = action_ids(self._table)
         if not ids:
             self._toaster.info("请先选择要移除的曲目")
             return
+        self._remove_tracks_for(ids)
+
+    def _remove_tracks_for(self, ids: list[int]) -> None:
         self._storage.delete_tracks(ids)
         self.reload()
         self.libraryChanged.emit()

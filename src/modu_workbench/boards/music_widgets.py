@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -134,12 +135,42 @@ def fill_remote_row(table: QTableWidget, row: int, remote: RemoteTrack, columns:
 
 
 def checked_track_ids(table: QTableWidget) -> List[int]:
+    """只返回「勾选」的曲目 id（非勾选列一律忽略，避免误伤整表）。"""
+    ids: list[int] = []
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is None or item.data(TRACK_ID_ROLE) is None:
+            continue
+        if not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+            continue
+        if item.checkState() != Qt.CheckState.Checked:
+            continue
+        ids.append(int(item.data(TRACK_ID_ROLE)))
+    return ids
+
+
+def all_track_ids(table: QTableWidget) -> List[int]:
+    """当前表格内的全部曲目 id（用于“全部”类操作）。"""
     ids: list[int] = []
     for row in range(table.rowCount()):
         item = table.item(row, 0)
         if item is not None and item.data(TRACK_ID_ROLE) is not None:
             ids.append(int(item.data(TRACK_ID_ROLE)))
     return ids
+
+
+def row_track_id(table: QTableWidget, row: int) -> int | None:
+    item = table.item(row, 0)
+    if item is None or item.data(TRACK_ID_ROLE) is None:
+        return None
+    return int(item.data(TRACK_ID_ROLE))
+
+
+def row_remote(table: QTableWidget, row: int) -> RemoteTrack | None:
+    item = table.item(row, 0)
+    if item is None or item.data(REMOTE_ROLE) is None:
+        return None
+    return RemoteTrack.from_json(item.data(REMOTE_ROLE))
 
 
 def selected_track_ids(table: QTableWidget) -> List[int]:
@@ -149,6 +180,21 @@ def selected_track_ids(table: QTableWidget) -> List[int]:
         if item is not None and item.data(TRACK_ID_ROLE) is not None:
             ids.append(int(item.data(TRACK_ID_ROLE)))
     return ids
+
+
+def action_ids(table: QTableWidget) -> List[int]:
+    """操作目标：优先勾选项，其次选中行（单条操作与批量操作共用）。"""
+    return checked_track_ids(table) or selected_track_ids(table)
+
+
+def action_remotes(table: QTableWidget) -> List[RemoteTrack]:
+    """在线结果的操作目标：优先勾选项，其次选中行。"""
+    remotes = checked_remotes(table)
+    if remotes:
+        return remotes
+    model = table.selectionModel()
+    rows = sorted(index.row() for index in model.selectedRows()) if model else []
+    return [remote for remote in (row_remote(table, row) for row in rows) if remote is not None]
 
 
 def checked_remotes(table: QTableWidget) -> List[RemoteTrack]:
@@ -168,6 +214,26 @@ def select_all(table: QTableWidget, checked: bool = True) -> None:
         item = table.item(row, 0)
         if item is not None and item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
             item.setCheckState(state)
+
+
+def attach_context_menu(table: QTableWidget, provider) -> None:  # noqa: ANN001
+    """给表格挂右键菜单：provider(row) 返回 [(菜单项, 处理函数), ...]。"""
+    table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def show_menu(pos) -> None:  # noqa: ANN001
+        row = table.indexAt(pos).row()
+        if row < 0:
+            return
+        entries = provider(row) or []
+        if not entries:
+            return
+        menu = QMenu(table)
+        for label, handler in entries:
+            action = menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, fn=handler: fn())
+        menu.exec(table.viewport().mapToGlobal(pos))
+
+    table.customContextMenuRequested.connect(show_menu)
 
 
 # --------------------------------------------------------------------------- 对话框

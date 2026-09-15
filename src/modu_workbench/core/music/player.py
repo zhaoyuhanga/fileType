@@ -31,6 +31,7 @@ class MusicPlayer(QObject):
     stateChanged = Signal(str)          # playing / paused / stopped / error
     modeChanged = Signal(str)
     errorOccurred = Signal(str)
+    durationKnown = Signal(int, int)    # track_id, duration_ms（播放时补全缺失时长）
 
     def __init__(self, parent: QObject | None = None, silent: bool = False):
         super().__init__(parent)
@@ -41,6 +42,8 @@ class MusicPlayer(QObject):
         self._volume = 70
         self._state = "stopped"
         self._silent = silent
+        self._failed_ids: set[int] = set()   # 播放失败过的曲目（避免无限跳歌）
+        self._reported_duration: set[int] = set()
 
         self._player = None
         self._audio = None
@@ -93,6 +96,7 @@ class MusicPlayer(QObject):
     def set_queue(self, tracks: Iterable[Track], start_index: int = 0, autoplay: bool = True) -> None:
         self._queue = list(tracks)
         self._shuffle_history = []
+        self._failed_ids = set()
         self._index = start_index if 0 <= start_index < len(self._queue) else (0 if self._queue else -1)
         self.queueChanged.emit()
         if autoplay and self._queue:
@@ -134,7 +138,7 @@ class MusicPlayer(QObject):
         track = self._queue[index]
         if not track.exists:
             self.errorOccurred.emit(f"文件不存在：{track.path}")
-            self.next(autoplay=True)
+            self._skip_after_error(index)
             return
         self.trackChanged.emit(track)
         if self._player is not None:
@@ -142,6 +146,19 @@ class MusicPlayer(QObject):
             self._player.play()
         self._set_state("playing")
         self.positionChanged.emit(0, track.duration_ms)
+
+    def _skip_after_error(self, index: int) -> None:
+        """播放失败：同一首只跳一次，避免坏文件导致死循环。"""
+        track = self._queue[index] if 0 <= index < len(self._queue) else None
+        track_id = track.id if track is not None else -1
+        if track_id in self._failed_ids or len(self._queue) <= 1:
+            self._set_state("error")
+            return
+        self._failed_ids.add(track_id)
+        if self._index + 1 < len(self._queue) or self._mode == "loop-all":
+            self.next(autoplay=True)
+        else:
+            self._set_state("error")
 
     def toggle_pause(self) -> None:
         if self._player is None:
@@ -249,6 +266,12 @@ class MusicPlayer(QObject):
 
     def _on_duration(self, duration: int) -> None:
         self.positionChanged.emit(int(self._player.position()) if self._player else 0, int(duration))
+        track = self.current
+        if track is not None and duration > 0 and track.id not in self._reported_duration:
+            self._reported_duration.add(track.id)
+            if not track.duration_ms:
+                track.duration_ms = int(duration)
+            self.durationKnown.emit(track.id, int(duration))
 
     def _on_playback_state(self, state) -> None:  # noqa: ANN001
         if QMediaPlayer is None:
@@ -272,6 +295,11 @@ class MusicPlayer(QObject):
     def _on_error(self, error, message: str = "") -> None:  # noqa: ANN001
         if QMediaPlayer is not None and error == QMediaPlayer.Error.NoError:
             return
-        text = message or "播放失败（缺少解码器或文件损坏）"
-        self._set_state("error")
-        self.errorOccurred.emit(text)
+        track = self.current
+        name = track.display() if track is not None else "当前曲目"
+        detail = message or "缺少解码器或文件损坏"
+        self.errorOccurred.emit(f"{name} 无法播放：{detail}")
+        if track is not None:
+            self._skip_after_error(self._index)
+        else:
+            self._set_state("error")

@@ -113,6 +113,68 @@ def _run_dependency_check(output_path: str) -> int:
         except Exception:  # noqa: BLE001
             return False
 
+    def check_multimedia_playback() -> bool:
+        """真实解码自检：播放一段静音 WAV，确认播放位置前进（验证打包后的解码后端）。"""
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return True  # 无头环境不要求音频后端
+        import tempfile
+        import wave
+
+        try:
+            from PySide6.QtCore import QEventLoop, QTimer, QUrl
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        except Exception:  # noqa: BLE001
+            return False
+
+        wav_path = ""
+        try:
+            app = QApplication.instance() or QApplication([])
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+                wav_path = handle.name
+            # 3 秒静音 WAV（纯 Python 生成，无需 ffmpeg；静音避免自检发声）
+            with wave.open(wav_path, "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(22050)
+                wav.writeframes(b"\x00\x00" * 22050 * 3)
+
+            player = QMediaPlayer()
+            audio = QAudioOutput()
+            audio.setVolume(0.5)
+            player.setAudioOutput(audio)
+            state = {"position": 0, "error": "", "ended": False}
+            loop = QEventLoop()
+
+            def on_position(value: int) -> None:
+                state["position"] = max(state["position"], int(value))
+                if state["position"] > 0:
+                    loop.quit()
+
+            def on_status(status) -> None:  # noqa: ANN001
+                if QMediaPlayer is not None and status == QMediaPlayer.MediaStatus.EndOfMedia:
+                    state["ended"] = True
+                    loop.quit()
+
+            player.positionChanged.connect(on_position)
+            player.mediaStatusChanged.connect(on_status)
+            player.errorOccurred.connect(lambda error, message="": state.update(error=message or str(error)))
+            player.setSource(QUrl.fromLocalFile(wav_path))
+            player.play()
+
+            QTimer.singleShot(6000, loop.quit)
+            loop.exec()
+            player.stop()
+            return bool((state["position"] > 0 or state["ended"]) and not state["error"])
+        except Exception:  # noqa: BLE001
+            return False
+        finally:
+            if wav_path:
+                try:
+                    os.unlink(wav_path)
+                except OSError:
+                    pass
+
     def check_music_core() -> bool:
         """音乐库存储可建表并完成一轮增删（验证 sqlite 表结构与打包模块完整）。"""
         import tempfile
@@ -142,6 +204,7 @@ def _run_dependency_check(output_path: str) -> int:
     record("webengine_render", check_webengine_render)
     record("webfront_present", check_webfront_present)
     record("multimedia", check_multimedia)
+    record("multimedia_playback", check_multimedia_playback)
     record("music_core", check_music_core)
 
     try:

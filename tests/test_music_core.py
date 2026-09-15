@@ -358,7 +358,8 @@ def test_guess_extension_and_unique_path(tmp_path: Path) -> None:
 
 
 def test_download_track_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    payload = [b"a" * 1024, b"b" * 512]
+    audio = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"a" * 20000
+    payload = [audio[:10000], audio[10000:]]
     monkeypatch.setattr(
         "modu_workbench.core.music.downloader.requests.get",
         lambda *a, **k: _FakeStream(payload, url="https://cdn/song.mp3"),
@@ -369,8 +370,38 @@ def test_download_track_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     path = download_track(remote, tmp_path, on_progress=lambda w, t, m: progress.append((w, t, m)),
                           save_cover=False, save_lyrics=False)
     assert path.name == "歌手 - 测试曲.mp3"
-    assert path.read_bytes() == b"a" * 1024 + b"b" * 512
-    assert progress[-1][0] == 1536
+    assert path.read_bytes() == audio
+    assert progress[-1][0] == len(audio)
+
+
+def test_looks_like_audio_rejects_fake_payloads(tmp_path: Path) -> None:
+    from modu_workbench.core.music.downloader import looks_like_audio
+
+    real = tmp_path / "real.mp3"
+    real.write_bytes(b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"a" * 20000)
+    assert looks_like_audio(real, "audio/mpeg")
+
+    tiny = tmp_path / "tiny.mp3"
+    tiny.write_bytes(b"ID3" + b"a" * 100)
+    assert not looks_like_audio(tiny, "audio/mpeg")
+
+    page = tmp_path / "page.mp3"
+    page.write_bytes(b"<!doctype html><html>VIP only</html>" + b" " * 20000)
+    assert not looks_like_audio(page, "text/html")
+
+
+def test_download_track_rejects_html_error_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """平台返回错误页时不能当成“下载完成”。"""
+    page = b"<html><body>VIP only</body></html>" + b" " * 20000
+    monkeypatch.setattr(
+        "modu_workbench.core.music.downloader.requests.get",
+        lambda *a, **k: _FakeStream([page], url="https://cdn/song.mp3", content_type="text/html"),
+    )
+    remote = RemoteTrack(source="url", remote_id="https://cdn/song.mp3", title="t", url="https://cdn/song.mp3")
+    with pytest.raises(SourceError) as exc:
+        download_track(remote, tmp_path, save_cover=False, save_lyrics=False)
+    assert "不是有效音频" in str(exc.value)
+    assert not list(tmp_path.glob("*.mp3"))
 
 
 def test_download_track_cancel_and_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -458,3 +489,41 @@ def test_player_play_track_and_favorite_state(tmp_path: Path) -> None:
     assert player.current_index == 1
     player.toggle_pause()
     assert player.state in {"paused", "playing"}
+
+
+def test_player_error_skips_bad_track(tmp_path: Path) -> None:
+    """坏文件必须报出曲名并自动跳到下一首，单曲队列才进入 error 状态。"""
+    player = MusicPlayer(silent=True)
+    errors: list[str] = []
+    player.errorOccurred.connect(errors.append)
+    bad = Track(id=1, path=str(make_audio(tmp_path / "bad.mp3")), title="坏文件", format="mp3")
+    good = Track(id=2, path=str(make_audio(tmp_path / "good.mp3")), title="好文件", format="mp3")
+    player.set_queue([bad, good], 0, autoplay=True)
+
+    player._on_error(None, "boom")   # noqa: SLF001  模拟解码失败
+    assert errors and "坏文件" in errors[0] and "无法播放" in errors[0]
+    assert player.current is not None and player.current.id == 2
+
+    single = MusicPlayer(silent=True)
+    single.set_queue([bad], 0, autoplay=True)
+    single._on_error(None, "boom")   # noqa: SLF001
+    assert single.state == "error"
+
+
+def test_player_and_library_duration_fill(tmp_path: Path, library: MusicLibrary) -> None:
+    """播放时补全时长：播放器上报 → 曲库写回（无 ffprobe 也有正确时长）。"""
+    source = make_audio(tmp_path / "song.mp3")
+    track = library.import_paths([str(source)])[0]
+    track.duration_ms = 0
+    library.storage.upsert_track(track)
+    assert library.storage.get_track(track.id).duration_ms == 0
+
+    player = MusicPlayer(silent=True)
+    events: list[tuple[int, int]] = []
+    player.durationKnown.connect(lambda track_id, ms: events.append((track_id, ms)))
+    player.set_queue([library.storage.get_track(track.id)], 0, autoplay=True)
+    player._on_duration(187_000)   # noqa: SLF001
+
+    assert events == [(track.id, 187_000)]
+    assert library.update_duration(events[0][0], events[0][1]) is True
+    assert library.storage.get_track(track.id).duration_ms == 187_000

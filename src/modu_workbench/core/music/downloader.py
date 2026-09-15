@@ -30,6 +30,31 @@ _AUDIO_MIME_EXT = {
     "audio/x-ms-wma": ".wma",
 }
 
+# 音频文件头（用于识别“下载到的其实是网页/错误页”这类伪成功）
+_AUDIO_MAGIC = (
+    b"ID3", b"fLaC", b"OggS", b"RIFF", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2",
+    b"\xff\xfa", b"\x00\x00\x00", b"ftyp", b"wav",
+)
+_MIN_AUDIO_BYTES = 16 * 1024
+
+
+def looks_like_audio(path: str | Path, content_type: str = "") -> bool:
+    """判断下载结果是否真的是音频（防止把错误页/占位文件当成歌曲入库）。"""
+    if content_type and content_type.startswith("text/") or "html" in content_type:
+        return False
+    file_path = Path(path)
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        return False
+    if size < _MIN_AUDIO_BYTES:
+        return False
+    with open(file_path, "rb") as handle:
+        head = handle.read(16)
+    if head[4:8] == b"ftyp" or head[:4] in (b"fLaC", b"OggS", b"RIFF", b"wav "):
+        return True
+    return any(head.startswith(magic) for magic in _AUDIO_MAGIC)
+
 
 @dataclass
 class DownloadResult:
@@ -93,6 +118,7 @@ def download_track(
 
     with response:
         extension = guess_extension(response.url or url, dict(response.headers))
+        content_type = str(response.headers.get("Content-Type", "")).split(";")[0].strip().lower()
         base_name = safe_filename(track.display() or track.title or "track")
         target = unique_path(dest, f"{base_name}{extension}")
         total = int(response.headers.get("Content-Length") or 0)
@@ -116,6 +142,14 @@ def download_track(
         if written == 0:
             target.unlink(missing_ok=True)
             raise SourceError("下载内容为空（可能受版权限制或链接失效）")
+
+        # 校验确实是音频：避免把“版权受限/需要登录”的网页当成歌曲入库后无法播放
+        if not looks_like_audio(target, content_type):
+            target.unlink(missing_ok=True)
+            raise SourceError(
+                f"下载到的不是有效音频（{content_type or '未知类型'}，{written // 1024} KB）："
+                "该曲目可能受版权限制、需要 VIP 或链接已失效"
+            )
 
     if save_cover and track.cover_url:
         _try_save_cover(track.cover_url, target)

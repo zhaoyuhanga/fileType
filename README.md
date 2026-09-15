@@ -32,10 +32,14 @@ Electron 主进程代码仅作参考，不再构建维护。
   | iTunes 试听 | Apple 公开接口，30 秒试听片段 + 完整元数据 | 否 |
   | Jamendo | CC 授权完整曲目（自由音乐） | 是（免费 client_id，设置里填写或 `MODU_JAMENDO_CLIENT_ID`） |
   | 音频直链 | 粘贴 http(s) 音频直链直接下载 | 否 |
-- **批量流程**：选择「歌手 / 类型」检索 → 结果列表勾选 → 一键「批量下载」或先「加入歌单」（歌单内显示为「待下载」，之后可整单下载）。
+- **批量流程**：选择「歌手 / 类型」检索 → 结果列表勾选 → 一键「下载（单条或批量）」或先「加入歌单」（歌单内显示为「待下载」，之后可整单下载）。
+  只选中一行时即下载该首；右键结果行还有「试听这首 / 下载这首 / 加入歌单」。
+- **收藏与分类**：曲目表「收藏」列可直接点击切换单曲收藏，右键菜单还可播放单曲 / 设置分类 / 加入歌单 / 移除 / 打开文件位置。
 - **播放**：底部播放条常驻，切板块不中断；歌单页支持顺序 / 列表循环 / 单曲循环 / 随机。
+  播放失败的曲目会在播放条上显示具体原因并自动跳到下一首；导入的本地文件在首次播放后会自动补全时长。
 - **格式转换**：mp3 / m4a / wav / flac / aac / ogg / opus / wma 互转（依赖 ffmpeg，可用 `MODU_FFMPEG` 指定）。
 - **合规**：抓取与下载仅限个人学习、试听与自有内容备份，界面默认勾选合规声明；请遵守各平台条款与版权要求。
+  平台返回「版权受限/VIP」页面时会明确报错，不会把无效文件当成歌曲入库。
 
 ## 技术栈
 
@@ -80,6 +84,18 @@ pyinstaller workbench.spec --noconfirm --clean
 # 可选：生成 NSIS 安装包（需 makensis；脚本自动读取版本号）
 pwsh -ExecutionPolicy Bypass -File packaging\build_installer.ps1
 ```
+
+### 打包自检（含音频解码）
+
+```powershell
+$env:MODU_CHECK_DEPS = "$env:TEMP\modu-check.json"
+.\dist\ModuWorkbench\ModuWorkbench.exe   # 检查完自动退出，结果写入该 json
+Get-Content $env:MODU_CHECK_DEPS
+```
+
+共 11 项：markdown 渲染 / 高亮 / Pygments / WebEngine 导入与渲染 / webfront 产物 / QtMultimedia /
+**真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/ 音乐库建表读写。全部为 `true` 才算打包正常。
+播放自检需要真实桌面与音频设备；设置 `QT_QPA_PLATFORM=offscreen` 时会跳过解码检查。
 
 可选环境变量：`MODU_DATA_DIR`（数据目录，默认 `%APPDATA%\ModuWorkbench`）、`MODU_FFMPEG`、`MODU_SOFFICE`。
 首次启动会自动迁移 win-e-book 旧库（`%APPDATA%\WinEBook\library.db`）。

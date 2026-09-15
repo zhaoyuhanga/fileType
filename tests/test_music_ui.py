@@ -8,7 +8,11 @@ from PySide6.QtWidgets import QApplication, QDialog, QTableWidget, QWidget
 
 from modu_workbench.boards.music_board import MusicBoardPage, MusicPlayerBar
 from modu_workbench.boards.music_history import MusicHistoryPage
-from modu_workbench.boards.music_library_page import MusicConvertPage, MusicLibraryPage
+from modu_workbench.boards.music_library_page import (
+    FAVORITE_COLUMN,
+    MusicConvertPage,
+    MusicLibraryPage,
+)
 from modu_workbench.boards.music_playlist import MusicPlaylistPage
 from modu_workbench.boards.music_search import MusicSearchPage
 from modu_workbench.boards.music_widgets import checked_remotes, select_all
@@ -130,6 +134,47 @@ def test_library_page_lists_and_plays(qapp: QApplication, storage: MusicStorage,
     assert page._table.rowCount() == 1
 
 
+def test_library_favorite_is_per_track(qapp: QApplication, storage: MusicStorage, library: MusicLibrary,
+                                       player: MusicPlayer) -> None:
+    """回归：收藏必须只作用于选中/点击的那一首（此前会把整表都收藏）。"""
+    add_tracks(storage, library, 3)
+    page = MusicLibraryPage(library, storage, player, toaster())
+    page.reload()
+    rows = page.tracks()
+
+    page._table.selectRow(1)
+    page._toggle_favorite()
+    assert storage.get_track(rows[1].id).favorited is True
+    assert storage.get_track(rows[0].id).favorited is False
+    assert storage.get_track(rows[2].id).favorited is False
+
+    # 点击「收藏」列直接切换单曲
+    page.reload()
+    target = page.tracks()[2]
+    page._on_item_clicked(page._table.item(2, FAVORITE_COLUMN))
+    assert storage.get_track(target.id).favorited is True
+    assert sum(1 for t in storage.list_tracks() if t.favorited) == 2
+
+    # 再次点击取消
+    page.reload()
+    page._on_item_clicked(page._table.item(2, FAVORITE_COLUMN))
+    assert storage.get_track(target.id).favorited is False
+
+
+def test_library_context_menu_entries(qapp: QApplication, storage: MusicStorage, library: MusicLibrary,
+                                      player: MusicPlayer) -> None:
+    add_tracks(storage, library, 1)
+    page = MusicLibraryPage(library, storage, player, toaster())
+    page.reload()
+    entries = page._row_menu(0)
+    labels = [label for label, _ in entries]
+    assert any("播放" in label for label in labels)
+    assert any("收藏" in label for label in labels)
+    assert any("分类" in label for label in labels)
+    assert any("歌单" in label for label in labels)
+    assert page._row_menu(999) == []
+
+
 def test_library_page_shuffle_all(qapp: QApplication, storage: MusicStorage, library: MusicLibrary,
                                   player: MusicPlayer) -> None:
     add_tracks(storage, library, 2)
@@ -229,6 +274,63 @@ def test_search_page_results_and_playlist(qapp: QApplication, storage: MusicStor
     monkeypatch.setattr("modu_workbench.boards.music_search.PlaylistPicker", FakePicker)
     page._add_to_playlist()
     assert [r.title for r in storage.list_playlist_remotes(playlist_id)] == ["晴天", "稻香"]
+
+    page.shutdown()
+
+
+def test_search_single_row_download_and_menu(qapp: QApplication, storage: MusicStorage,
+                                             library: MusicLibrary, monkeypatch: pytest.MonkeyPatch) -> None:
+    """只选中一行（不勾选）也必须能下载该首。"""
+    from PySide6.QtCore import QObject, Signal
+
+    page = MusicSearchPage(library, storage, toaster())
+    remotes = [
+        RemoteTrack(source="itunes", remote_id="1", title="第一首", artist="A", url="http://x/1.m4a"),
+        RemoteTrack(source="itunes", remote_id="2", title="第二首", artist="B", url="http://x/2.m4a"),
+    ]
+    page._on_results(remotes, [])
+
+    captured: dict = {}
+
+    class FakeWorker(QObject):
+        progressed = Signal(int, int, str)
+        finishedAll = Signal(object)
+        failed = Signal(str)
+        finished = Signal()
+
+        def __init__(self, remotes_, dest, *args, **kwargs):  # noqa: ANN002, ANN003
+            super().__init__()
+            captured["remotes"] = list(remotes_)
+            captured["dest"] = dest
+
+        def cancel(self) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def isRunning(self) -> bool:  # noqa: N802
+            return False
+
+    monkeypatch.setattr("modu_workbench.boards.music_search.DownloadWorker", FakeWorker)
+
+    # 未勾选、只选中第二行 → 只下载第二首
+    page._table.selectRow(1)
+    page._start_download()
+    assert [r.title for r in captured["remotes"]] == ["第二首"]
+
+    # 右键菜单提供单条操作
+    labels = [label for label, _ in page._row_menu(0)]
+    assert any("下载这首" in label for label in labels)
+    assert any("试听这首" in label for label in labels)
+    assert any("歌单" in label for label in labels)
+
+    # 勾选后优先用勾选项（批量）
+    from modu_workbench.boards.music_widgets import select_all
+
+    select_all(page._table, True)
+    page._start_download()
+    assert [r.title for r in captured["remotes"]] == ["第一首", "第二首"]
 
     page.shutdown()
 

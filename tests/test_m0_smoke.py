@@ -26,9 +26,43 @@ def test_board_registry_contains_book_and_convert() -> None:
     keys = [spec.key for spec in ACTIVE_BOARDS]
     assert "book" in keys
     assert "convert" in keys
+    assert "music" in keys
     assert get_board("book") is not None
     assert get_board("convert") is not None
+    assert get_board("music") is not None
     assert get_board("nope") is None
+
+
+def test_home_cards_do_not_overlap(qapp: QApplication) -> None:
+    """首页每张卡片必须独占一个格子（此前幽灵卡与第三张板块卡重叠导致无法点击）。"""
+    from PySide6.QtWidgets import QGridLayout
+
+    page = HomePage()
+    page.resize(1200, 800)
+    page.show()
+    qapp.processEvents()
+
+    layout = page.findChild(QGridLayout)
+    assert layout is not None
+
+    occupied: dict[tuple[int, int], object] = {}
+    widgets = []
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        widget = item.widget() if item is not None else None
+        if widget is None:
+            continue
+        position = layout.getItemPosition(index)[:2]
+        assert position not in occupied, f"格子 {position} 有重叠控件"
+        occupied[position] = widget
+        widgets.append(widget)
+
+    # 板块卡 + 幽灵卡都在，且实际几何矩形互不相交（重叠会让卡片点不动）
+    assert len(widgets) >= len(ACTIVE_BOARDS) + 1
+    for i, first in enumerate(widgets):
+        for second in widgets[i + 1:]:
+            assert not first.geometry().intersects(second.geometry()), "卡片矩形重叠"
+    page.close()
 
 
 def test_theme_tokens_and_qss() -> None:
