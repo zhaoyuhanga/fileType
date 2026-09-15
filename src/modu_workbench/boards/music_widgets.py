@@ -193,8 +193,23 @@ def action_remotes(table: QTableWidget) -> List[RemoteTrack]:
     if remotes:
         return remotes
     model = table.selectionModel()
-    rows = sorted(index.row() for index in model.selectedRows()) if model else []
-    return [remote for remote in (row_remote(table, row) for row in rows) if remote is not None]
+    if model is None:
+        return []
+    remotes = []
+    for index in sorted(model.selectedIndexes(), key=lambda item: item.row()):
+        remote = row_remote(table, index.row())
+        if remote is not None and remote not in remotes:
+            remotes.append(remote)
+    return remotes
+
+
+def as_remote_batch(value) -> List[RemoteTrack] | None:  # noqa: ANN001
+    """把槽函数收到的参数归一化：按钮 clicked 会传 bool，需忽略。"""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if isinstance(item, RemoteTrack)]
+    return [value] if isinstance(value, RemoteTrack) else None
 
 
 def checked_remotes(table: QTableWidget) -> List[RemoteTrack]:

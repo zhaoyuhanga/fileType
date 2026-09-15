@@ -38,6 +38,7 @@ from .music_widgets import (
     PlaylistPicker,
     SearchWorker,
     action_remotes,
+    as_remote_batch,
     attach_context_menu,
     configure_table,
     fill_remote_row,
@@ -154,10 +155,10 @@ class MusicSearchPage(QWidget):
         self._download_button = QPushButton("下载（单条或批量）")
         self._download_button.setObjectName("primaryButton")
         self._download_button.setToolTip("勾选多首=批量下载；只选中一行=下载该首")
-        self._download_button.clicked.connect(self._start_download)
+        self._download_button.clicked.connect(lambda: self._start_download())
         self._playlist_button = QPushButton("加入歌单")
         self._playlist_button.setToolTip("勾选或选中一行后加入歌单（稍后可整单下载）")
-        self._playlist_button.clicked.connect(self._add_to_playlist)
+        self._playlist_button.clicked.connect(lambda: self._add_to_playlist())
         self._cancel_button = QPushButton("取消下载")
         self._cancel_button.setObjectName("dangerButton")
         self._cancel_button.clicked.connect(self._cancel_download)
@@ -313,6 +314,8 @@ class MusicSearchPage(QWidget):
     # ---------- 下载 ----------
 
     def _start_download(self, remotes: list | None = None) -> None:
+        # 注意：按钮 clicked 会传 bool，必须过滤掉（否则会被当成“没有目标”）
+        remotes = as_remote_batch(remotes) if remotes is not None else None
         if remotes is None:
             remotes = action_remotes(self._table)
         if not remotes:
@@ -425,6 +428,8 @@ class MusicSearchPage(QWidget):
     # ---------- 加入歌单 ----------
 
     def _add_to_playlist(self, remotes: list | None = None) -> None:
+        # 同上：忽略按钮 clicked 传入的 bool
+        remotes = as_remote_batch(remotes) if remotes is not None else None
         if remotes is None:
             remotes = action_remotes(self._table)
         if not remotes:

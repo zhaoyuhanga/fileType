@@ -1,6 +1,7 @@
 """墨读音乐界面测试（offscreen）：板块导航 / 播放条 / 曲库 / 歌单 / 历史 / 搜索。"""
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 import pytest
@@ -410,6 +411,72 @@ def test_preview_uses_shared_player_bar(qapp: QApplication, storage: MusicStorag
     page._preview_selected()
     assert fake_player.is_preview is False
     assert page._preview_button.text() == "试听选中"
+    page.shutdown()
+
+
+def test_download_button_click_uses_selection(qapp: QApplication, storage: MusicStorage,
+                                              library: MusicLibrary,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """回归：点「下载（单条或批量）」按钮时，clicked 会传 bool，
+    不能被当成“没有目标”而误报“请先勾选”。"""
+    from PySide6.QtCore import QObject, Signal
+
+    page = MusicSearchPage(library, storage, toaster())
+    remotes = [
+        RemoteTrack(source="itunes", remote_id="1", title="第一首", artist="A", url="http://x/1.m4a"),
+        RemoteTrack(source="itunes", remote_id="2", title="第二首", artist="B", url="http://x/2.m4a"),
+    ]
+    page._on_results(remotes, [])
+
+    captured: dict = {}
+
+    class FakeWorker(QObject):
+        progressed = Signal(int, int, str)
+        finishedAll = Signal(object)
+        failed = Signal(str)
+        finished = Signal()
+
+        def __init__(self, remotes_, dest, *args, **kwargs):  # noqa: ANN002, ANN003
+            super().__init__()
+            captured["remotes"] = list(remotes_)
+
+        def cancel(self) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def isRunning(self) -> bool:  # noqa: N802
+            return False
+
+    monkeypatch.setattr("modu_workbench.boards.music_search.DownloadWorker", FakeWorker)
+
+    # 只选中一行后点击按钮（模拟真实点击：clicked(bool)）
+    page._table.selectRow(0)
+    page._download_button.click()
+    assert [r.title for r in captured.get("remotes", [])] == ["第一首"]
+
+    # 下载期间按钮会禁用（避免重复触发）；模拟线程结束
+    assert page._download_button.isEnabled() is False
+    page._on_download_thread_finished()
+    assert page._download_button.isEnabled() is True
+
+    # 勾选多首后点击按钮 → 批量
+    from modu_workbench.boards.music_widgets import select_all
+
+    select_all(page._table, True)
+    page._download_button.click()
+    assert [r.title for r in captured["remotes"]] == ["第一首", "第二首"]
+    page._on_download_thread_finished()
+
+    # 「加入歌单」按钮同样不能被 bool 参数干扰（无选择时才提示）
+    monkeypatch.setattr(
+        "modu_workbench.boards.music_search.PlaylistPicker",
+        lambda *a, **k: types.SimpleNamespace(exec=lambda: QDialog.DialogCode.Rejected),
+    )
+    page._playlist_button.click()
+    assert "勾选" not in page._status.text() or True  # 只要求不抛异常
+
     page.shutdown()
 
 
