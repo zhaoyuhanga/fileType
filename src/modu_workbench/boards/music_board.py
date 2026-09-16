@@ -219,6 +219,11 @@ class MusicBoardPage(QWidget):
             button.clicked.connect(lambda _=False, k=key: self.show_page(k))
             self._nav_buttons[key] = button
             nav_row.addWidget(button)
+
+        settings_button = make_nav_button("⚙ 板块设置")
+        settings_button.setToolTip("打开「设置 → 乐库」：下载目录、音源启用、Jamendo 凭据")
+        settings_button.clicked.connect(self._open_board_settings)
+        nav_row.addWidget(settings_button)
         nav_row.addStretch(1)
         layout.addWidget(nav)
 
@@ -279,6 +284,13 @@ class MusicBoardPage(QWidget):
             if index == self._stack.currentIndex():
                 self.show_page(page_key)
                 break
+
+    def _open_board_settings(self) -> None:
+        """打开统一设置对话框的「乐库」页（设置按板块区分）。"""
+        from modu_workbench.ui_kit.settings import SettingsDialog
+
+        SettingsDialog(self, initial="music").exec()
+        self._search.reload_sources()
 
     # ---------- 播放联动 ----------
 

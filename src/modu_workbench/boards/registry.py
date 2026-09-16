@@ -1,7 +1,7 @@
 """板块注册表：墨软·工作台当前可用板块。"""
 from __future__ import annotations
 
-from . import book_board, convert_board, music_board, video_board
+from . import book_board, convert_board, gallery_board, music_board, video_board
 from .base import BoardSpec
 
 BOOK_BOARD = BoardSpec(
@@ -47,8 +47,24 @@ VIDEO_BOARD = BoardSpec(
     page=video_board.VideoBoardPage,
 )
 
+GALLERY_BOARD = BoardSpec(
+    key="gallery",
+    title="墨软图库",
+    tagline="本地相册 · 分类收藏 · 美化与增强",
+    description=(
+        "读取本地图片并生成缩略图，网格/瀑布流/时间轴浏览；自动与手动分类、标签、收藏、"
+        "重复识别；批量导入与网址/剪贴板收集；裁剪滤镜调节文字马赛克等美化（可撤销），"
+        "以及本地增强（一键增强/超分/降噪/去模糊/抠图/消除）。"
+    ),
+    icon="🖼",
+    phase="可用",
+    page=gallery_board.GalleryBoardPage,
+)
+
 # 首页卡片与顶栏导航顺序
-ACTIVE_BOARDS: tuple[BoardSpec, ...] = (BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD)
+ACTIVE_BOARDS: tuple[BoardSpec, ...] = (
+    BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD, GALLERY_BOARD,
+)
 
 
 def get_board(key: str) -> BoardSpec | None:

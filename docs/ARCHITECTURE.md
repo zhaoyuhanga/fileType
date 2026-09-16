@@ -6,7 +6,7 @@
 
 - 产品名：**墨软·工作台**；形态：**全 Python 单应用**（PySide6/Qt6），onedir 分发 + NSIS 安装包；
 - 仓库：沿用 fileType 仓库演进（历史保留），旧 Electron/React 代码归档于 `archive/electron-formatflow/`；
-- 板块化：首页 + 可扩展板块入口，当前为「墨软书库」「墨软转换」「墨软乐库」「墨软影视」，未来可继续追加；
+- 板块化：首页 + 可扩展板块入口，当前为「墨软书库」「墨软转换」「墨软乐库」「墨软影视」「墨软图库」，未来可继续追加；
 - 后端主技术：**Python**（无 Node/Python 双运行时）；SQLite 用 Python 标准库 `sqlite3`；
 - **界面沿革（route A）**：转换板块与文档预览复用 main 分支 React 界面 —— Vite 产物由
   `packaging/build_webfront.*` 整理进 `src/modu_workbench/webfront/`，QtWebEngine 加载，
@@ -24,6 +24,9 @@
 - `src/modu_workbench/boards/music_*.py`：墨软乐库界面（搜索下载 / 我的音乐 / 格式转换 / 歌单收藏 / 播放历史 + 常驻播放条）。
 - `src/modu_workbench/core/video/`：墨软影视引擎（models/storage/hls/sources/downloader/library）。
 - `src/modu_workbench/boards/video_*.py`：墨软影视界面（搜索下载 / 详情选集 / 我的视频 / 分类收藏 / 播放历史 / 源设置 + 播放器窗口）。
+- `src/modu_workbench/core/image/`：墨软图库引擎（models/storage/hashing/exif/thumbs/edits/enhance/ai/library）。
+- `src/modu_workbench/boards/gallery_*.py`：墨软图库界面（图库浏览 + 大图查看 / 编辑美化 / AI 优化）。
+- `src/modu_workbench/ui_kit/settings/`：**分板块设置页**（通用/书库/转换/乐库/影视/图库），统一对话框左侧分页。
 - `src/modu_workbench/services/`：桥接与本地服务（web_bridge/web_prepare/media_server/media_player/file_scan）。
 - `src/modu_workbench/webfront/`：内嵌前端产物（构建生成，随包分发）。
 - `tests/`：pytest 单元与无头冒烟测试。
@@ -62,6 +65,35 @@
   无 ffmpeg 时退化为分片拼接为 `.ts`；直链走流式下载；两者都做容器嗅探（`looks_like_video`）。
 - **后台任务**：搜索 / 详情 / 解析 / 下载 / 转换均为 `QThread` 工作线程，支持取消与进度回报。
 
+## 墨软图库设计要点
+
+- **桌面端本地相册**：不引入手机相册权限模型，直接在文件系统上扫描与索引（`IMAGE_EXTENSIONS`）。
+- **性能三件套**（对应「1 万张图流畅滚动」）：
+  1. `thumbs.py` 按「路径+mtime+大小+目标尺寸」生成**磁盘缩略图缓存**，滚动只读几十 KB 小图；
+  2. 网格**懒加载**——只为视口上下各一屏的项目创建 QPixmap，其余保持占位；
+  3. 缩略图缓存带内存 LRU（只丢索引，磁盘缓存保留）。
+- **两级去重**：`sha256` 内容哈希（导入阶段直接跳过完全相同的文件）+
+  `dhash` 感知哈希（汉明距离聚类，识别原图与缩放/微调副本）。
+  注意 dhash 必须用 numpy 取像素 —— 旧版 `Image.getdata()` 在新 Pillow 上会返回空序列，
+  导致所有哈希都为 0（去重与相似识别静默失效）。
+- **非破坏性编辑**：`edits.py` 把操作记成 `EditStep` 步骤栈，随时重放/撤销/改参数；
+  预览在缩放后的图上渲染（`PREVIEW_MAX`），只有保存时才全尺寸渲染，避免大图卡顿。
+- **AI 优化的能力边界**：`enhance.py` 用 numpy + Pillow 实现本地算法（一键增强/超分/降噪/
+  去模糊/白平衡/去雾/人像柔化/背景移除/消除/老照片/风格化），**不依赖外部模型**；
+  `EnhanceSpec.fidelity` 明确区分「本地算法」与「近似效果」，界面上如实标注，
+  并提供 `compute_quality_metrics` 给出前后客观指标（清晰度/噪点/对比/亮度）。
+- **DeepSeek 只做文本**：`ai.py` 负责描述/标签/检索关键词/参数建议。
+  **它不能生成或编辑图片**，因此不参与像素级优化 —— 这一点在设置页与图库页都有明确说明，
+  避免做成"点了没反应"的按钮。默认关闭图片上传，关闭时只发送元数据。
+- **后台任务**：导入扫描 / 增强 / AI 分析 / 重复检测均为 `QThread`，支持取消与进度回报。
+
+## 设置分区
+
+设置页从"一个混合对话框"改为 `ui_kit/settings/` 下的**分板块页面**：
+每页实现 `SettingsPage` 的 `load()` / `save()` / `hint()`，统一对话框左侧分页装配；
+各板块顶栏的「⚙ 板块设置」用 `SettingsDialog(initial=<板块key>)` 直达本板块页。
+单页构造失败会用占位页显示原因，不影响其它板块。
+
 ## 行为对齐清单（fileType → Python）
 
 - 批量任务队列：实时进度 / 取消 / 状态本地化 / Toast 统一提示；
@@ -81,6 +113,7 @@
 - M5 内嵌 main 分支前端（QtWebEngine + QWebChannel 桥）/ mp4 流式预览 / NSIS 安装包 ✅
 - M6 墨软乐库（在线搜索下载 / 播放器 / 歌单收藏分类 / 播放历史 / 音频格式转换）✅
 - M7 墨软影视（多源搜索下载 / 多清晰度播放器 / 分类收藏 / 播放历史 / 视频格式转换）✅
+- M8 墨软图库（本地相册 / 分类标签收藏 / 导入去重 / 美化编辑 / 本地增强）+ 设置按板块分区 ✅
 
 ## 合规要点
 

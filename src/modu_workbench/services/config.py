@@ -71,6 +71,33 @@ def video_download_dir() -> Path:
     return path
 
 
+def gallery_db_path() -> str:
+    """墨软图库数据库路径。"""
+    return str(app_data_dir() / "gallery.db")
+
+
+def gallery_dir() -> Path:
+    """墨软图库默认存放目录（收集/编辑/AI 产出的图片）。"""
+    path = app_data_dir() / "gallery"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def gallery_cache_dir() -> Path:
+    """墨软图库缩略图缓存目录（可安全清理，会按需重建）。"""
+    path = app_data_dir() / "gallery" / "cache"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def gallery_import_dir() -> Path:
+    """墨软图库默认导入目录（用户可见的图片文件夹）。"""
+    override = os.environ.get("MODU_GALLERY_DIR")
+    path = Path(override) if override else Path.home() / "Pictures" / "墨软图库"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def legacy_db_path() -> Path | None:
     """win-e-book 旧库位置（%APPDATA%\\WinEBook\\library.db）。"""
     if not os.environ.get("APPDATA"):

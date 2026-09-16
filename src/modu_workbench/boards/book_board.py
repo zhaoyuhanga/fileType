@@ -45,6 +45,11 @@ class BookBoardPage(QWidget):
             button.clicked.connect(lambda _=False, k=key: self._show_mode(k))
             self._mode_buttons[key] = button
             mode_row.addWidget(button)
+
+        settings_button = make_nav_button("⚙ 板块设置")
+        settings_button.setToolTip("打开「设置 → 书库」：合规开关、字号、行距、进度记忆")
+        settings_button.clicked.connect(self._open_board_settings)
+        mode_row.addWidget(settings_button)
         mode_row.addStretch(1)
         layout.addWidget(self._mode_bar)
 
@@ -65,6 +70,13 @@ class BookBoardPage(QWidget):
             set_nav_active(button, mode_key == key)
         if key == SHELF_KEY:
             self._shelf.reload()
+
+    def _open_board_settings(self) -> None:
+        """打开统一设置对话框的「书库」页（设置按板块区分）。"""
+        from modu_workbench.ui_kit.settings import SettingsDialog
+
+        SettingsDialog(self, initial="book").exec()
+        self._show_mode(SHELF_KEY)
 
     # ---------- 阅读 ----------
 

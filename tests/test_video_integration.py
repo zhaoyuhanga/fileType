@@ -101,8 +101,9 @@ def test_video_registry_settings_persist_through_app_context() -> None:
 
 
 def test_new_board_is_listed_on_home_page() -> None:
-    """首页卡片来自 ACTIVE_BOARDS，因此第四板块会自动出现。"""
+    """首页卡片来自 ACTIVE_BOARDS，因此新板块会自动出现。"""
     from modu_workbench.boards.registry import ACTIVE_BOARDS
 
     titles = [board.title for board in ACTIVE_BOARDS]
-    assert titles == ["墨软书库", "墨软转换", "墨软乐库", "墨软影视"]
+    assert titles[:4] == ["墨软书库", "墨软转换", "墨软乐库", "墨软影视"]
+    assert "墨软图库" in titles

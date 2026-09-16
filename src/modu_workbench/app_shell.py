@@ -82,16 +82,25 @@ class AppShell(QMainWindow):
             layout.addWidget(button)
 
         settings_btn = make_nav_button("⚙ 设置")
-        settings_btn.clicked.connect(self._open_settings)
+        settings_btn.clicked.connect(lambda: self._open_settings())
         layout.addWidget(settings_btn)
 
         return bar
 
-    def _open_settings(self) -> None:
-        from .ui_kit.settings_dialog import SettingsDialog
+    def _open_settings(self, board_key: str = "") -> None:
+        """打开设置对话框；传入板块 key 时直接定位到该板块那一页。
 
-        dialog = SettingsDialog(self)
+        各板块顶栏的「⚙ 设置」会带上自己的 key，实现「设置区分是哪个板块的」。
+        """
+        from .ui_kit.settings import SettingsDialog
+
+        dialog = SettingsDialog(self, initial=board_key or "general")
         dialog.exec()
+
+    def open_settings_for_current_board(self) -> None:
+        """供板块调用：打开当前板块对应的设置页。"""
+        key = self.current_key if self.current_key != HOME_KEY else ""
+        self._open_settings(key)
 
     def go_page(self, key: str) -> None:
         index = self._pages.get(key)

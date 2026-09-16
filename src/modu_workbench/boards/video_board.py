@@ -124,6 +124,11 @@ class VideoBoardPage(QWidget):
         sources_button = make_nav_button("🧩 源设置")
         sources_button.clicked.connect(self._open_sources)
         nav_row.addWidget(sources_button)
+
+        settings_button = make_nav_button("⚙ 板块设置")
+        settings_button.setToolTip("打开「设置 → 影视」：下载目录、自动换源、数据源启用")
+        settings_button.clicked.connect(self._open_board_settings)
+        nav_row.addWidget(settings_button)
         nav_row.addStretch(1)
         self._source_hint = QLabel("")
         self._source_hint.setObjectName("readerStatus")
@@ -211,6 +216,14 @@ class VideoBoardPage(QWidget):
     def _open_sources(self) -> None:
         dialog = VideoSourceDialog(self)
         dialog.exec()
+        self._update_source_hint()
+        self._search.reload_sources()
+
+    def _open_board_settings(self) -> None:
+        """打开统一设置对话框的「影视」页（设置按板块区分）。"""
+        from modu_workbench.ui_kit.settings import SettingsDialog
+
+        SettingsDialog(self, initial="video").exec()
         self._update_source_hint()
         self._search.reload_sources()
 

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from modu_workbench.core.convert import engine as convert_engine
 from modu_workbench.core.convert.formats import TARGET_EXTENSION, format_from_extension, format_label
 from modu_workbench.core.convert.registry import ConverterAction, common_actions, get_action
+from modu_workbench.ui_kit.settings import app_settings
 from modu_workbench.ui_kit.toast import Toaster
 
 VIEWABLE_DOC_EXTENSIONS = {".txt", ".md", ".json", ".mp4"}
@@ -96,6 +97,11 @@ class ConvertBoardPage(QWidget):
         toolbar.addWidget(QLabel("输出："))
         toolbar.addWidget(self._out_input, 1)
         toolbar.addWidget(browse_out)
+
+        board_settings = QPushButton("⚙ 板块设置")
+        board_settings.setToolTip("打开「设置 → 转换」：默认输出目录、输出防覆盖、外部工具状态")
+        board_settings.clicked.connect(self._open_board_settings)
+        toolbar.addWidget(board_settings)
         layout.addLayout(toolbar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -235,6 +241,17 @@ class ConvertBoardPage(QWidget):
         text = self._out_input.text().strip()
         if text:
             self._output_dir = text
+
+    def _open_board_settings(self) -> None:
+        """打开统一设置对话框的「转换」页（设置按板块区分）。"""
+        from modu_workbench.ui_kit.settings import SettingsDialog
+
+        SettingsDialog(self, initial="convert").exec()
+        # 设置里可能改了默认输出目录，回到本页后同步一次
+        stored = app_settings().value("convert/output_dir", "", type=str)
+        if stored:
+            self._output_dir = str(stored)
+            self._out_input.setText(self._output_dir)
 
     # ---------- 表格 ----------
 

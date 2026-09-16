@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from modu_workbench.core.image import ImageLibrary, ImageStorage
 from modu_workbench.core.music import MusicLibrary, MusicRegistry, MusicPlayer, MusicStorage, registry
 from modu_workbench.core.reader import Library, Storage
 from modu_workbench.core.video import VideoLibrary, VideoRegistry, VideoStorage
@@ -12,6 +13,9 @@ from modu_workbench.core.video.sources import registry as video_source_registry
 
 from .config import (
     ensure_legacy_migration,
+    gallery_cache_dir,
+    gallery_db_path,
+    gallery_dir,
     music_db_path,
     music_dir,
     video_db_path,
@@ -27,6 +31,8 @@ _music_registry: MusicRegistry | None = None
 _video_storage: VideoStorage | None = None
 _video_library: VideoLibrary | None = None
 _video_registry: VideoRegistry | None = None
+_image_storage: ImageStorage | None = None
+_image_library: ImageLibrary | None = None
 
 
 def storage() -> Storage:
@@ -99,3 +105,20 @@ def video_library() -> VideoLibrary:
     if _video_library is None:
         _video_library = VideoLibrary(video_storage(), video_dir(), video_registry())
     return _video_library
+
+
+# ---------- 墨软图库 ----------
+
+def image_storage() -> ImageStorage:
+    global _image_storage
+    if _image_storage is None:
+        _image_storage = ImageStorage(gallery_db_path())
+    return _image_storage
+
+
+def image_library() -> ImageLibrary:
+    global _image_library
+    if _image_library is None:
+        _image_library = ImageLibrary(image_storage(), gallery_cache_dir(),
+                                      image_dir=gallery_dir())
+    return _image_library

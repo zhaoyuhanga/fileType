@@ -1191,8 +1191,8 @@ def test_video_board_registered() -> None:
     assert spec.title == "墨软影视"
     assert spec.icon
     assert "video" in [board.key for board in ACTIVE_BOARDS]
-    # 第四板块排在乐库之后
-    assert [board.key for board in ACTIVE_BOARDS] == ["book", "convert", "music", "video"]
+    # 前四个板块顺序固定；后续板块（图库等）追加在后面
+    assert [board.key for board in ACTIVE_BOARDS][:4] == ["book", "convert", "music", "video"]
 
 
 def test_media_server_proxy_helpers() -> None:

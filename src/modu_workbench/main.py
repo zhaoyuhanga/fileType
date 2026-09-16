@@ -375,6 +375,103 @@ def _run_dependency_check(output_path: str) -> int:
                 return False
         return True
 
+    def check_gallery_core() -> bool:
+        """墨软图库核心：建表读写、缩略图生成、感知哈希、编辑管线、本地增强算法。"""
+        import tempfile
+        from pathlib import Path as _Path
+
+        import numpy as _np
+        from PIL import Image as _Image
+
+        from modu_workbench.core.image import (
+            EditStep,
+            ImageLibrary,
+            ImageItem,
+            ImageStorage,
+            ai as _ai,
+            apply_enhancement,
+            apply_steps,
+            compute_quality_metrics,
+            dhash_image,
+            hamming_distance,
+        )
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = _Path(folder)
+            # 1) 造两张图（其一一模一样的副本用于去重）
+            source = root / "photos"
+            source.mkdir()
+            try:
+                array = (_np.arange(240 * 320 * 3) % 251).reshape((240, 320, 3)).astype("uint8")
+                _Image.fromarray(array).save(source / "a.jpg")
+                _Image.new("RGB", (320, 240), (200, 120, 60)).save(source / "b.png")
+            except Exception:  # noqa: BLE001
+                return False
+            import shutil as _shutil
+
+            _shutil.copy2(source / "a.jpg", source / "a_copy.jpg")
+
+            store = ImageStorage(str(root / "gallery.db"))
+            try:
+                library = ImageLibrary(store, root / "cache", image_dir=root / "images")
+                result = library.import_paths([str(source)])
+                dedupe_ok = result.added == 2 and result.skipped_duplicate == 1
+
+                # 2) 缩略图真的生成
+                first = result.images[0]
+                thumb = library.thumbnail(first)
+                thumb_ok = bool(thumb) and _Path(thumb).is_file() and _Path(thumb).stat().st_size > 0
+
+                # 3) 相册 / 标签 / 收藏
+                album_id = library.create_album("自检相册")
+                library.add_to_album(album_id, [item.id for item in result.images])
+                library.tag_images([first.id], "自检标签")
+                library.toggle_favorite(first.id)
+                store_ok = (
+                    store.get_album(album_id).image_count == 2
+                    and store.list_tags()
+                    and store.get_image(first.id).favorited
+                )
+
+                # 4) 编辑管线（裁剪 + 旋转 + 滤镜 + AI 增强）
+                steps = [
+                    EditStep("crop", {"box": [8, 8, 120, 90]}),
+                    EditStep("rotate", {"angle": 90}),
+                    EditStep("filter", {"name": "grayscale", "amount": 1.0}),
+                    EditStep("ai", {"kind": "auto_enhance"}),
+                ]
+                library.save_steps(first.id, steps)
+                exported = library.export_edited(first, root / "edited.jpg", fmt="jpg")
+                edit_ok = exported.is_file() and exported.stat().st_size > 0
+
+                # 5) 本地增强算法 + 画质指标
+                metrics = compute_quality_metrics(
+                    apply_enhancement("sharpen", _Image.new("RGB", (64, 64), (120, 120, 120)))
+                )
+                enhance_ok = all(isinstance(value, float) for value in metrics.values())
+
+                # 6) 感知哈希能区分不同图
+                hash_a = dhash_image(_Image.open(source / "a.jpg"))
+                hash_b = dhash_image(_Image.open(source / "b.png"))
+                hash_ok = bool(hash_a) and bool(hash_b) and hash_a != hash_b
+            finally:
+                store.close()
+
+        # 7) DeepSeek 客户端可构造、未配置时给出明确错误（不联网）
+        ai_ok = False
+        try:
+            client = _ai.DeepSeekClient(_ai.AiConfig(api_key=""))
+            try:
+                client.test_connection()
+            except _ai.AiConfigError:
+                ai_ok = True
+            except Exception:  # noqa: BLE001  未配置时不允许发起网络请求
+                ai_ok = False
+        except Exception:  # noqa: BLE001
+            ai_ok = False
+
+        return bool(dedupe_ok and thumb_ok and store_ok and edit_ok and enhance_ok and hash_ok and ai_ok)
+
     def check_branding_icon() -> bool:
         """品牌图标：随包 app.ico 可定位，且能加载出多尺寸 QIcon（窗口/任务栏图标）。"""
         try:
@@ -403,6 +500,7 @@ def _run_dependency_check(output_path: str) -> int:
     record("multimedia_playback", check_multimedia_playback)
     record("music_core", check_music_core)
     record("video_core", check_video_core)
+    record("gallery_core", check_gallery_core)
     record("ffmpeg_tools", check_ffmpeg_tools)
     record("branding_icon", check_branding_icon)
 
