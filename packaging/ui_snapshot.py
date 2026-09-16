@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -21,7 +22,8 @@ sys.path.insert(0, str(REPO / "src"))
 
 # 离屏渲染必须先设置，否则 Qt 会尝试连接显示服务
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ.setdefault("MODU_DATA_DIR", str(REPO / ".ui-snapshot-data"))
+# 用系统临时目录：截图是"看一眼就扔"的工具，不该在仓库里留下数据库
+os.environ.setdefault("MODU_DATA_DIR", tempfile.mkdtemp(prefix="modu-ui-snapshot-"))
 # 离屏环境默认找不到字体，截图会全是方框：显式指向系统字体目录
 if os.name == "nt":
     os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")

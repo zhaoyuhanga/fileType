@@ -33,3 +33,6 @@ out-build/
 
 # bundled ffmpeg binaries (fetched by packaging/build_app.ps1)
 tools/ffmpeg/
+
+# UI snapshot tool temp data dir (fallback)
+.ui-snapshot-data/
