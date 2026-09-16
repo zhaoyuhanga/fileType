@@ -307,6 +307,10 @@ class DirectUrlVideoSource(VideoSource):
     def detail(self, video: RemoteVideo) -> RemoteVideo:
         return video
 
+    def supports_keyword_search(self) -> bool:
+        """直链源只能凭地址检索，不参与关键词聚合搜索（否则每次搜索都多一条报错）。"""
+        return False
+
 
 class CustomVodSource(CmsVodSource):
     """用户自定义采集接口：地址存于设置里，可在「源设置」中增删改。

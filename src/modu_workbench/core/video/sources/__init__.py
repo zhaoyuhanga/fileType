@@ -26,15 +26,18 @@ from .base import (
 )
 from .http import (
     DEFAULT_UA,
+    MEDIA_URL_SUFFIXES,
     HttpClient,
     SourceError,
     describe_network_error,
     guess_referer,
     host_of,
+    looks_like_media_url,
     origin_of,
 )
 from .matcher import best_match, match_score
 from .providers import (
+    CMS_SITES,
     DEFAULT_PROVIDER_ORDER,
     ArchiveOrgVideoSource,
     CmsVodSource,
@@ -42,11 +45,15 @@ from .providers import (
     DirectUrlVideoSource,
     WikimediaVideoSource,
     build_default_providers,
+    extract_media_url,
+    is_play_page,
 )
 from .registry import (
     SETTING_ENABLED,
     SETTING_ORDER,
     SETTING_SOURCE_URLS,
+    SETTING_VERSION,
+    SOURCES_VERSION,
     VideoRegistry,
 )
 
@@ -88,6 +95,7 @@ def search_all(keyword: str, kind: str = "all", limit: int = 20,
 
 
 __all__ = [
+    "CMS_SITES",
     "DEFAULT_PROVIDER_ORDER",
     "DEFAULT_UA",
     "KIND_CC",
@@ -97,9 +105,12 @@ __all__ = [
     "KIND_FULL",
     "KIND_LABELS",
     "KIND_PREVIEW",
+    "MEDIA_URL_SUFFIXES",
     "SETTING_ENABLED",
     "SETTING_ORDER",
     "SETTING_SOURCE_URLS",
+    "SETTING_VERSION",
+    "SOURCES_VERSION",
     "ArchiveOrgVideoSource",
     "CmsVodSource",
     "CustomVodSource",
@@ -115,10 +126,13 @@ __all__ = [
     "best_match",
     "build_default_providers",
     "describe_network_error",
+    "extract_media_url",
     "get_source",
     "guess_referer",
     "host_of",
+    "is_play_page",
     "list_sources",
+    "looks_like_media_url",
     "match_score",
     "origin_of",
     "registry",

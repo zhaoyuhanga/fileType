@@ -19,9 +19,26 @@ DEFAULT_UA = (
 
 _DEFAULT_ACCEPT = "application/json, text/plain, */*"
 
+# 常见媒体地址后缀：用来判断一个地址是「媒体文件本身」还是「HTML 播放页」
+MEDIA_URL_SUFFIXES = (
+    ".m3u8", ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts",
+    ".m4v", ".mpg", ".mpeg", ".wmv", ".mpd",
+)
+
 
 class SourceError(RuntimeError):
     """视频源不可用、抓取失败或内容受限。"""
+
+
+def looks_like_media_url(url: str) -> bool:
+    """地址是否本身就是媒体文件（只看路径后缀，忽略查询串）。
+
+    采集接口给的分集地址有两种形态：直接是 `…/index.m3u8`，
+    或者是带播放器的 HTML 页（如 `…/share/<hash>`）。后者必须先解析，
+    否则会被当成视频去解码 —— 表现就是「播放和下载都失败」。
+    """
+    path = urlsplit(url or "").path.lower()
+    return path.endswith(MEDIA_URL_SUFFIXES)
 
 
 def host_of(url: str) -> str:

@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from ..base import VideoSource
-from .cms_vod import CmsVodSource, build_source
+from .cms_vod import CmsVodSource, build_source, extract_media_url, is_play_page
 from .public import (
     ArchiveOrgVideoSource,
     CustomVodSource,
@@ -23,43 +23,54 @@ from .public import (
 
 # 默认启用的源顺序（磁盘上的配置会覆盖它）
 DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (
-    "cms_360", "cms_heimuer", "cms_ffzy", "cms_wolong", "cms_tyyszy",
+    "cms_360", "cms_lziapi", "cms_rycjapi", "cms_ffzy", "cms_dyttzy", "cms_ukuapi",
     "archive", "wikimedia", "url", "custom",
 )
 
 # ---- 苹果CMS 采集站清单（接口地址可在「源设置」里修改） ----
 # 说明：这些是公开的采集接口（同类开源项目 LibreTV 等亦使用），
 # 仅用于个人学习与技术研究；请遵守相应站点条款与版权要求。
+#
+# 维护约定：采集站域名寿命普遍很短（改版/换域名/挂 Cloudflare 是常态），
+# 因此清单里的每一项都必须是「实测能返回 JSON 列表」的地址；
+# 其中返回分享页（`/share/<hash>`）的站点由 CmsVodSource.play_url 自动解析，
+# 不需要单独处理。失效的源请直接替换，不要留在默认启用列表里。
 CMS_SITES: tuple[dict, ...] = (
     {
         "key": "cms_360",
         "label": "360资源",
-        "base_url": "https://360zy.com",
+        "base_url": "https://www.360zy.com",
         "note": "360资源 · 苹果CMS 采集接口（电影/剧集/动漫/综艺）",
     },
     {
-        "key": "cms_heimuer",
-        "label": "黑木耳",
-        "base_url": "https://json.heimuer.xyz",
-        "note": "黑木耳资源 · 苹果CMS 采集接口",
+        "key": "cms_lziapi",
+        "label": "量子资源",
+        "base_url": "https://cj.lziapi.com",
+        "note": "量子资源 · 苹果CMS 采集接口（直链 m3u8）",
+    },
+    {
+        "key": "cms_rycjapi",
+        "label": "如意资源",
+        "base_url": "https://cj.rycjapi.com",
+        "note": "如意资源 · 苹果CMS 采集接口（直链 m3u8）",
     },
     {
         "key": "cms_ffzy",
-        "label": "非凡影视",
-        "base_url": "http://ffzy5.tv",
-        "note": "非凡影视 · 苹果CMS 采集接口",
+        "label": "非凡资源",
+        "base_url": "https://api.ffzyapi.com",
+        "note": "非凡资源 · 苹果CMS 采集接口（分享页地址已自动解析）",
     },
     {
-        "key": "cms_wolong",
-        "label": "卧龙资源",
-        "base_url": "https://wolongzyw.com",
-        "note": "卧龙资源 · 苹果CMS 采集接口",
+        "key": "cms_dyttzy",
+        "label": "电影天堂",
+        "base_url": "https://caiji.dyttzyapi.com",
+        "note": "电影天堂 · 苹果CMS 采集接口（分享页地址已自动解析）",
     },
     {
-        "key": "cms_tyyszy",
-        "label": "天涯资源",
-        "base_url": "https://tyyszy.com",
-        "note": "天涯资源 · 苹果CMS 采集接口",
+        "key": "cms_ukuapi",
+        "label": "U酷资源",
+        "base_url": "https://api.ukuapi.com",
+        "note": "U酷资源 · 苹果CMS 采集接口（分享页地址已自动解析）",
     },
 )
 
@@ -97,4 +108,6 @@ __all__ = [
     "build_cms_providers",
     "build_default_providers",
     "build_source",
+    "extract_media_url",
+    "is_play_page",
 ]

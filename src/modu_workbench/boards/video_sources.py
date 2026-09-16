@@ -48,6 +48,40 @@ class _ProbeWorker(QThread):
             self.finishedProbe.emit(self._key, False, str(error))
 
 
+class _ProbeAllWorker(QThread):
+    """逐个测试所有可用源（一键判断「是我这边网络的问题，还是某个源失效了」）。"""
+
+    probed = Signal(str, bool, str)          # key, ok, message
+    finishedAll = Signal(int, int)           # 可用数, 总数
+
+    def __init__(self, registry: VideoRegistry, keyword: str = "电影", parent=None):
+        super().__init__(parent)
+        self._registry = registry
+        self._keyword = keyword
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:  # noqa: D102
+        ok = total = 0
+        for provider in self._registry.providers(enabled_only=False):
+            if self._cancel:
+                break
+            if not provider.available():          # 直链/自定义源没配置，跳过不算失败
+                continue
+            if not provider.supports_keyword_search():   # 直链源不能按关键词测试
+                continue
+            total += 1
+            try:
+                videos = self._registry.search_one(provider.key, self._keyword, limit=3)
+                ok += 1
+                self.probed.emit(provider.key, True, f"可用（返回 {len(videos)} 条结果）")
+            except Exception as error:  # noqa: BLE001
+                self.probed.emit(provider.key, False, str(error))
+        self.finishedAll.emit(ok, total)
+
+
 class VideoSourceDialog(QDialog):
     """视频源设置对话框。"""
 
@@ -59,6 +93,7 @@ class VideoSourceDialog(QDialog):
         self._registry = app_context.video_registry()
         self._storage = app_context.video_storage()
         self._probe: _ProbeWorker | None = None
+        self._probe_all_worker: _ProbeAllWorker | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 12)
@@ -101,11 +136,14 @@ class VideoSourceDialog(QDialog):
         probe = QPushButton("测试选中源")
         probe.setObjectName("primaryButton")
         probe.clicked.connect(self._probe_selected)
+        probe_all = QPushButton("测试全部")
+        probe_all.setToolTip("逐个源跑一次真实搜索：可快速看出是网络问题还是某个源失效")
+        probe_all.clicked.connect(self._probe_all)
         detail = QPushButton("编辑接口地址…")
         detail.clicked.connect(self._edit_url)
         reset = QPushButton("恢复默认顺序")
         reset.clicked.connect(self._reset)
-        for widget in (up, down, probe, detail, reset):
+        for widget in (up, down, probe, probe_all, detail, reset):
             actions.addWidget(widget)
         actions.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -214,6 +252,43 @@ class VideoSourceDialog(QDialog):
             self._toaster.error(f"{label} 不可用：{message}")
         self._reload()
 
+    def _probe_all(self) -> None:
+        """一键测试所有可用源：快速区分「本机网络问题」与「个别源失效」。"""
+        if self._probe_all_worker is not None and self._probe_all_worker.isRunning():
+            self._toaster.info("正在测试中，请稍候")
+            return
+        self._status.setText("正在逐个测试数据源（每个源跑一次真实搜索）…")
+        worker = _ProbeAllWorker(self._registry, parent=self)
+        worker.probed.connect(self._on_probed_one)
+        worker.finishedAll.connect(self._on_probed_all)
+        self._probe_all_worker = worker
+        worker.start()
+
+    def _on_probed_one(self, key: str, ok: bool, message: str) -> None:
+        for row in range(self._table.rowCount()):
+            if self._key_at(row) == key:
+                item = self._table.item(row, 3)
+                if item is not None:
+                    item.setText(f"{'可用' if ok else '不可用'}（{message[:60]}）")
+                break
+
+    def _on_probed_all(self, ok: int, total: int) -> None:
+        if ok >= total:
+            self._status.setText(f"测试完成：{ok}/{total} 个源可用")
+            self._toaster.success(f"{ok}/{total} 个源可用")
+        elif ok == 0:
+            self._status.setText(
+                f"测试完成：{ok}/{total} 个源可用 —— 全部不可用通常是本机网络/代理问题"
+                "（可检查代理是否开启、或稍后重试）"
+            )
+            self._toaster.error("所有源都不可用：请检查网络或代理设置")
+        else:
+            self._status.setText(
+                f"测试完成：{ok}/{total} 个源可用 —— 不可用的源可停用、或改接口地址后用其他源"
+            )
+            self._toaster.info(f"{ok}/{total} 个源可用")
+        self._reload()
+
     def _edit_url(self) -> None:
         row = self._table.currentRow()
         if row < 0:
@@ -244,7 +319,8 @@ class VideoSourceDialog(QDialog):
 
         self._registry.set_order(list(DEFAULT_PROVIDER_ORDER))
         for provider in self._registry.providers(enabled_only=False):
-            provider.set_credential("")
+            # 恢复内置默认地址（用户改过错域名时也能一键回到出厂设置）
+            provider.reset_credential()
         self._registry.set_enabled_keys(DEFAULT_PROVIDER_ORDER)
         self._reload()
         self._toaster.info("已恢复默认源顺序与地址")
@@ -261,7 +337,9 @@ class VideoSourceDialog(QDialog):
         self.accept()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        worker = self._probe
-        if worker is not None and worker.isRunning():
-            worker.wait(2000)
+        for worker in (self._probe, self._probe_all_worker):
+            if worker is not None and worker.isRunning():
+                if isinstance(worker, _ProbeAllWorker):
+                    worker.cancel()
+                worker.wait(2000)
         super().closeEvent(event)

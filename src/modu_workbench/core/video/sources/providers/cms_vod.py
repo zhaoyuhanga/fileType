@@ -14,19 +14,39 @@
 
 因此「多线路」天然映射为「多清晰度选项」，本模块把每个线路都转成一个
 `Episode`，并尽力从线路名推断画质；真实 m3u8 主清单的画质由 `hls.py` 再细化。
+
+**关于「分享页」**：不少采集站（非凡、电影天堂、U酷……）给的不是直链，而是形如
+`https://vip.xxx.com/share/<hash>` 的 HTML 播放页，真实地址写在页面脚本里。
+此时 `play_url()` 会抓一次页面并取出真实地址（带缓存），
+否则播放与下载都会拿到一页 HTML 而失败。
 """
 from __future__ import annotations
 
 import re
 from typing import Iterable, List
+from urllib.parse import urljoin, urlsplit
 
 from ...models import Episode, Quality, RemoteVideo, classify_kind, strip_html
 from ..base import KIND_FULL, SourceInfo, VideoSource
-from ..http import HttpClient, SourceError, host_of
+from ..http import HttpClient, SourceError, host_of, looks_like_media_url, origin_of
 
 # maccms 的 ac 参数
 AC_VIDEOLIST = "videolist"
 AC_DETAIL = "detail"
+
+# 播放页（HTML）的路径特征：命中且没有媒体后缀时，必须解析页面才能拿到真实地址
+_PAGE_PATH_HINTS = (
+    "/share/", "/play/", "/vodplay/", "/v_play/", "/vod/play", "/index.php/vod/play/",
+)
+
+# 播放页里的真实地址：绝对地址、协议相对地址或站点根相对地址都可能是 m3u8/mp4
+_MEDIA_URL_RE = re.compile(
+    r"(?:https?:)?//[^\s\"'<>\\)]+?\.(?:m3u8|mp4|mkv|flv|ts)(?:\?[^\s\"'<>\\)]*)?"
+    r"|/[^\s\"'<>\\)]*?\.(?:m3u8|mp4|mkv|flv|ts)(?:\?[^\s\"'<>\\)]*)?",
+    re.IGNORECASE,
+)
+# 解析播放页时的提取优先级：m3u8 最通用（走 HLS 合流），其次 mp4
+_PREFERRED_SUFFIXES = (".m3u8", ".mp4", ".mkv", ".flv", ".ts")
 
 # 线路名里可能出现的画质线索：按清晰度从高到低匹配
 _ROUTE_QUALITY_HINTS: tuple[tuple[str, str], ...] = (
@@ -102,6 +122,39 @@ def _looks_playable(url: str) -> bool:
     return True
 
 
+def is_play_page(url: str) -> bool:
+    """地址是否看起来是 HTML 播放页（分享页）而不是媒体文件。"""
+    if not url or looks_like_media_url(url):
+        return False
+    path = urlsplit(url).path.lower()
+    return any(hint in path for hint in _PAGE_PATH_HINTS)
+
+
+def extract_media_url(text: str, base_url: str = "") -> str:
+    """从播放页正文（HTML/JS）里提取真实播放地址；找不到返回空串。
+
+    页面里常见三种写法，都要能取到：
+    - `const url = "https://cdn/x/index.m3u8?sign=…"`；
+    - 站点根相对路径 `const url = "/2024/x/index.m3u8?sign=…"`（用页面地址补全）；
+    - 转义写法 `https:\\/\\/cdn\\/x.m3u8`（先还原再匹配）。
+    """
+    if not text:
+        return ""
+    normalized = text.replace("\\/", "/")
+    found: list[str] = []
+    for match in _MEDIA_URL_RE.finditer(normalized):
+        candidate = urljoin(base_url, match.group(0)) if base_url else match.group(0)
+        if candidate and candidate not in found:
+            found.append(candidate)
+    if not found:
+        return ""
+    for suffix in _PREFERRED_SUFFIXES:
+        for candidate in found:
+            if candidate.lower().split("?", 1)[0].endswith(suffix):
+                return candidate
+    return found[0]
+
+
 class CmsVodSource(VideoSource):
     """苹果 CMS V10 采集源（同一个类可承载任意多个采集站实例）。"""
 
@@ -117,6 +170,11 @@ class CmsVodSource(VideoSource):
                  base_url: str = "", timeout: float = 15.0):
         self.info = info
         self.base_url = (base_url or info.homepage or "").rstrip("/")
+        # 内置的默认接口地址：用户在「源设置」里改坏/改错后可以一键恢复
+        self.default_base_url = self.base_url
+        # 播放页 → 真实媒体地址的缓存（同一集重复播放/下载时不再抓页面）
+        self._page_cache: dict[str, str] = {}
+        self._media_referer: dict[str, str] = {}
         super().__init__(http=http, key="")
         if http is None:
             self.http = HttpClient(headers=self.default_headers(), timeout=timeout)
@@ -142,6 +200,10 @@ class CmsVodSource(VideoSource):
         value = (value or "").strip()
         if value:
             self.base_url = value.rstrip("/")
+
+    def reset_credential(self) -> None:
+        """恢复内置的默认接口地址（「源设置 → 恢复默认」用）。"""
+        self.base_url = self.default_base_url
 
     @property
     def credential(self) -> str:
@@ -328,14 +390,66 @@ class CmsVodSource(VideoSource):
         except ValueError:
             return 0
 
+    # ---------- 播放地址解析 ----------
+
+    # 播放页缓存上限：超过后整体清空（剧集多时也只需偶尔重抓）
+    _PAGE_CACHE_LIMIT = 512
+
+    def play_url(self, video: RemoteVideo, episode: Episode,
+                 quality: Quality | None = None) -> str:
+        """返回可直接播放/下载的地址（自动解开「分享页/播放页」）。"""
+        url = super().play_url(video, episode, quality)
+        return self.resolve_media_url(url)
+
+    def resolve_media_url(self, url: str) -> str:
+        """把视频站的播放页地址解析为真实媒体地址（m3u8/mp4）。
+
+        - 本身已是媒体文件（`…/index.m3u8`、`…/x.mp4`）→ 原样返回；
+        - 是 HTML 播放页（`…/share/<hash>` 这类）→ 抓页面并取出真实地址；
+        - 既没有媒体后缀、也不是播放页特征 → 抓一次页面尝试提取，
+          提取不到就原样返回（避免误伤「无扩展名但确实是流」的地址）。
+        """
+        if not url or looks_like_media_url(url):
+            return url
+        cached = self._page_cache.get(url)
+        if cached:
+            return cached
+        referer = self.default_headers().get("Referer", "")
+        try:
+            text = self.http.get_text(url, headers={"Referer": referer} if referer else None,
+                                      timeout=15.0)
+        except SourceError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            raise SourceError(f"打开播放页失败（{host_of(url)}）：{error}") from error
+        real = extract_media_url(text, url)
+        if not real:
+            if is_play_page(url):
+                raise SourceError(
+                    f"{host_of(url)} 的播放页里没有找到播放地址"
+                    "（该站点可能已改版，建议改用其他视频源）"
+                )
+            return url
+        self._remember_page(url, real)
+        return real
+
+    def _remember_page(self, page_url: str, media_url: str) -> None:
+        """记住「播放页 → 真实地址」以及该真实地址该带的 Referer。"""
+        if len(self._page_cache) >= self._PAGE_CACHE_LIMIT:
+            self._page_cache.clear()
+            self._media_referer.clear()
+        self._page_cache[page_url] = media_url
+        origin = origin_of(page_url)
+        if origin:
+            self._media_referer[media_url] = origin
+
     # ---------- 下载头 ----------
 
     def download_headers(self, url: str = "") -> dict:
-        headers = {}
-        referer = self.default_headers().get("Referer", "")
-        if referer:
-            headers["Referer"] = referer
-        return headers
+        # 分享页解析出来的地址用「播放页所在站点」当 Referer（部分 CDN 会校验），
+        # 其余地址沿用采集站首页
+        referer = self._media_referer.get(url or "") or self.default_headers().get("Referer", "")
+        return {"Referer": referer} if referer else {}
 
 
 def build_source(key: str, label: str, base_url: str, note: str = "",

@@ -32,6 +32,7 @@ from modu_workbench.core.video import (
     VideoRegistry,
     VideoStorage,
     apply_quality_choice,
+    looks_like_media_url,
 )
 from modu_workbench.services import app_context
 from modu_workbench.services.config import video_dir
@@ -392,6 +393,15 @@ class VideoBoardPage(QWidget):
             self._toaster.info(f"当前线路没有独立的「{label}」地址，改为换源解析")
             self._resolve_and_play(
                 remote, episode, None, quality_label=label,
+                start_ms=position, title=self._play_title(remote, episode),
+            )
+            return
+        if not looks_like_media_url(quality.url):
+            # 地址是「播放页 / 分享页」而不是媒体文件：必须走解析链路拿到真实地址，
+            # 否则播放器会把 HTML 当视频解，表现为「换了清晰度就播不了」
+            self._toaster.info(f"正在解析「{label}」线路的真实播放地址…")
+            self._resolve_and_play(
+                remote, episode, quality, quality_label=label,
                 start_ms=position, title=self._play_title(remote, episode),
             )
             return

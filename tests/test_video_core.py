@@ -509,6 +509,159 @@ def test_cms_credential_override_switches_domain() -> None:
     assert source._api().endswith("/api.php/provide/vod")  # noqa: SLF001
 
 
+def test_cms_credential_reset_restores_default_domain() -> None:
+    """「源设置 → 恢复默认」要真的把改过的接口地址还原（空字符串不算还原）。"""
+    source = build_cms_source()
+    source.set_credential("https://broken.example")
+    assert source.credential == "https://broken.example"
+    source.reset_credential()
+    assert source.credential == "https://360zy.com"
+
+
+# --------------------------------------------------------------------------- 分享页解析
+# 背景：不少采集站（非凡 / 电影天堂 / U酷…）给的是 `…/share/<hash>` 这类 HTML 播放页，
+# 真实 m3u8 写在页面脚本里。不解析就会「播放和下载都失败」（把 HTML 当视频解）。
+
+SHARE_PAGE = """<!DOCTYPE html><html><head><script>
+        const vid = "b9e4ce50f6c1ba80d31aa4826948a5a6";
+        const url = "/20241031/173690_b9e4ce50/index.m3u8?sign=abc123";
+        const pic = "/20241031/173690_b9e4ce50/1.jpg";
+</script></head><body></body></html>"""
+
+
+def build_share_source(page_text: str = SHARE_PAGE, **routes):  # noqa: ANN003
+    """构造「分集地址是分享页」的采集源。"""
+    from modu_workbench.core.video.sources.providers.cms_vod import build_source
+
+    source = build_source("cms_ffzy", "非凡资源", "https://api.ffzyapi.com")
+    source.http = FakeHttp(routes or {
+        ("GET", "provide/vod"): FakeResponse(payload={
+            "code": 1,
+            "list": [{
+                "vod_id": 1, "vod_name": "样例电影", "type_name": "科幻片",
+                "vod_play_from": "ffm3u8",
+                "vod_play_url": "正片$https://vip.ffzy-play8.com/share/b9e4ce50f6c1ba80d31aa4826948a5a6",
+            }],
+        }),
+        ("GET", "/share/"): FakeResponse(text=page_text, url="https://vip.ffzy-play8.com/share/hash",
+                                        headers={"Content-Type": "text/html"}),
+    })
+    return source
+
+
+def test_looks_like_media_url_only_accepts_files() -> None:
+    from modu_workbench.core.video.sources import looks_like_media_url
+
+    assert looks_like_media_url("https://v/x/index.m3u8") is True
+    assert looks_like_media_url("https://v/x/index.m3u8?sign=1") is True
+    assert looks_like_media_url("https://v/x/movie.MP4") is True
+    assert looks_like_media_url("https://vip.ffzy-play8.com/share/b9e4ce50") is False
+    assert looks_like_media_url("") is False
+
+
+def test_extract_media_url_prefers_m3u8_and_handles_escapes() -> None:
+    from modu_workbench.core.video.sources.providers.cms_vod import extract_media_url
+
+    assert extract_media_url(SHARE_PAGE, "https://vip.ffzy-play8.com/share/hash") == \
+        "https://vip.ffzy-play8.com/20241031/173690_b9e4ce50/index.m3u8?sign=abc123"
+    # 转义写法（JSON 里的 \/）与相对路径都要能取到；m3u8 优先于 mp4
+    escaped = '{"url":"https:\\/\\/cdn\\/a\\/index.m3u8?sign=9","backup":"https://cdn/a/x.mp4"}'
+    assert extract_media_url(escaped, "https://cdn/page") == "https://cdn/a/index.m3u8?sign=9"
+    assert extract_media_url("<html>没有地址</html>", "https://cdn/page") == ""
+
+
+def test_cms_play_url_resolves_share_page() -> None:
+    source = build_share_source()
+    video = source.search("x", limit=1)[0]
+    episode = video.episodes[0]
+    assert episode.url.endswith("/share/b9e4ce50f6c1ba80d31aa4826948a5a6")   # 采集接口给的是页面
+    assert source.play_url(video, episode) == \
+        "https://vip.ffzy-play8.com/20241031/173690_b9e4ce50/index.m3u8?sign=abc123"
+
+
+def test_cms_play_url_caches_share_page() -> None:
+    source = build_share_source()
+    video = source.search("x", limit=1)[0]
+    episode = video.episodes[0]
+    source.play_url(video, episode)
+    before = len([call for call in source.http.calls if "/share/" in call[1]])
+    source.play_url(video, episode)
+    after = len([call for call in source.http.calls if "/share/" in call[1]])
+    assert before == 1
+    assert after == 1          # 第二次直接用缓存，不再抓页面
+
+
+def test_cms_direct_media_url_is_not_fetched() -> None:
+    source = build_share_source()
+    source.http = FakeHttp({("GET", "provide/vod"): FakeResponse(payload={
+        "code": 1,
+        "list": [{"vod_id": 2, "vod_name": "直链片", "vod_play_from": "lzm3u8",
+                  "vod_play_url": "正片$https://vod1.example.com/1/index.m3u8"}],
+    })})
+    video = source.search("x", limit=1)[0]
+    assert source.play_url(video, video.episodes[0]) == "https://vod1.example.com/1/index.m3u8"
+    # 直链不应触发任何额外请求（除搜索外）
+    assert all("provide/vod" in call[1] for call in source.http.calls)
+
+
+def test_cms_share_page_without_address_raises() -> None:
+    source = build_share_source(page_text="<html><body>该视频已下架</body></html>")
+    video = source.search("x", limit=1)[0]
+    with pytest.raises(SourceError) as exc:
+        source.play_url(video, video.episodes[0])
+    assert "播放页" in str(exc.value)
+
+
+def test_cms_resolved_media_uses_page_referer() -> None:
+    source = build_share_source()
+    video = source.search("x", limit=1)[0]
+    real = source.play_url(video, video.episodes[0])
+    # 解析出来的 CDN 地址要用「播放页所在站点」当 Referer（部分 CDN 校验）
+    assert source.download_headers(real)["Referer"] == "https://vip.ffzy-play8.com/"
+
+
+def test_default_sources_match_order_and_are_configured() -> None:
+    """内置源清单自检：顺序表里的每个 key 都要真的注册，且都有接口地址。
+
+    采集站会失效，这里只保证「清单与实现一致」；接口地址本身是否可用由维护时实测。
+    """
+    from modu_workbench.core.video.sources import DEFAULT_PROVIDER_ORDER, build_default_providers
+
+    providers = {provider.key: provider for provider in build_default_providers()}
+    assert set(DEFAULT_PROVIDER_ORDER) == set(providers)
+    for key, provider in providers.items():
+        if key.startswith("cms_"):
+            assert provider.available(), f"{key} 缺少接口地址"
+
+
+def test_registry_migrates_source_settings_on_version_bump(storage: VideoStorage) -> None:
+    """源清单升级后，旧的启用集合不能把新增源默认关掉。"""
+    from modu_workbench.core.video.sources import (
+        DEFAULT_PROVIDER_ORDER,
+        SETTING_ENABLED,
+        SETTING_ORDER,
+        SETTING_VERSION,
+        SOURCES_VERSION,
+    )
+
+    # 模拟旧版本留下的数据：有启用集合与排序，但没有版本号
+    storage.set_setting(SETTING_ENABLED, "cms_360,archive")
+    storage.set_setting(SETTING_ORDER, "archive,cms_360")
+
+    registry = VideoRegistry()
+    registry.load_settings(storage)
+    assert registry.is_enabled("cms_lziapi") is True       # 新增源默认启用
+    assert registry.order[:3] == list(DEFAULT_PROVIDER_ORDER)[:3]
+    assert storage.get_setting(SETTING_VERSION, "") == str(SOURCES_VERSION)
+
+    # 用户主动停用后要被尊重（版本一致时不再回退默认）
+    registry.set_enabled("cms_lziapi", False)
+    registry.save_settings(storage)
+    restored = VideoRegistry()
+    restored.load_settings(storage)
+    assert restored.is_enabled("cms_lziapi") is False
+
+
 # --------------------------------------------------------------------------- 自由授权源
 
 
@@ -602,6 +755,18 @@ def test_registry_search_all_collects_errors() -> None:
     videos, errors = registry.search_all("x", sources=["ok", "bad"])
     assert len(videos) == 1
     assert errors and "404" in errors[0]
+
+
+def test_registry_search_all_skips_link_only_source() -> None:
+    """直链源不参与关键词聚合搜索（否则每次搜索都多一条噪音报错），但粘贴地址仍可用。"""
+    registry = VideoRegistry([StubSource("ok", [make_remote("ok", "1", "片")]), DirectUrlVideoSource()])
+    videos, errors = registry.search_all("电影")
+    assert [video.source for video in videos] == ["ok"]
+    assert errors == []
+
+    videos, errors = registry.search_all("https://cdn.example.com/a/index.m3u8")
+    assert "url" in [video.source for video in videos]
+    assert errors == []
 
 
 def test_registry_health_degrades_after_repeated_failures() -> None:

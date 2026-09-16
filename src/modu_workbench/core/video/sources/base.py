@@ -136,6 +136,10 @@ class VideoSource:
         """可选：需要密钥/自定义地址的源在此接收设置里的值。"""
         self._key = (value or "").strip()
 
+    def reset_credential(self) -> None:
+        """恢复默认凭据/接口地址（内置源在自己的类里重写）。"""
+        self.set_credential("")
+
     @property
     def credential(self) -> str:
         return self._key
@@ -161,6 +165,15 @@ class VideoSource:
 
     def supports_download(self) -> bool:
         return bool(self.info.downloadable)
+
+    def supports_keyword_search(self) -> bool:
+        """是否参与「关键词聚合搜索」。
+
+        直链类源只能凭一个地址检索，参与关键词聚合搜索只会每次都报一个
+        「请输入 http(s):// 开头的地址」，因此由子类声明为 False 并在聚合搜索里跳过
+        （用户直接粘贴地址时仍会走它，见 `VideoRegistry.search_all`）。
+        """
+        return True
 
     def download_headers(self, url: str = "") -> dict:
         """下载分片时需要附带的请求头（Referer 等）。"""

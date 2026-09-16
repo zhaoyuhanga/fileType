@@ -23,6 +23,12 @@ from .providers import DEFAULT_PROVIDER_ORDER, build_default_providers
 SETTING_ENABLED = "sources/enabled"
 SETTING_ORDER = "sources/priority"
 SETTING_SOURCE_URLS = "sources/urls"      # 用户覆盖的采集接口地址 {key: url}
+SETTING_VERSION = "sources/version"       # 源清单版本（升级时迁移用户的启用/排序设置）
+
+# 源清单版本：改动内置源（下线失效源、新增可用源）时递增。
+# 递增后，旧的「启用集合/排序」不再直接套用 —— 否则新加的源会默认处于停用状态，
+# 用户会以为「源没了」。用户自己填的接口地址（sources/urls）始终保留。
+SOURCES_VERSION = 2
 
 # 熔断参数：连续失败 3 次 → 降级 120 秒（视频源抖动比音乐源更常见）
 DEGRADE_AFTER = 3
@@ -164,8 +170,12 @@ class VideoRegistry:
         errors: List[str] = []
         now = time.time()
         if sources is None:
+            # 直链类源只在「关键词本身就是一个地址」时才参与聚合，
+            # 否则每次搜索都会多出一条「请输入 http(s):// 开头的地址」的噪音错误
+            keyword_is_url = (keyword or "").strip().lower().startswith(("http://", "https://"))
             chosen = [p.key for p in self.providers()
-                      if include_degraded or not self.health(p.key).is_degraded(now)]
+                      if (p.supports_keyword_search() or keyword_is_url)
+                      and (include_degraded or not self.health(p.key).is_degraded(now))]
         else:
             chosen = [key for key in sources if key in self._providers]
 
@@ -355,14 +365,21 @@ class VideoRegistry:
     # ---------- 配置持久化 ----------
 
     def load_settings(self, storage) -> None:  # noqa: ANN001  VideoStorage
-        enabled = storage.get_setting(SETTING_ENABLED, "")
-        if enabled:
-            keys = {key for key in enabled.split(",") if key}
-            if keys:
-                self._enabled = keys
-        order = storage.get_setting(SETTING_ORDER, "")
-        if order:
-            self.set_order([key for key in order.split(",") if key])
+        version = storage.get_setting(SETTING_VERSION, "")
+        if version == str(SOURCES_VERSION):
+            enabled = storage.get_setting(SETTING_ENABLED, "")
+            if enabled:
+                keys = {key for key in enabled.split(",") if key}
+                if keys:
+                    self._enabled = keys
+            order = storage.get_setting(SETTING_ORDER, "")
+            if order:
+                self.set_order([key for key in order.split(",") if key])
+        else:
+            # 源清单已升级：旧的启用集合里可能有已下线的源、也会漏掉新加入的源，
+            # 因此回到「新清单的默认启用集合 + 默认顺序」，并记下新版本号。
+            self._enabled = {key for key in DEFAULT_PROVIDER_ORDER if key in self._providers}
+            storage.set_setting(SETTING_VERSION, str(SOURCES_VERSION))
         # 用户改过的采集接口地址：覆盖到对应源实例
         raw = storage.get_setting(SETTING_SOURCE_URLS, "")
         if raw:
@@ -378,6 +395,7 @@ class VideoRegistry:
     def save_settings(self, storage) -> None:  # noqa: ANN001  VideoStorage
         storage.set_setting(SETTING_ENABLED, ",".join(sorted(self._enabled)))
         storage.set_setting(SETTING_ORDER, ",".join(self.order))
+        storage.set_setting(SETTING_VERSION, str(SOURCES_VERSION))
         urls = {
             key: provider.credential
             for key, provider in self._providers.items()
