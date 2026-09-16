@@ -227,8 +227,22 @@ Write-Step "运行打包产物做能力自检"
 $checkOut2 = Join-Path $env:TEMP "modu-dist-check.json"
 $env:MODU_CHECK_DEPS = $checkOut2
 Remove-Item $checkOut2 -ErrorAction SilentlyContinue
-& $exePath | Out-Null
+# 注意：刚构建出来的未签名 exe 可能被 Windows「智能应用控制（Smart App Control）」拦下
+# （An Application Control policy has blocked this file）。这是系统策略而非打包缺陷，
+# 因此这里捕获异常给出提示并继续（否则安装包步骤永远跑不到）。
+$selfCheckError = ""
+try {
+    & $exePath | Out-Null
+} catch {
+    $selfCheckError = $_.Exception.Message
+}
 Remove-Item Env:\MODU_CHECK_DEPS -ErrorAction SilentlyContinue
+
+if ($selfCheckError) {
+    Write-Warn2 "打包产物未能运行自检：$selfCheckError"
+    Write-Warn2 "  若是「Application Control policy」，请关闭「智能应用控制」或对 exe 签名后重跑；"
+    Write-Warn2 "  也可以只做模块级核验（上面 15 项已通过）。"
+}
 
 if (Test-Path $checkOut2) {
     $json2 = Get-Content $checkOut2 -Raw -Encoding UTF8 | ConvertFrom-Json
