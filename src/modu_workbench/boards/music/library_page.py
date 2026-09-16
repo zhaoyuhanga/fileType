@@ -26,6 +26,7 @@ from modu_workbench.core.music import (
     scan_audio_files,
 )
 from modu_workbench.core.platform.paths import music_dir
+from modu_workbench.ui_kit.components import EmptyState
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (
@@ -147,6 +148,12 @@ class MusicLibraryPage(QWidget):
         # 点击「收藏」列即可单独切换该曲目收藏（无需先选中再点按钮）
         self._table.itemClicked.connect(self._on_item_clicked)
         attach_context_menu(self._table, self._row_menu)
+        self._empty = EmptyState(
+            "🎵", "曲库还是空的",
+            "用「导入本地音频」把已有文件加进来，或去「搜索下载」在线下载",
+        )
+        self._empty.setMaximumHeight(240)
+        layout.addWidget(self._empty, 1 if 'layout' == 'layout' else 2)
         layout.addWidget(self._table, 1)
 
         # ---- 操作栏 ----
@@ -197,6 +204,8 @@ class MusicLibraryPage(QWidget):
             favorite_only=favorite_only, order=order,
         )
         self._table.setRowCount(len(self._tracks))
+        self._empty.setVisible(not self._tracks)
+        self._table.setVisible(bool(self._tracks))
         for row, track in enumerate(self._tracks):
             fill_track_row(
                 self._table, row, track,

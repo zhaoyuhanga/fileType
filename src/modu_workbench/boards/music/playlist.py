@@ -25,6 +25,7 @@ from modu_workbench.core.music import (
 )
 from . import context as app_context
 from modu_workbench.core.platform.paths import music_download_dir
+from modu_workbench.ui_kit.components import EmptyState
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (
@@ -146,6 +147,12 @@ class MusicPlaylistPage(QWidget):
         self._table.doubleClicked.connect(lambda _i: self._play(0, "order"))
         self._table.itemClicked.connect(self._on_track_clicked)
         attach_context_menu(self._table, self._row_menu)
+        self._empty = EmptyState(
+            "📁", "这个歌单还是空的",
+            "从「搜索下载」或「我的音乐」把曲目加入歌单",
+        )
+        self._empty.setMaximumHeight(240)
+        right_layout.addWidget(self._empty, 1 if 'right_layout' == 'layout' else 2)
         right_layout.addWidget(self._table, 2)
 
         self._pending_label = QLabel("待下载（0）")
@@ -235,6 +242,8 @@ class MusicPlaylistPage(QWidget):
         name = playlist.name if playlist else "歌单"
         self._tracks = self._storage.list_playlist_tracks(self._playlist_id)
         self._table.setRowCount(len(self._tracks))
+        self._empty.setVisible(not self._tracks)
+        self._table.setVisible(bool(self._tracks))
         for row, track in enumerate(self._tracks):
             fill_track_row(self._table, row, track,
                            ["title", "artist", "album", "duration", "format", "favorite"])

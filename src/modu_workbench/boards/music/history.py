@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.music import MusicLibrary, MusicPlayer, MusicStorage
+from modu_workbench.ui_kit.components import EmptyState
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import TRACK_ID_ROLE, configure_table
@@ -82,6 +83,12 @@ class MusicHistoryPage(QWidget):
 
         self._table = configure_table(QTableWidget(), ["曲名", "歌手", "行为", "时间", "文件"])
         self._table.doubleClicked.connect(lambda _index: self.play_selected())
+        self._empty = EmptyState(
+            "🕘", "还没有播放记录",
+            "播放或下载过的曲目会自动记录在这里",
+        )
+        self._empty.setMaximumHeight(240)
+        layout.addWidget(self._empty, 1 if 'layout' == 'layout' else 2)
         layout.addWidget(self._table, 1)
 
         actions = QHBoxLayout()
@@ -107,6 +114,8 @@ class MusicHistoryPage(QWidget):
     def reload(self) -> None:
         self._entries = self._storage.list_history(300)
         self._table.setRowCount(len(self._entries))
+        self._empty.setVisible(not self._entries)
+        self._table.setVisible(bool(self._entries))
         action_labels = {"play": "播放", "download": "下载"}
         for row, entry in enumerate(self._entries):
             title_item = QTableWidgetItem(entry.title)

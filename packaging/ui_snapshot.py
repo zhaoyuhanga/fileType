@@ -36,16 +36,32 @@ from modu_workbench.ui_kit.theme import apply_theme  # noqa: E402
 
 
 def snapshot(app: QApplication, shell: AppShell, key: str, out_dir: Path,
-             width: int, height: int) -> Path:
+             width: int, height: int, sub_pages: list[str] | None = None) -> list[Path]:
+    """渲染某个板块（可选再渲染它的若干子页）。返回生成的文件列表。"""
     shell.go_page(key)
     shell.resize(width, height)
     app.processEvents()
     page = shell.current_page()
-    page.repaint()
-    app.processEvents()
+    created: list[Path] = []
+
+    def grab(target: Path) -> None:
+        page.repaint()
+        app.processEvents()
+        page.grab().save(str(target))
+        created.append(target)
+
     target = out_dir / f"board-{key}.png"
-    page.grab().save(str(target))
-    return target
+    grab(target)
+
+    # 子页：板块页面提供 show_page(key)（影视/乐库等板块都是这个约定）
+    if sub_pages:
+        show_page = getattr(page, "show_page", None)
+        if callable(show_page):
+            for sub in sub_pages:
+                show_page(sub)
+                app.processEvents()
+                grab(out_dir / f"board-{key}-{sub}.png")
+    return created
 
 
 def main() -> int:
@@ -54,6 +70,8 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=820)
     parser.add_argument("--out", default=str(REPO / "docs" / "ui"))
     parser.add_argument("--only", default="", help="只渲染某个板块 key（home/book/...）")
+    parser.add_argument("--sub", default="",
+                        help="额外渲染该板块的子页（逗号分隔，如 search,library,history）")
     args = parser.parse_args()
 
     out_dir = Path(args.out)
@@ -70,10 +88,12 @@ def main() -> int:
     keys = ["home", *[spec.key for spec in ACTIVE_BOARDS]]
     if args.only:
         keys = [key for key in keys if key == args.only]
+    sub_pages = [item.strip() for item in args.sub.split(",") if item.strip()]
 
     for key in keys:
-        target = snapshot(app, shell, key, out_dir, args.width, args.height)
-        print(f"已生成 {target.relative_to(REPO)}")
+        targets = snapshot(app, shell, key, out_dir, args.width, args.height, sub_pages)
+        for target in targets:
+            print(f"已生成 {target.relative_to(REPO)}")
 
     shell.close()
     return 0
