@@ -137,7 +137,7 @@ ui_kit          ✗→ boards/*、core/<board>
 | P2 | 解耦：ffmpeg 定位、时长探测、HTTP、设置抽到 `core/platform/`；`app_context` 拆分为板块各自 context | 无跨板块 import；全量测试通过 |
 | P3 | 数据库：单库 + 迁移 + 旧库导入 + 仓储层统一 | `test_db_schema`/`test_db_migration` 通过；旧数据可读 |
 | P4 | UI 重设计：令牌 + 组件库 + 五板块页面重构 | 截图验收 + UI 测试通过 |
-| P5 | 前端统一（方案 A/B） | 转换/文档预览功能对照旧版逐项通过 |
+| P5 | 前端统一（方案 A：Qt 单栈）✅ 已完成 | 移除 React/QtWebEngine；转换与文档预览走原生 Qt；自检 `single_qt_stack` 通过 |
 | P6 | 测试与文档补齐 | 覆盖率报告、`docs/*` 齐全、每板块冒烟清单 |
 | P7 | 定版 v1.0.0 | 全量测试 + 打包自检 + 安装包（如需） |
 

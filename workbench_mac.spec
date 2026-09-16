@@ -45,13 +45,9 @@ a = Analysis(
         "modu_workbench.boards.convert.doc_viewer",
         "modu_workbench.core.convert.media_io",
         "modu_workbench.core.convert.pdf_out",
-        "modu_workbench.services.web_bridge",
         # 分板块设置页（旧版单体 settings_dialog 已拆分为 ui_kit/settings/ 包）
         "modu_workbench.ui_kit.settings",
         "modu_workbench.ui_kit.settings.base",
-        "PySide6.QtWebEngineWidgets",
-        "PySide6.QtWebEngineCore",
-        "PySide6.QtWebChannel",
         "markdown.extensions.extra",
         "markdown.extensions.fenced_code",
         "markdown.extensions.sane_lists",

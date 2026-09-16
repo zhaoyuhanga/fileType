@@ -177,7 +177,7 @@ Electron 主进程代码仅作参考，不再构建维护。
 
 ## 技术栈
 
-- Python 3.10+ / PySide6(Qt6) 单应用
+- Python 3.10+ / PySide6(Qt6) 单应用（**前端统一 Qt 单栈**：不依赖 Node/React/QtWebEngine）
 - 内嵌前端：QtWebEngine + QWebChannel（React 产物见 `src/modu_workbench/webfront/`，桥协议见 `services/bridge_shim.js`）
 - 解析：ebooklib（EPUB）、python-docx、openpyxl/xlrd、Pillow、markdown/html2text、chardet、Pygments（预览高亮）
 - 持久化：SQLite（stdlib sqlite3，`library.db` 书籍进度/历史、`music.db` 曲库/歌单/播放历史）

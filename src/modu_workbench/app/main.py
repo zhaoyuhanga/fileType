@@ -70,45 +70,31 @@ def _run_dependency_check(output_path: str) -> int:
 
         return get_lexer_by_name("json") is not None
 
-    def check_webengine_import() -> bool:
-        try:
-            import PySide6.QtWebEngineWidgets  # noqa: F401
-            import PySide6.QtWebEngineCore  # noqa: F401
+    def check_single_qt_stack() -> bool:
+        """v1.0.0：前端统一为 Qt 单栈。
 
-            return True
-        except Exception:  # noqa: BLE001
-            return False
+        用 AST 精确检查"有没有任何模块 import 了 QtWebEngine"（注释里提到不算），
+        并确认内嵌前端产物目录已不存在。
+        """
+        import ast
+        import pathlib
 
-    def check_webengine_render() -> bool:
-        """真实渲染自检：创建 QWebEngineView 并确认 HTML 加载成功。"""
-        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
-            return True  # 无头环境不要求 Chromium 渲染
-        try:
-            from PySide6.QtCore import QEventLoop, QTimer
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtWebEngineWidgets import QWebEngineView
-
-            app = QApplication.instance() or QApplication([])
-            view = QWebEngineView()
-            state = {"ok": False}
-            view.loadFinished.connect(lambda ok: state.update(ok=bool(ok)))
-            view.setHtml("<!doctype html><html><body>ok</body></html>")
-            loop = QEventLoop()
-            view.loadFinished.connect(lambda _ok: loop.quit())
-            QTimer.singleShot(4000, loop.quit)
-            loop.exec()
-            view.close()
-            return bool(state["ok"])
-        except Exception:  # noqa: BLE001
-            return False
-
-    def check_webfront_present() -> bool:
-        from modu_workbench.services.webfront import webfront_dir
-
-        front = webfront_dir()
-        if front is None:
-            return False
-        return (front / "index.html").is_file() and (front / "bridge_shim.js").is_file()
+        root = pathlib.Path(__file__).resolve().parent.parent
+        needle = "PySide6.QtWebEngine"
+        for path in list(root.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
+            except SyntaxError:
+                return False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    if any(alias.name.startswith(needle) for alias in node.names):
+                        return False
+                elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith(needle):
+                    return False
+        return not (root / "webfront").exists()
 
     def check_multimedia() -> bool:
         """墨软乐库播放依赖 QtMultimedia（打包必须带上）。"""
@@ -575,9 +561,7 @@ def _run_dependency_check(output_path: str) -> int:
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
     record("lexer_by_name", check_lexer_by_name)
-    record("webengine_import", check_webengine_import)
-    record("webengine_render", check_webengine_render)
-    record("webfront_present", check_webfront_present)
+    record("single_qt_stack", check_single_qt_stack)
     record("multimedia", check_multimedia)
     record("multimedia_playback", check_multimedia_playback)
     record("music_core", check_music_core)

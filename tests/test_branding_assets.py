@@ -77,7 +77,6 @@ def test_build_scripts_keep_utf8_bom() -> None:
     for name in (
         "packaging/installer.nsi",
         "packaging/build_installer.ps1",
-        "packaging/build_webfront.ps1",
     ):
         raw = (REPO_ROOT / name).read_bytes()
         assert raw.startswith(b"\xef\xbb\xbf"), f"{name} 缺少 UTF-8 BOM"

@@ -4,6 +4,10 @@
 # 产物：dist/ModuWorkbench/ModuWorkbench.exe
 
 EXCLUDES = [
+    # v1.0.0：前端统一 Qt 单栈，不再打包 QtWebEngine（体积减约 200MB）
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebEngineQuick",
     # 用不到的 Qt 大模块（保留 QtWebEngine 用于文档预览渲染）
     "PySide6.Qt3DCore",
     "PySide6.Qt3DRender",
@@ -37,7 +41,6 @@ a = Analysis(
     pathex=["src"],
     binaries=[],
     datas=[
-        ("src/modu_workbench/webfront", "modu_workbench/webfront"),
         # 应用图标与安装包图形（services/assets.py 定位）
         ("src/modu_workbench/assets", "modu_workbench/assets"),
         # 随包 ffmpeg：用户无需自行安装即可转换音视频 / 下载 HLS 为 MP4
@@ -80,11 +83,6 @@ a = Analysis(
         "pygments.lexers.markup",
         "pygments.formatters.html",
         # 文档预览 WebView（完整 CSS 渲染，与旧版 Web 预览一致）
-        "PySide6.QtWebEngineWidgets",
-        "PySide6.QtWebEngineCore",
-        "PySide6.QtWebChannel",
-        "modu_workbench.boards.convert.web",
-        "modu_workbench.services.web_bridge",
         # 墨软乐库：板块页面与核心引擎（含 QtMultimedia 播放与在线音源）
         "modu_workbench.boards.music.board",
         "modu_workbench.boards.music.search",

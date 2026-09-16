@@ -204,21 +204,11 @@ def _render_txt(content: str) -> str:
 
 
 def _make_preview_widget(parent: QWidget) -> QWidget:
-    """创建预览控件：优先 QtWebEngine（完整 CSS），无头环境回退 QTextBrowser。"""
-    if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
-        try:
-            from PySide6.QtWebEngineWidgets import QWebEngineView
+    """创建预览控件：统一用 QTextBrowser（Qt 单栈，不再依赖 QtWebEngine）。
 
-            view = QWebEngineView(parent)
-            settings = view.settings()
-            from PySide6.QtWebEngineCore import QWebEngineSettings
-
-            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, False)
-            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
-            view._preview_engine = "Chromium"  # type: ignore[attr-defined]
-            return view
-        except Exception:  # noqa: BLE001
-            pass
+    渲染能力：Markdown → HTML、JSON 高亮、HTML 富文本、TXT 等宽——均由
+    `QTextDocument` 自带能力完成（见 `_render_markdown` / `_render_json` / `_wrap_page`）。
+    """
     browser = QTextBrowser(parent)
     browser.setOpenExternalLinks(False)
     browser._preview_engine = "兼容文本预览"  # type: ignore[attr-defined]

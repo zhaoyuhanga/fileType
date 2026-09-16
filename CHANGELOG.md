@@ -115,6 +115,24 @@
 > 注：转换板块（P4f）与「前端统一为 Qt」（P5）改造同一批文件，**合并执行**：
 > 直接以原生 Qt 重写转换板块与文档预览，避免先改 Web 版再重写一遍。
 
+### P5 前端统一为 Qt 单栈（含 P4f 转换板块）
+
+- **转换板块**：永远使用原生 Qt 实现（文件表格 + 动作面板 + 批量转换 + 加入书架），
+  删除「可用则加载 React 内嵌前端」的分支——该分支此前只在非无头环境生效，等于线上走的是未测试路径。
+- **文档预览**：统一 `QTextBrowser`（Markdown/JSON/HTML/TXT 由 `QTextDocument` 渲染），
+  不再优先 QtWebEngine。
+- **影视播放**：移除 hls.js 网页兜底（QtWebEngine 的 Chromium 不含 H.264/AAC，兜底本就无效），
+  只保留 QtMultimedia 原生内核；`player_available()` 不再探测 QtWebEngine。
+- **删除**：`boards/convert/web.py`、`services/web_bridge.py`、`services/web_prepare.py`、
+  `services/webfront.py`、`services/bridge_shim.js`、`src/modu_workbench/webfront/`、
+  `packaging/build_webfront.ps1|sh`。
+- **打包**：spec 移除 WebEngine/webfront 条目并把 `PySide6.QtWebEngine*` 加入 EXCLUDES；
+  实测包体积 **731MB → 389MB**（其中随包 ffmpeg 196MB），QtWebEngine 已不在包内。
+- **自检**：`webengine_import`/`webengine_render`/`webfront_present` 三项替换为
+  `single_qt_stack`（AST 扫描确认无 QtWebEngine import 且无内嵌前端产物）。
+- **测试**：`test_web_bridge.py` → `tests/test_convert_files.py`（保留文件扫描用例），
+  版本单一来源测试独立为 `tests/test_version.py` 并改为校验"安装包版本由打包脚本注入"。
+
 ## v0.3.1 — 墨软影视修复版
 
 ### 修复：影视板块「播放和下载都失败」

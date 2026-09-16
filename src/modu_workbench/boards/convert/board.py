@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
 from modu_workbench.core.convert import engine as convert_engine
 from modu_workbench.core.convert.formats import TARGET_EXTENSION, format_from_extension, format_label
 from modu_workbench.core.convert.registry import ConverterAction, common_actions, get_action
+from modu_workbench.ui_kit.components import EmptyState, PageHeader
 from modu_workbench.ui_kit.settings import app_settings
+from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SECTION_GAP, SPACE
 from modu_workbench.ui_kit.toast import Toaster
 
 VIEWABLE_DOC_EXTENSIONS = {".txt", ".md", ".json", ".mp4"}
@@ -59,25 +61,22 @@ class ConvertBoardPage(QWidget):
 
     def __init__(self, output_dir: str | None = None, parent: QWidget | None = None):
         super().__init__(parent)
-        from .web import WebConvertPage, web_convert_available
-        from modu_workbench.services.webfront import webfront_dir
-
-        if web_convert_available():
-            front = webfront_dir()
-            self._web_page = WebConvertPage(front, self)  # type: ignore[arg-type]
-            lay = QVBoxLayout(self)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.addWidget(self._web_page)
-            self._web_mode = True
-            return
-        self._web_mode = False
+        # v1.0.0：前端统一为 Qt 单栈（原先的 React 内嵌前端与 QtWebEngine 已移除）
         self._toaster = Toaster(self)
         self._output_dir = output_dir or str(default_output_dir())
         self._worker: _ConvertWorker | None = None
         self._rows: list[dict] = []  # path/name/ext/format/checked/status
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(PAGE_MARGIN, SPACE["md"], PAGE_MARGIN, SPACE["md"])
+        layout.setSpacing(SECTION_GAP)
+
+        # 统一页头（与其他板块一致）
+        self._header = PageHeader(
+            "墨软转换",
+            "本地离线转换：文本 / 文档 / 表格 / 图片 / 媒体 / 归档；双击文件可在本地查看或编辑。",
+        )
+        layout.addWidget(self._header)
 
         toolbar = QHBoxLayout()
         add_files = QPushButton("添加文件")
@@ -129,7 +128,14 @@ class ConvertBoardPage(QWidget):
         left_header.addStretch(1)
         left_header.addWidget(self._count_label)
         left_layout.addLayout(left_header)
+        self._empty = EmptyState(
+            "📄", "还没有待转换的文件",
+            "用「添加文件 / 添加文件夹」把要处理的内容加进来，右侧会自动列出可用转换动作",
+        )
+        self._empty.setMaximumHeight(240)
+        left_layout.addWidget(self._empty)
         left_layout.addWidget(self._table, 1)
+        self._table.setVisible(False)          # 无文件时显示引导，有文件时切回表格
         splitter.addWidget(left)
 
         right = QWidget()
@@ -256,6 +262,9 @@ class ConvertBoardPage(QWidget):
     # ---------- 表格 ----------
 
     def _rebuild_table(self) -> None:
+        has_rows = bool(self._rows)
+        self._empty.setVisible(not has_rows)
+        self._table.setVisible(has_rows)
         self._table.blockSignals(True)
         self._table.setRowCount(len(self._rows))
         for row_index, row in enumerate(self._rows):

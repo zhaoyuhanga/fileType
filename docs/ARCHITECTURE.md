@@ -8,10 +8,11 @@
 - 仓库：沿用 fileType 仓库演进（历史保留），旧 Electron/React 代码归档于 `archive/electron-formatflow/`；
 - 板块化：首页 + 可扩展板块入口，当前为「墨软书库」「墨软转换」「墨软乐库」「墨软影视」「墨软图库」，未来可继续追加；
 - 后端主技术：**Python**（无 Node/Python 双运行时）；SQLite 用 Python 标准库 `sqlite3`；
-- **界面沿革（route A）**：转换板块与文档预览复用 main 分支 React 界面 —— Vite 产物由
-  `packaging/build_webfront.*` 整理进 `src/modu_workbench/webfront/`，QtWebEngine 加载，
-  经 QWebChannel（`services/web_bridge.py` + `services/bridge_shim.js`）调用 Python 引擎；
-  转换核心、文档读写、媒体流全部在 Python 侧，Electron 主进程与 Node 能力不再参与运行。
+- **界面技术（v1.0.0：Qt 单栈）**：全部界面为 PySide6 原生控件 —— 转换板块为 Qt 表格 + 动作面板，
+  文档预览用 `QTextBrowser`（Markdown/JSON/HTML/TXT 由 `QTextDocument` 渲染），
+  播放用 `QtMultimedia`（FFmpeg 后端）。内嵌 React 前端、`services/web_bridge.py`、
+  `webfront/` 产物与 QtWebEngine 依赖**已全部移除**（安装包体积减少约 340MB）。
+  自检项 `single_qt_stack` 会用 AST 扫描确保没有任何模块再 import QtWebEngine。
 
 ## 顶层结构
 

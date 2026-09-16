@@ -1,11 +1,11 @@
 """墨软影视播放器：QtMultimedia 原生播放，必要时回退到内嵌 Web 播放。
 
-为什么需要两套内核：
+播放内核（Qt 单栈）：
 - **QtMultimedia(QMediaPlayer + QVideoWidget)**：原生控件、进度/音量/倍速最稳，
   在 Windows 上由 Media Foundation 解码，本地文件与多数 http 直链都能播；
-- **QtWebEngine + hls.js**：m3u8 清单在部分环境下原生解码器不认，
-  这时改为内嵌网页播放，并通过本机流服务（services.media_server）代理清单与分片，
-  由服务端补上 Referer/UA —— 视频站普遍校验这些请求头。
+- **单栈说明（v1.0.0）**：不再使用 QtWebEngine + hls.js 兜底。实测 QtWebEngine 自带的
+  Chromium 不含 H.264/AAC，切过去只会更差；m3u8 由 QtMultimedia 的 FFmpeg 后端直接解码，
+  远程地址统一经本机流服务（services.media_server）代理（服务端补 Referer/UA）。
 
 对外只暴露 `VideoPlayerDialog`，两种内核的差异对调用方透明。
 """
@@ -285,22 +285,8 @@ class VideoPlayerDialog(QDialog):
             self._player.setPlaybackRate(1.0)
 
     def _build_web_surface(self) -> None:
-        """网页播放画面（QtWebEngine + hls.js），作为 HLS / 原生失败时的兜底。"""
-        try:
-            from PySide6.QtWebEngineWidgets import QWebEngineView
-        except Exception:  # noqa: BLE001  无 WebEngine 时仅原生
-            return
-        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
-            return
-        try:
-            view = QWebEngineView(self)
-            self._web_page = view.page()
-            self._stack.addWidget(view)
-            self._view = view
-            self._web_holder = view
-        except Exception:  # noqa: BLE001
-            self._view = None
-            self._web_holder = None
+        """v1.0.0：网页播放内核已移除（Qt 单栈），保留空实现以兼容既有调用。"""
+        return
 
     # ------------------------------------------------------------------ 加载
 
@@ -333,7 +319,7 @@ class VideoPlayerDialog(QDialog):
         elif self._web_holder is not None:
             self._start_web(play_url, referer)
         else:
-            self._status.setText("⚠ 当前环境既没有 QtMultimedia 也没有 QtWebEngine，无法播放")
+            self._status.setText("⚠ 当前环境缺少 QtMultimedia（音视频后端），无法播放；请安装完整版 PySide6")
 
     def _start_native(self, play_url: str) -> None:
         self._native_ok = False
@@ -347,7 +333,8 @@ class VideoPlayerDialog(QDialog):
         self._player.setSource(QUrl(play_url, QUrl.ParsingMode.TolerantMode))
         self._player.play()
         self._status.setText("正在加载…（HLS 需要先缓冲若干分片，请稍候）")
-        # 超时仍未起播 → 回退网页内核（没有 WebEngine 时给出可操作提示）
+        # 超时仍未起播 → 给出可操作提示（v1.0.0 起不再有 hls.js 网页兜底：
+        # QtWebEngine 的 Chromium 不含 H.264/AAC，切过去只会更差）
         QTimer.singleShot(self._grace_ms(), self._check_native_started)
 
     def _grace_ms(self) -> int:
@@ -373,89 +360,18 @@ class VideoPlayerDialog(QDialog):
             )
             QTimer.singleShot(NATIVE_GRACE_MS, self._check_native_started)
             return
-        # HLS 不切网页内核：QtWebEngine 内置 Chromium 不含 H.264/AAC，
-        # 而影视源几乎全是 H.264 —— 切过去只会得到 bufferAppendError，反而更差。
-        if self._is_hls or self._web_holder is None:
-            self._status.setText(
-                "⚠ 该地址未能起播。可能原因：片源线路已失效、需要更长时间，或编码不被原生解码器支持。"
-                "可尝试切换清晰度/换源，或先下载到本地再播放。"
-            )
-            return
-        self._status.setText("原生解码未起播，已切换网页播放内核…")
-        self._start_web(self._play_url, self._referer)
+        # v1.0.0：只有原生内核（不再有 hls.js 网页兜底）
+        self._status.setText(
+            "⚠ 该地址未能起播。可能原因：片源线路已失效、需要更长时间，或编码不被原生解码器支持。"
+            "可尝试切换清晰度/换源，或先下载到本地再播放。"
+        )
 
     def _start_web(self, play_url: str, referer: str) -> None:
-        self._web_engine_active = True
-        # 停掉原生内核，避免两套播放器同时出声
-        if self._player is not None:
-            try:
-                self._player.stop()
-            except Exception:  # noqa: BLE001
-                pass
-        self._engine_label.setText("网页内核（hls.js）")
-        self._stack.setCurrentWidget(self._web_holder)
-        self._web_page.setHtml(self._player_html(play_url, referer), QUrl("http://127.0.0.1/"))
-        self._status.setText("网页内核加载中…（HLS 首次播放需联网拉取 hls.js）")
-
-    def _player_html(self, play_url: str, referer: str) -> str:
-        cdn_list = json.dumps(list(HLS_JS_CDNS))
-        start_seconds = self._start_ms / 1000
-        volume = self._volume.value() / 100
-        return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<style>
-  html,body {{ margin:0; padding:0; background:#0d1117; height:100%; overflow:hidden; }}
-  video {{ width:100%; height:100%; background:#000; outline:none; }}
-  #tip {{ position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-          color:#c9d1d9; font:14px/1.7 "Microsoft YaHei",sans-serif; text-align:center; }}
-</style></head>
-<body>
-<video id="v" controls autoplay playsinline preload="auto"></video>
-<div id="tip">正在初始化播放内核…</div>
-<script>
-const SRC = {json.dumps(play_url)};
-const IS_HLS = {str(bool(self._is_hls)).lower()};
-const START = {start_seconds};
-const CDNS = {cdn_list};
-const video = document.getElementById('v');
-const tip = document.getElementById('tip');
-function say(text) {{ tip.innerHTML = text; tip.style.display = 'block'; }}
-function hide() {{ tip.style.display = 'none'; }}
-video.volume = {volume:.2f};
-video.addEventListener('loadedmetadata', () => {{
-  hide();
-  if (START > 0 && video.duration > START) {{ video.currentTime = START; }}
-  video.play().catch(() => {{}});
-}});
-video.addEventListener('error', () => {{
-  say('播放失败：地址可能已失效或需要专用请求头。<br>可返回后<b>下载到本地</b>再播放。');
-}});
-function attachNative() {{
-  video.src = SRC;
-  say('使用浏览器原生解码…');
-  video.load();
-}}
-function attachHls(Hls) {{
-  const hls = new Hls({{ enableWorker: true, lowLatencyMode: false, maxBufferLength: 60 }});
-  hls.on(Hls.Events.ERROR, (evt, data) => {{
-    if (data && data.fatal) {{ say('播放错误：' + data.type + ' / ' + data.details); }}
-  }});
-  hls.loadSource(SRC);
-  hls.attachMedia(video);
-  say('hls.js 已接管播放…');
-}}
-function loadScript(index) {{
-  if (index >= CDNS.length) {{ attachNative(); return; }}
-  const script = document.createElement('script');
-  script.src = CDNS[index];
-  script.onload = () => {{ window.Hls ? attachHls(window.Hls) : attachNative(); }};
-  script.onerror = () => loadScript(index + 1);
-  document.head.appendChild(script);
-}}
-if (!IS_HLS) {{ attachNative(); }}
-else if (video.canPlayType('application/vnd.apple.mpegurl')) {{ attachNative(); }}
-else {{ loadScript(0); }}
-</script></body></html>"""
+        """v1.0.0：不再有网页内核；直接给出可操作提示。"""
+        self._web_engine_active = False
+        self._status.setText(
+            "⚠ 该地址原生解码器未能起播。可尝试切换清晰度/换源，或先下载到本地再播放。"
+        )
 
     # ------------------------------------------------------------------ 控制
 
@@ -476,15 +392,12 @@ else {{ loadScript(0); }}
 
     @property
     def _web_active(self) -> bool:
-        """当前是否由网页内核在播放（比控件比较更可靠：QWebEngineView 会被 Qt 包装）。"""
-        return bool(self._web_engine_active)
+        """v1.0.0：网页内核已移除，恒为 False（保留属性以兼容既有调用）。"""
+        return False
 
-    def _web_js(self, code: str) -> None:
-        if self._web_page is not None:
-            try:
-                self._web_page.runJavaScript(code)
-            except Exception:  # noqa: BLE001
-                pass
+    def _web_js(self, code: str) -> None:  # noqa: ARG002
+        """v1.0.0：网页内核已移除，保留空实现以兼容既有调用。"""
+        return
 
     def _on_slider_pressed(self) -> None:
         self._dragging = True
@@ -658,17 +571,11 @@ else {{ loadScript(0); }}
 
 
 def player_available() -> bool:
-    """是否有可用的视频播放后端（原生或网页任一即可）。"""
+    """是否有可用的播放后端（Qt 单栈：只看 QtMultimedia）。"""
     try:
         from PySide6.QtMultimedia import QMediaPlayer  # noqa: F401
 
         return True
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
-
-        return os.environ.get("QT_QPA_PLATFORM") != "offscreen"
     except Exception:  # noqa: BLE001
         return False
 
