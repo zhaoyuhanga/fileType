@@ -196,19 +196,19 @@ $exeBytes = [System.IO.File]::ReadAllBytes($exePath)
 $exeText = [System.Text.Encoding]::UTF8.GetString($exeBytes)
 
 $required = @(
-    "modu_workbench.boards.video_board",
-    "modu_workbench.boards.video_search",
-    "modu_workbench.boards.video_player",
+    "modu_workbench.boards.video.board",
+    "modu_workbench.boards.video.search",
+    "modu_workbench.boards.video.player",
     "modu_workbench.core.video.sources",
     "modu_workbench.core.video.sources.providers.cms_vod",
     "modu_workbench.core.video.downloader",
-    "modu_workbench.boards.gallery_board",
-    "modu_workbench.boards.gallery_widgets",
-    "modu_workbench.boards.gallery_editor",
-    "modu_workbench.boards.gallery_enhance",
-    "modu_workbench.core.image.library",
-    "modu_workbench.core.image.enhance",
-    "modu_workbench.core.image.ai",
+    "modu_workbench.boards.gallery.board",
+    "modu_workbench.boards.gallery.widgets",
+    "modu_workbench.boards.gallery.editor",
+    "modu_workbench.boards.gallery.enhance",
+    "modu_workbench.core.gallery.library",
+    "modu_workbench.core.gallery.enhance",
+    "modu_workbench.core.gallery.ai",
     "modu_workbench.core.llm.router",
     "modu_workbench.ui_kit.settings.llm"
 )
@@ -243,10 +243,10 @@ if (Test-Path $checkOut2) {
         Write-Ok "全部自检项通过（含 video_core）"
     }
     if ($null -eq $json2.video_core) {
-        Write-Warn2 "自检结果里没有 video_core 项，请确认 main.py 的 record(\"video_core\", ...) 存在。"
+        Write-Warn2 "自检结果里没有 video_core 项，请确认 app/main.py 的 record(\"video_core\", ...) 存在。"
     }
     if ($null -eq $json2.gallery_core) {
-        Write-Warn2 "自检结果里没有 gallery_core 项，请确认 main.py 的 record(\"gallery_core\", ...) 存在。"
+        Write-Warn2 "自检结果里没有 gallery_core 项，请确认 app/main.py 的 record(\"gallery_core\", ...) 存在。"
     }
 } else {
     Write-Warn2 "打包产物未输出自检结果，请手动运行 $exePath 确认首页有五张板块卡。"

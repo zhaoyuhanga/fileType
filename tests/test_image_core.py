@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from modu_workbench.core.image import (
+from modu_workbench.core.gallery import (
     ADJUST_LABELS,
     EXPORT_FORMATS,
     SPECS,
@@ -43,7 +43,7 @@ from modu_workbench.core.image import (
     scan_image_files,
     sha256_file,
 )
-from modu_workbench.core.image.hashing import dhash_image as _dhash
+from modu_workbench.core.gallery.hashing import dhash_image as _dhash
 
 # --------------------------------------------------------------------------- 夹具
 
@@ -496,7 +496,7 @@ def test_ai_config_roundtrip(storage: ImageStorage) -> None:
 
 
 def test_ai_parses_keyword_json() -> None:
-    from modu_workbench.core.image.ai import _parse_str_list
+    from modu_workbench.core.gallery.ai import _parse_str_list
 
     assert _parse_str_list('["海边", "日落"]') == ["海边", "日落"]
     assert _parse_str_list('```json\n["a","b"]\n```') == ["a", "b"]
@@ -504,7 +504,7 @@ def test_ai_parses_keyword_json() -> None:
 
 
 def test_ai_parses_edit_params_json() -> None:
-    from modu_workbench.core.image.ai import _parse_json_object
+    from modu_workbench.core.gallery.ai import _parse_json_object
 
     assert _parse_json_object('{"filter": "黑白"}') == {"filter": "黑白"}
     assert _parse_json_object('说明文字 {"brightness": 1.2} 结尾') == {"brightness": 1.2}

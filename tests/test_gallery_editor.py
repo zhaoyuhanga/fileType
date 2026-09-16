@@ -12,8 +12,8 @@ import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
-from modu_workbench.boards.gallery_editor import PREVIEW_MAX, ImageEditorDialog
-from modu_workbench.core.image import ImageLibrary, ImageStorage
+from modu_workbench.boards.gallery.editor import PREVIEW_MAX, ImageEditorDialog
+from modu_workbench.core.gallery import ImageLibrary, ImageStorage
 
 
 @pytest.fixture(scope="module")
@@ -122,7 +122,7 @@ def test_editor_save_as_new_creates_file(qapp: QApplication, library: ImageLibra
     target = tmp_path / "导出" / "结果.jpg"
     target.parent.mkdir()
     monkeypatch.setattr(
-        "modu_workbench.boards.gallery_editor.QFileDialog.getSaveFileName",
+        "modu_workbench.boards.gallery.editor.QFileDialog.getSaveFileName",
         staticmethod(lambda *a, **k: (str(target), "")),
     )
     saved: list[str] = []
@@ -147,7 +147,7 @@ def test_editor_overwrite_needs_confirmation(qapp: QApplication, library: ImageL
     dialog.show()
     qapp.processEvents()
     monkeypatch.setattr(
-        "modu_workbench.boards.gallery_editor.QMessageBox.question",
+        "modu_workbench.boards.gallery.editor.QMessageBox.question",
         staticmethod(lambda *a, **k: QMessageBox.StandardButton.No),
     )
     saved: list[str] = []

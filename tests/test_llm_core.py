@@ -251,7 +251,7 @@ def test_legacy_migration_skips_without_key(storage: LlmStorage) -> None:
 
 
 def test_config_from_profile_maps_vision_model() -> None:
-    from modu_workbench.core.image.ai import config_from_profile
+    from modu_workbench.core.gallery.ai import config_from_profile
 
     profile = ModelProfile(kind=KIND_IMAGE, provider="deepseek", api_key="k",
                            base_url="https://x/v1", model="deepseek-vl", max_tokens=2048)

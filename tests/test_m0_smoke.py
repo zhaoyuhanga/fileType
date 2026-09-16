@@ -8,9 +8,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from modu_workbench.app_shell import HOME_KEY, AppShell
-from modu_workbench.boards.home_board import HomePage
-from modu_workbench.boards.registry import ACTIVE_BOARDS, get_board
+from modu_workbench.app.shell import HOME_KEY, AppShell
+from modu_workbench.boards.home.page import HomePage
+from modu_workbench.app.registry import ACTIVE_BOARDS, get_board
 from modu_workbench.ui_kit.theme import ThemeTokens, app_qss
 
 

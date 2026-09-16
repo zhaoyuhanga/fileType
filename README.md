@@ -30,7 +30,7 @@ Electron 主进程代码仅作参考，不再构建维护。
 | 墨软乐库 | 在线搜索（歌曲/歌手/专辑/类型）与批量下载、内置播放条（顺序/列表循环/单曲循环/随机）、我的音乐（导入/收藏/分类/筛选）、歌单收藏（含待下载项）、播放历史、批量音频格式转换 | ✅ |
 | 墨软影视 | 在线搜索电影/电视剧/动漫（多源聚合/去重/换源重试）与剧集下载、内置播放器（多清晰度/倍速/全屏/续播）、我的视频（分类/收藏/筛选/导入）、播放历史、视频格式转换 | ✅ |
 | 墨软图库 | 网格/瀑布流/时间轴浏览、相册标签收藏、批量导入与内容去重、EXIF、重复识别、裁剪滤镜调节文字马赛克涂鸦（可撤销）、本地增强（一键增强/超分/降噪/去模糊/抠图/消除/风格化）、可选 DeepSeek 生成描述标签 | ✅ |
-| （可扩展） | 新增板块：`boards/registry.py` 注册一条即可，首页与顶栏自动出现 | — |
+| （可扩展） | 新增板块：`app/registry.py` 注册一条即可，首页与顶栏自动出现 | — |
 
 ### 墨软乐库使用说明
 
@@ -298,8 +298,8 @@ webfront 产物 / QtMultimedia / **真实音频解码播放**（播放一段静�
 
 ```
 src/modu_workbench/
-├── main.py / __main__.py      # 入口
-├── app_shell.py               # 主壳：顶栏（首页/板块/设置）+ 页面栈
+├── app/main.py / __main__.py      # 入口
+├── app/shell.py               # 主壳：顶栏（首页/板块/设置）+ 页面栈
 ├── boards/                    # ★ 板块注册与页面
 │   ├── registry.py / base.py  # 板块注册表（可扩展）
 │   ├── home_board.py          # 首页：介绍 + 板块入口
@@ -328,7 +328,7 @@ src/modu_workbench/
 │   ├── gallery_widgets.py     # 墨软图库：缩略图网格/查看器/对话框/后台线程
 │   ├── gallery_editor.py      # 墨软图库：编辑美化（裁剪/滤镜/调节/文字/马赛克/涂鸦/边框）
 │   └── gallery_enhance.py     # 墨软图库：AI 优化（本地增强 + 前后对比）
-├── core/reader/               # 书库引擎（迁移自 win-e-book）
+├── core/book/               # 书库引擎（迁移自 win-e-book）
 │   ├── parser.py / storage.py / library.py / online.py
 ├── core/music/                # 音乐引擎
 │   ├── models.py              # 曲目/在线结果/歌单/历史模型
@@ -354,7 +354,7 @@ src/modu_workbench/
 │   │   └── providers/         # cms_vod（苹果CMS 采集）/ public（Archive·Wikimedia·直链·自定义）
 │   ├── downloader.py          # 下载（HLS 合流 / 直链；进度/取消/换源重试/容器嗅探）
 │   └── library.py             # 影视库：导入/在线解析/下载入库/转换入口
-├── core/image/                # 图库引擎
+├── core/gallery/                # 图库引擎
 │   ├── models.py              # 图片/相册/标签/编辑步骤/AI 任务模型
 │   ├── storage.py             # SQLite：图片/相册/标签/编辑历史/AI 任务/设置
 │   ├── hashing.py             # 内容哈希(sha256) + 感知哈希(dhash) 去重与相似识别

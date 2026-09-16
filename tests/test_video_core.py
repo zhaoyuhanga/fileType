@@ -1349,7 +1349,7 @@ def test_unique_path_avoids_overwrite(tmp_path: Path) -> None:
 
 
 def test_video_board_registered() -> None:
-    from modu_workbench.boards.registry import ACTIVE_BOARDS, get_board
+    from modu_workbench.app.registry import ACTIVE_BOARDS, get_board
 
     spec = get_board("video")
     assert spec is not None

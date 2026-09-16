@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QWidget
 
-from modu_workbench.boards.book_reader import FONT_MAX, FONT_MIN, ReaderView
-from modu_workbench.boards.book_shelf import ShelfView
-from modu_workbench.core.reader import Library, Storage
+from modu_workbench.boards.book.reader import FONT_MAX, FONT_MIN, ReaderView
+from modu_workbench.boards.book.shelf import ShelfView
+from modu_workbench.core.book import Library, Storage
 from modu_workbench.ui_kit.toast import Toaster
 
 
@@ -77,7 +77,7 @@ def test_reader_navigation_and_theme(qapp: QApplication, library: Library) -> No
 
 
 def test_board_page_opens_reader_and_back(qapp: QApplication, library: Library) -> None:
-    from modu_workbench.boards.book_board import BookBoardPage
+    from modu_workbench.boards.book.board import BookBoardPage
 
     # 用同一份 library 不方便注入；改验证 BookBoardPage 自身能创建并列出书籍为空/有书。
     board = BookBoardPage()
@@ -90,7 +90,7 @@ def test_board_page_opens_reader_and_back(qapp: QApplication, library: Library) 
 
 
 def test_board_mode_switch_to_online(qapp: QApplication) -> None:
-    from modu_workbench.boards.book_board import ONLINE_KEY, SHELF_KEY, BookBoardPage
+    from modu_workbench.boards.book.board import ONLINE_KEY, SHELF_KEY, BookBoardPage
 
     board = BookBoardPage()
     try:
@@ -103,7 +103,7 @@ def test_board_mode_switch_to_online(qapp: QApplication) -> None:
 
 
 def test_online_page_compliance_gate(qapp: QApplication, library: Library) -> None:
-    from modu_workbench.boards.book_online import OnlineDownloadPage
+    from modu_workbench.boards.book.online import OnlineDownloadPage
 
     page = OnlineDownloadPage(library, _toaster(qapp))
     try:

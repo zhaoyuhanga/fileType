@@ -5,10 +5,10 @@
 """
 from __future__ import annotations
 
-from modu_workbench.core.image import ImageLibrary, ImageStorage
+from modu_workbench.core.gallery import ImageLibrary, ImageStorage
 from modu_workbench.core.llm import LlmStorage, ModelRouter
 from modu_workbench.core.music import MusicLibrary, MusicRegistry, MusicPlayer, MusicStorage, registry
-from modu_workbench.core.reader import Library, Storage
+from modu_workbench.core.book import Library, Storage
 from modu_workbench.core.video import VideoLibrary, VideoRegistry, VideoStorage
 from modu_workbench.core.video.sources import registry as video_source_registry
 

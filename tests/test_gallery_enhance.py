@@ -12,8 +12,8 @@ import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from modu_workbench.boards.gallery_enhance import EnhanceDialog
-from modu_workbench.core.image import SPECS, STYLE_PRESETS, ImageLibrary, ImageStorage
+from modu_workbench.boards.gallery.enhance import EnhanceDialog
+from modu_workbench.core.gallery import SPECS, STYLE_PRESETS, ImageLibrary, ImageStorage
 
 
 @pytest.fixture(scope="module")

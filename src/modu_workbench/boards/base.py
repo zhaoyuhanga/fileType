@@ -2,7 +2,7 @@
 
 新增板块步骤：
 1. 在 boards/ 下新建页面模块（继承 QWidget）；
-2. 在 boards/registry.py 追加一个 BoardSpec；
+2. 在 app/registry.py 追加一个 BoardSpec；
 3. 首页与顶栏自动出现入口。
 """
 from __future__ import annotations

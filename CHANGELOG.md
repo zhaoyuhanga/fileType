@@ -3,6 +3,22 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml`、内嵌前端注入版本保持一致，见 `tests/test_web_bridge.py::test_version_single_source`）。
 
+## v1.0.0 — 架构重构与定版（进行中）
+
+> 目标、目录设计与阶段验收见 `docs/REFACTOR_PLAN.md`。
+
+### P1 目录与包边界重构
+
+- **五大板块各自成包**：`boards/home|book|convert|music|video|gallery/`，
+  板块入口固定 `board.py`，同板块子页按功能命名（`search.py` / `detail.py` / `player.py` /
+  `widgets.py` / `library_page.py` / `history.py` / `sources.py`），前缀式平铺文件全部取消。
+- **应用骨架独立**：`main.py`→`app/main.py`、`app_shell.py`→`app/shell.py`、
+  `boards/registry.py`→`app/registry.py`。
+- **引擎包名对齐板块**：`core/reader`→`core/book`、`core/image`→`core/gallery`。
+- **新增 `tests/test_architecture.py`**：用依赖规则（AST 解析 import）锁死
+  「板块之间互不影响」，并显式登记待解耦清单（P2 清空）。
+- 全部用 `git mv` 迁移以保留历史；全量 pytest 通过。
+
 ## v0.3.1 — 墨软影视修复版
 
 ### 修复：影视板块「播放和下载都失败」

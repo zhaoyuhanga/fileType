@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from modu_workbench.core.reader import Library, Storage
+from modu_workbench.core.book import Library, Storage
 
 
 @pytest.fixture()

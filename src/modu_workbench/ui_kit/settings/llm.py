@@ -416,7 +416,7 @@ class LlmSettingsPage(SettingsPage):
         self._refresh_usage()
 
     def _migrate_legacy(self) -> None:
-        from modu_workbench.core.image import load_ai_config
+        from modu_workbench.core.gallery import load_ai_config
 
         try:
             legacy = load_ai_config(app_context.image_storage())

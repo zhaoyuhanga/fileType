@@ -1,7 +1,7 @@
 """DocViewer 预览渲染测试：Markdown 排版 / JSON 与代码块语法高亮。"""
 from __future__ import annotations
 
-from modu_workbench.boards.doc_viewer import _render_json, _render_markdown, highlight_code
+from modu_workbench.boards.convert.doc_viewer import _render_json, _render_markdown, highlight_code
 
 
 def test_highlight_json_code() -> None:

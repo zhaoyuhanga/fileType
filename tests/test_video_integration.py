@@ -29,15 +29,15 @@ VIDEO_MODULES = [
     "modu_workbench.core.video.sources.providers",
     "modu_workbench.core.video.sources.providers.cms_vod",
     "modu_workbench.core.video.sources.providers.public",
-    "modu_workbench.boards.video_board",
-    "modu_workbench.boards.video_search",
-    "modu_workbench.boards.video_detail",
-    "modu_workbench.boards.video_library_page",
-    "modu_workbench.boards.video_history",
-    "modu_workbench.boards.video_sources",
-    "modu_workbench.boards.video_player",
-    "modu_workbench.boards.video_widgets",
-    "modu_workbench.boards.registry",
+    "modu_workbench.boards.video.board",
+    "modu_workbench.boards.video.search",
+    "modu_workbench.boards.video.detail",
+    "modu_workbench.boards.video.library_page",
+    "modu_workbench.boards.video.history",
+    "modu_workbench.boards.video.sources",
+    "modu_workbench.boards.video.player",
+    "modu_workbench.boards.video.widgets",
+    "modu_workbench.app.registry",
     "modu_workbench.services.app_context",
     "modu_workbench.services.config",
     "modu_workbench.services.media_server",
@@ -56,10 +56,10 @@ def test_video_modules_import(module: str) -> None:
 
 def test_app_entry_imports_cleanly() -> None:
     """入口与主壳导入无环、无笔误。"""
-    import modu_workbench.main as main_module
+    import modu_workbench.app.main as main_module
 
     assert callable(main_module.main)
-    from modu_workbench import app_shell
+    from modu_workbench.app import shell as app_shell
 
     assert app_shell.AppShell is not None
 
@@ -102,7 +102,7 @@ def test_video_registry_settings_persist_through_app_context() -> None:
 
 def test_new_board_is_listed_on_home_page() -> None:
     """首页卡片来自 ACTIVE_BOARDS，因此新板块会自动出现。"""
-    from modu_workbench.boards.registry import ACTIVE_BOARDS
+    from modu_workbench.app.registry import ACTIVE_BOARDS
 
     titles = [board.title for board in ACTIVE_BOARDS]
     assert titles[:4] == ["墨软书库", "墨软转换", "墨软乐库", "墨软影视"]

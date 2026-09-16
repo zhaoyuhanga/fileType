@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from modu_workbench.core.reader.parser import parse_txt, parse_epub, _split_txt_into_chapters
+from modu_workbench.core.book.parser import parse_txt, parse_epub, _split_txt_into_chapters
 
 
 # ---------- TXT 解析测试 ----------

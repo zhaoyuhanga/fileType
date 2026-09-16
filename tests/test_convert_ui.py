@@ -7,8 +7,8 @@ import pytest
 from PySide6.QtCore import QEventLoop
 from PySide6.QtWidgets import QApplication
 
-from modu_workbench.boards.convert_board import ConvertBoardPage
-from modu_workbench.boards.doc_viewer import DocViewerDialog
+from modu_workbench.boards.convert.board import ConvertBoardPage
+from modu_workbench.boards.convert.doc_viewer import DocViewerDialog
 
 
 @pytest.fixture()

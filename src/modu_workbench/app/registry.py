@@ -1,0 +1,78 @@
+"""板块注册表：墨软·工作台当前可用板块。"""
+from __future__ import annotations
+
+from ..boards.book import board as book_board
+from ..boards.convert import board as convert_board
+from ..boards.gallery import board as gallery_board
+from ..boards.music import board as music_board
+from ..boards.video import board as video_board
+from ..boards.base import BoardSpec
+
+BOOK_BOARD = BoardSpec(
+    key="book",
+    title="墨软书库",
+    tagline="电子书阅读 · 本地书库",
+    description="导入 TXT / EPUB，自动章节解析、进度记忆、阅读主题与历史记录；内置在线书库下载（个人学习用途）。",
+    icon="📚",
+    phase="可用",
+    page=book_board.BookBoardPage,
+)
+
+CONVERT_BOARD = BoardSpec(
+    key="convert",
+    title="墨软转换",
+    tagline="文档 / 表格 / 图片 / 媒体 / 归档",
+    description="本地离线转换：文本互转、PDF、图片、归档与查看编辑（txt/md/json/mp4）；Word/Excel、音视频能力陆续升级中。",
+    icon="🔄",
+    phase="基础可用",
+    page=convert_board.ConvertBoardPage,
+)
+
+MUSIC_BOARD = BoardSpec(
+    key="music",
+    title="墨软乐库",
+    tagline="在线搜索 · 本地曲库 · 歌单播放",
+    description="联网搜索并下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史与音频格式转换。",
+    icon="🎧",
+    phase="可用",
+    page=music_board.MusicBoardPage,
+)
+
+VIDEO_BOARD = BoardSpec(
+    key="video",
+    title="墨软影视",
+    tagline="在线搜索 · 本地播放 · 分类收藏",
+    description=(
+        "联网搜索电影/电视剧/动漫并下载到本地；内置播放器（多清晰度、倍速、续播）、"
+        "分类与收藏、播放历史，以及视频格式转换。多数据源可切换、支持换源重试。"
+    ),
+    icon="🎬",
+    phase="可用",
+    page=video_board.VideoBoardPage,
+)
+
+GALLERY_BOARD = BoardSpec(
+    key="gallery",
+    title="墨软图库",
+    tagline="本地相册 · 分类收藏 · 美化与增强",
+    description=(
+        "读取本地图片并生成缩略图，网格/瀑布流/时间轴浏览；自动与手动分类、标签、收藏、"
+        "重复识别；批量导入与网址/剪贴板收集；裁剪滤镜调节文字马赛克等美化（可撤销），"
+        "以及本地增强（一键增强/超分/降噪/去模糊/抠图/消除）。"
+    ),
+    icon="🖼",
+    phase="可用",
+    page=gallery_board.GalleryBoardPage,
+)
+
+# 首页卡片与顶栏导航顺序
+ACTIVE_BOARDS: tuple[BoardSpec, ...] = (
+    BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD, GALLERY_BOARD,
+)
+
+
+def get_board(key: str) -> BoardSpec | None:
+    for spec in ACTIVE_BOARDS:
+        if spec.key == key:
+            return spec
+    return None

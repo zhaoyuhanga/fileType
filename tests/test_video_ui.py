@@ -7,14 +7,14 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTableWidget, QWidget
 
-from modu_workbench.boards.video_board import VideoBoardPage
-from modu_workbench.boards.video_detail import VideoDetailDialog
-from modu_workbench.boards.video_history import VideoHistoryPage
-from modu_workbench.boards.video_library_page import VideoLibraryPage
-from modu_workbench.boards.video_player import VideoPlayerDialog, format_time, player_available
-from modu_workbench.boards.video_search import VideoSearchPage
-from modu_workbench.boards.video_sources import VideoSourceDialog
-from modu_workbench.boards.video_widgets import (
+from modu_workbench.boards.video.board import VideoBoardPage
+from modu_workbench.boards.video.detail import VideoDetailDialog
+from modu_workbench.boards.video.history import VideoHistoryPage
+from modu_workbench.boards.video.library_page import VideoLibraryPage
+from modu_workbench.boards.video.player import VideoPlayerDialog, format_time, player_available
+from modu_workbench.boards.video.search import VideoSearchPage
+from modu_workbench.boards.video.sources import VideoSourceDialog
+from modu_workbench.boards.video.widgets import (
     action_remotes,
     action_video_ids,
     attach_context_menu,
@@ -486,7 +486,7 @@ def test_board_play_local_file(qapp: QApplication, library: VideoLibrary,
     """本地条目播放：走本机流服务，不发起联网解析，并记入历史。"""
     # 不依赖本机流服务能否起来：固定返回一个本机地址（真实链路由 media_server 测试覆盖）
     monkeypatch.setattr(
-        "modu_workbench.boards.video_board.local_file_url",
+        "modu_workbench.boards.video.board.local_file_url",
         lambda path: f"http://127.0.0.1:9/media/{Path(path).name}",
     )
     path = make_video_file(library.video_dir / "本地测试片.mp4")

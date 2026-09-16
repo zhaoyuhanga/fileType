@@ -15,21 +15,24 @@
 
 ## 顶层结构
 
-- `src/modu_workbench/boards/`：板块注册表（BoardSpec + 页面类），新增板块只需注册一条。
-- `src/modu_workbench/boards/convert_web.py`：内嵌前端页面（QtWebEngine + 桥）；`convert_board.py`/`doc_viewer.py` 为纯 Qt 回退实现。
-- `src/modu_workbench/ui_kit/`：统一设计令牌（ThemeTokens）+ QSS + 基础组件，各板块共用视觉规范。
-- `src/modu_workbench/core/reader/`：墨软书库引擎（自 win-e-book 迁移：parser/storage/library/online）。
+- `src/modu_workbench/app/`：应用骨架 —— 入口 `main.py`、主壳 `shell.py`、板块注册表 `registry.py`
+  （新增板块只需在注册表加一条）。
+- `src/modu_workbench/boards/`：**五大板块各自一个包**，板块之间互不引用
+  （由 `tests/test_architecture.py` 强制，破坏边界即测试失败）：
+  - `boards/home/`（首页）、`boards/book/`（墨软书库）、`boards/convert/`（墨软转换）、
+    `boards/music/`（墨软乐库）、`boards/video/`（墨软影视）、`boards/gallery/`（墨软图库）；
+  - 每个板块包固定以 `board.py` 作为入口（装配导航 + 子页），其余按功能拆分
+    （`search.py` / `detail.py` / `player.py` / `widgets.py` …）。
+- `src/modu_workbench/ui_kit/`：统一设计令牌（ThemeTokens）+ QSS + 基础组件 + 分板块设置页。
+- `src/modu_workbench/core/book/`：墨软书库引擎（自 win-e-book 迁移：parser/storage/library/online）。
 - `src/modu_workbench/core/convert/`：墨软转换引擎（自 fileType 行为重写：registry、text/pdf/image/media/archive 等）。
 - `src/modu_workbench/core/music/`：墨软乐库引擎（models/storage/sources/downloader/library/player）。
-- `src/modu_workbench/boards/music_*.py`：墨软乐库界面（搜索下载 / 我的音乐 / 格式转换 / 歌单收藏 / 播放历史 + 常驻播放条）。
 - `src/modu_workbench/core/video/`：墨软影视引擎（models/storage/hls/sources/downloader/library）。
-- `src/modu_workbench/boards/video_*.py`：墨软影视界面（搜索下载 / 详情选集 / 我的视频 / 分类收藏 / 播放历史 / 源设置 + 播放器窗口）。
-- `src/modu_workbench/core/image/`：墨软图库引擎（models/storage/hashing/exif/thumbs/edits/enhance/ai/library）。
-- `src/modu_workbench/boards/gallery_*.py`：墨软图库界面（图库浏览 + 大图查看 / 编辑美化 / AI 优化）。
-- `src/modu_workbench/ui_kit/settings/`：**分板块设置页**（通用/书库/转换/乐库/影视/图库），统一对话框左侧分页。
-- `src/modu_workbench/services/`：桥接与本地服务（web_bridge/web_prepare/media_server/media_player/file_scan）。
-- `src/modu_workbench/webfront/`：内嵌前端产物（构建生成，随包分发）。
-- `tests/`：pytest 单元与无头冒烟测试。
+- `src/modu_workbench/core/gallery/`：墨软图库引擎（models/storage/hashing/exif/thumbs/edits/enhance/ai/library）。
+- `src/modu_workbench/core/llm/`：大模型能力中心（跨板块共用：配置 / 路由 / 降级）。
+- `src/modu_workbench/services/`：跨板块的本地服务（数据目录 `config.py`、应用级单例 `app_context.py`、
+  本机媒体流 `media_server.py`）。
+- `tests/`：pytest 单元 / 集成 / 无头 UI 冒烟；`tests/test_architecture.py` 锁死上面的依赖规则。
 
 ## 墨软乐库设计要点
 
@@ -127,7 +130,7 @@
   **降级逻辑集中在 `ModelRouter.run(kind, task)`**：按优先级逐个执行 `task(profile)`，
   抛异常就记下原因并换下一份，全部失败抛 `LlmRequestError`（消息里带每一次的失败原因）。
   `chat()` 只是 `run()` 的一个特例，所以看图/关键词/参数建议等任意任务都自带降级能力。
-- 与 `core/image/ai.py` 的分工：那边是**提示词与解析**（描述/标签/关键词/参数），
+- 与 `core/gallery/ai.py` 的分工：那边是**提示词与解析**（描述/标签/关键词/参数），
   通过 `config_from_profile()` 把一份配置适配成 `AiConfig` 复用；这边只管"选谁、按什么顺序试"。
 - 图库的调用链：`ai_analyze` → 图片类型（允许上传时）→ 文字类型（只发元数据）→ 逐份降级；
   `ai_suggest_keywords` / `ai_suggest_edit_params` 走文字类型。

@@ -7,16 +7,16 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QDialog, QTableWidget, QWidget
 
-from modu_workbench.boards.music_board import MusicBoardPage, MusicPlayerBar
-from modu_workbench.boards.music_history import MusicHistoryPage
-from modu_workbench.boards.music_library_page import (
+from modu_workbench.boards.music.board import MusicBoardPage, MusicPlayerBar
+from modu_workbench.boards.music.history import MusicHistoryPage
+from modu_workbench.boards.music.library_page import (
     FAVORITE_COLUMN,
     MusicConvertPage,
     MusicLibraryPage,
 )
-from modu_workbench.boards.music_playlist import MusicPlaylistPage
-from modu_workbench.boards.music_search import MusicSearchPage
-from modu_workbench.boards.music_widgets import checked_remotes, select_all
+from modu_workbench.boards.music.playlist import MusicPlaylistPage
+from modu_workbench.boards.music.search import MusicSearchPage
+from modu_workbench.boards.music.widgets import checked_remotes, select_all
 from modu_workbench.core.music import (
     MusicLibrary,
     MusicPlayer,
@@ -272,7 +272,7 @@ def test_search_page_results_and_playlist(qapp: QApplication, storage: MusicStor
         def selected_playlist_id(self) -> int:
             return playlist_id
 
-    monkeypatch.setattr("modu_workbench.boards.music_search.PlaylistPicker", FakePicker)
+    monkeypatch.setattr("modu_workbench.boards.music.search.PlaylistPicker", FakePicker)
     page._add_to_playlist()
     assert [r.title for r in storage.list_playlist_remotes(playlist_id)] == ["晴天", "稻香"]
 
@@ -313,7 +313,7 @@ def test_search_single_row_download_and_menu(qapp: QApplication, storage: MusicS
         def isRunning(self) -> bool:  # noqa: N802
             return False
 
-    monkeypatch.setattr("modu_workbench.boards.music_search.DownloadWorker", FakeWorker)
+    monkeypatch.setattr("modu_workbench.boards.music.search.DownloadWorker", FakeWorker)
 
     # 未勾选、只选中第二行 → 只下载第二首
     page._table.selectRow(1)
@@ -327,7 +327,7 @@ def test_search_single_row_download_and_menu(qapp: QApplication, storage: MusicS
     assert any("歌单" in label for label in labels)
 
     # 勾选后优先用勾选项（批量）
-    from modu_workbench.boards.music_widgets import select_all
+    from modu_workbench.boards.music.widgets import select_all
 
     select_all(page._table, True)
     page._start_download()
@@ -367,12 +367,12 @@ def test_search_download_uses_registry_and_reports_switch(qapp: QApplication, st
         def isRunning(self) -> bool:  # noqa: N802
             return False
 
-    monkeypatch.setattr("modu_workbench.boards.music_search.DownloadWorker", FakeWorker)
+    monkeypatch.setattr("modu_workbench.boards.music.search.DownloadWorker", FakeWorker)
 
     page = MusicSearchPage(library, storage, toaster())
     page._on_results([RemoteTrack(source="netease", remote_id="1", title="屋顶",
                                   artist="周杰伦", url="http://x/1.mp3")], [])
-    from modu_workbench.boards.music_widgets import select_all
+    from modu_workbench.boards.music.widgets import select_all
 
     select_all(page._table, True)
     page._start_download()
@@ -413,7 +413,7 @@ def test_preview_uses_shared_player_bar(qapp: QApplication, storage: MusicStorag
         def start(self) -> None:
             self.finishedResults.emit("https://cdn.example.com/song.m4a", self._remote)
 
-    monkeypatch.setattr("modu_workbench.boards.music_search._PreviewResolver", FakeResolver)
+    monkeypatch.setattr("modu_workbench.boards.music.search._PreviewResolver", FakeResolver)
 
     page = MusicSearchPage(library, storage, toaster())
     page._on_results([RemoteTrack(source="itunes", remote_id="1", title="晴天",
@@ -472,7 +472,7 @@ def test_download_button_click_uses_selection(qapp: QApplication, storage: Music
         def isRunning(self) -> bool:  # noqa: N802
             return False
 
-    monkeypatch.setattr("modu_workbench.boards.music_search.DownloadWorker", FakeWorker)
+    monkeypatch.setattr("modu_workbench.boards.music.search.DownloadWorker", FakeWorker)
 
     # 只选中一行后点击按钮（模拟真实点击：clicked(bool)）
     page._table.selectRow(0)
@@ -485,7 +485,7 @@ def test_download_button_click_uses_selection(qapp: QApplication, storage: Music
     assert page._download_button.isEnabled() is True
 
     # 勾选多首后点击按钮 → 批量
-    from modu_workbench.boards.music_widgets import select_all
+    from modu_workbench.boards.music.widgets import select_all
 
     select_all(page._table, True)
     page._download_button.click()
@@ -494,7 +494,7 @@ def test_download_button_click_uses_selection(qapp: QApplication, storage: Music
 
     # 「加入歌单」按钮同样不能被 bool 参数干扰（无选择时才提示）
     monkeypatch.setattr(
-        "modu_workbench.boards.music_search.PlaylistPicker",
+        "modu_workbench.boards.music.search.PlaylistPicker",
         lambda *a, **k: types.SimpleNamespace(exec=lambda: QDialog.DialogCode.Rejected),
     )
     page._playlist_button.click()

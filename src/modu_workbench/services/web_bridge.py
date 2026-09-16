@@ -191,7 +191,7 @@ class WebBridge(QObject):
         return folder or ""
 
     def handle_getDefaultOutputDir(self) -> str:
-        from modu_workbench.boards.convert_board import default_output_dir
+        from modu_workbench.boards.convert.board import default_output_dir
 
         return str(default_output_dir())
 

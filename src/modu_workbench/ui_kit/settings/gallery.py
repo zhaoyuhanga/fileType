@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from modu_workbench.core.image import format_size, load_ai_config, save_ai_config
+from modu_workbench.core.gallery import format_size, load_ai_config, save_ai_config
 from modu_workbench.core.llm import KIND_IMAGE, KIND_TEXT, kind_label
 from modu_workbench.services import app_context, config
 

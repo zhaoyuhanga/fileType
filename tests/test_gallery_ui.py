@@ -17,19 +17,19 @@ import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from modu_workbench.boards.gallery_board import (
+from modu_workbench.boards.gallery.board import (
     BROWSE_KEY,
     THUMB_STEPS,
     VIEWER_KEY,
     GalleryBoardPage,
 )
-from modu_workbench.boards.gallery_widgets import (
+from modu_workbench.boards.gallery.widgets import (
     CARD_PAD,
     INNER_PAD,
     ITEM_ROLE,
     TITLE_HEIGHT,
 )
-from modu_workbench.core.image import ImageLibrary, ImageStorage
+from modu_workbench.core.gallery import ImageLibrary, ImageStorage
 
 
 @pytest.fixture(scope="module")
