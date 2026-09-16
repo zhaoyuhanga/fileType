@@ -51,14 +51,22 @@ def _run_dependency_check(output_path: str) -> int:
             results[name] = f"ERROR: {error}"
 
     def check_markdown_extra() -> bool:
+        """Markdown 渲染可用（标题带样式属性，因此只断言标签与文字，不写死整串）。
+
+        顺带验证新排版管线（`_qt_style_html` 依赖 bs4）在打包环境里同样生效：
+        表格必须被属性化成带底色的 Qt 友好 HTML。
+        """
         from modu_workbench.boards.convert.doc_viewer import _render_markdown
 
-        return "<h1>标题</h1>" in _render_markdown("# 标题\n\n正文。")
+        html = _render_markdown("# 标题\n\n正文。\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")
+        return "<h1" in html and "标题" in html and "正文" in html and 'bgcolor="#eef1f8"' in html.lower()
 
     def check_markdown_codeblock() -> bool:
+        """代码块：保留 <pre> 且被带底色的单元格包住（Qt 单栈下的排版约定）。"""
         from modu_workbench.boards.convert.doc_viewer import _render_markdown
 
-        return "<pre" in _render_markdown("# 标题\n\n```json\n{\"a\": 1}\n```")
+        html = _render_markdown("# 标题\n\n```json\n{\"a\": 1}\n```")
+        return "<pre" in html and "#f6f8fc" in html.lower()
 
     def check_json_highlight() -> bool:
         from modu_workbench.boards.convert.doc_viewer import _render_json
