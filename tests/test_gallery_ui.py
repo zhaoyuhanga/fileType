@@ -417,3 +417,102 @@ def test_edit_save_reports_progress(page: GalleryBoardPage, qapp: QApplication) 
     assert page._progress.value() == 100
     assert "已保存编辑结果" in page._status.text()
     assert "风景_edited.jpg" in page._status.text()
+
+
+# ------------------------------------------------- 第三轮反馈：分页（300+ 张不再卡）
+
+
+def test_pagination_splits_items_into_pages(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """16 张图、每页 6 张 → 3 页，网格只拿到当前页。"""
+    page._page_size = 6
+    page.reload(keep_page=False)
+    qapp.processEvents()
+
+    assert len(page._all_items) == 16
+    assert page.page_count == 3
+    assert page._page == 1
+    assert len(page._items) == 6
+    assert page._grid.count() == 6
+    assert "第 1 / 3 页" in page._page_label.text()
+
+    page._turn_page(1)
+    qapp.processEvents()
+    assert page._page == 2
+    assert len(page._items) == 6
+    assert page._grid.count() == 6
+    assert "第 2 / 3 页" in page._page_label.text()
+
+    page._turn_page(1)
+    qapp.processEvents()
+    assert page._page == 3
+    assert len(page._items) == 4                 # 最后一页只剩 4 张
+    assert not page._next_button.isEnabled()
+    assert page._prev_button.isEnabled()
+
+    page._turn_page(1)                            # 已经是最后一页，不该越界
+    assert page._page == 3
+
+
+def test_page_items_are_disjoint_and_complete(page: GalleryBoardPage) -> None:
+    page._page_size = 5
+    page.reload(keep_page=False)
+    seen: list[int] = []
+    for number in range(1, page.page_count + 1):
+        seen.extend(item.id for item in page.page_items(number))
+    assert len(seen) == len(page._all_items)
+    assert len(set(seen)) == len(seen)            # 不重不漏
+
+
+def test_page_size_all_disables_paging(page: GalleryBoardPage, qapp: QApplication) -> None:
+    page._page_size = 0
+    page.reload(keep_page=False)
+    qapp.processEvents()
+    assert page.page_count == 1
+    assert len(page._items) == 16
+    assert not page._prev_button.isEnabled() and not page._next_button.isEnabled()
+    assert "不分页" in page._page_label.text()
+
+
+def test_filter_change_resets_to_first_page(page: GalleryBoardPage, qapp: QApplication) -> None:
+    page._page_size = 4
+    page.reload(keep_page=False)
+    page._turn_page(1)
+    assert page._page == 2
+
+    page._search.setText("风景")
+    page._on_filter_changed()
+    qapp.processEvents()
+    assert page._page == 1
+    assert len(page._all_items) == 12
+    assert "搜索「风景」" in page._scope_text()
+
+
+def test_page_jump_spinbox(page: GalleryBoardPage, qapp: QApplication) -> None:
+    page._page_size = 4
+    page.reload(keep_page=False)
+    qapp.processEvents()
+    assert page._page_spin.maximum() == page.page_count
+
+    page._page_spin.setValue(3)
+    page._on_page_jump()
+    qapp.processEvents()
+    assert page._page == 3
+    assert len(page._items) == 4
+
+
+def test_viewer_step_crosses_page_boundary(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """上一张/下一张要在整个筛选结果集里走，跨页时自动翻页。"""
+    page._page_size = 4
+    page.reload(keep_page=False)
+    qapp.processEvents()
+    assert page._page == 1
+
+    page._grid.setCurrentRow(3)                   # 本页最后一张
+    last_of_page = page._items[3]
+    page._step_viewer(1)
+    qapp.processEvents()
+
+    assert page._page == 2                        # 自动翻到第 2 页
+    assert page._viewer_info.text().startswith(page._items[0].display())
+    assert page._items[0].id != last_of_page.id
+    assert page._grid.current_item() is not None

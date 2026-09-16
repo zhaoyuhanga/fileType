@@ -494,29 +494,36 @@ class ImageLibrary:
                 pass
         return before, after
 
-    # ---------- AI 文本（DeepSeek） ----------
+    # ---------- AI 文本（大模型） ----------
 
     def ai_client(self, config: ai_mod.AiConfig | None = None) -> ai_mod.DeepSeekClient:
         if config is None:
             config = load_ai_config(self.storage)
         return ai_mod.DeepSeekClient(config)
 
-    def ai_analyze(self, item: ImageItem, *, use_vision: bool = True,
-                   config: ai_mod.AiConfig | None = None) -> dict:
-        """用 DeepSeek 生成描述与标签，并写回库。
+    @staticmethod
+    def _llm_router():  # noqa: ANN205
+        """应用级大模型路由器（多类型 / 多配置 / 优先级降级）。"""
+        from modu_workbench.services import app_context
 
-        vision 不可用（模型不支持图片/未授权上传）时自动退回元数据模式。
+        return app_context.llm_router()
+
+    def ai_analyze(self, item: ImageItem, *, use_vision: bool = True,
+                   config: ai_mod.AiConfig | None = None, prefer_vision: bool = True) -> dict:
+        """用大模型生成描述与标签，并写回库。
+
+        调用顺序：**图片大模型**（看图，需允许上传且已配置）→ **文字大模型**（只用元数据）。
+        同一类型内部按「设置 → 大模型」里的优先级依次尝试，失败自动降级。
+        显式传入 `config` 时走单配置老路径（测试/自定义场景）。
         """
-        client = self.ai_client(config)
-        effective = config or load_ai_config(self.storage)
-        result: dict = {"caption": "", "tags": []}
-        if use_vision and effective.allow_upload and item.path:
-            try:
-                result = client.analyze_image(item.path)
-            except Exception:  # noqa: BLE001  退回文本模式
-                result = client.analyze_by_metadata(item)
+        allow_upload = (config.allow_upload if config is not None
+                        else load_ai_config(self.storage).allow_upload)
+        result: dict
+        if config is not None:
+            result = self._analyze_one(item, config, use_vision=use_vision)
         else:
-            result = client.analyze_by_metadata(item)
+            result = self._analyze_routed(item, use_vision=use_vision and prefer_vision,
+                                          allow_upload=allow_upload)
 
         tags = [str(t) for t in (result.get("tags") or [])]
         for tag in tags:
@@ -527,6 +534,62 @@ class ImageLibrary:
             caption=str(result.get("caption") or ""),
         )
         return result
+
+    def _analyze_one(self, item: ImageItem, config: ai_mod.AiConfig, *,
+                     use_vision: bool) -> dict:
+        """单配置分析：看清图是否可用，不可用退回元数据模式。"""
+        client = ai_mod.DeepSeekClient(config)
+        if use_vision and config.allow_upload and item.path:
+            try:
+                return client.analyze_image(item.path)
+            except Exception:  # noqa: BLE001  退回文本模式
+                pass
+        return client.analyze_by_metadata(item)
+
+    def _analyze_routed(self, item: ImageItem, *, use_vision: bool,
+                        allow_upload: bool) -> dict:
+        """按「图片 → 文字」的顺序路由，同一类型内自动降级。"""
+        from modu_workbench.core.llm import KIND_IMAGE, KIND_TEXT
+
+        router = self._llm_router()
+        kinds: list[str] = []
+        if use_vision and allow_upload and item.path and router.has_any(KIND_IMAGE):
+            kinds.append(KIND_IMAGE)
+        kinds.append(KIND_TEXT)
+
+        problems: list[str] = []
+        for kind in kinds:
+            try:
+                result, _profile = router.run(
+                    kind,
+                    lambda profile, k=kind: self._analyze_one(
+                        item,
+                        ai_mod.config_from_profile(profile, kind=k, allow_upload=allow_upload),
+                        use_vision=(k == KIND_IMAGE),
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001  换下一个类型
+                problems.append(str(error))
+                continue
+            if isinstance(result, dict) and (result.get("tags") or result.get("caption")):
+                return result
+            problems.append(f"{kind}：没有解析出有效内容")
+        raise ai_mod.AiRequestError(
+            "AI 分析失败：\n" + "\n".join(problems) if problems else "AI 分析失败")
+
+    def ai_suggest_keywords(self, query: str) -> list[str]:
+        """自然语言检索 → 关键词（文字大模型，多配置降级）。"""
+        text, _profile = self._llm_router().run(
+            "text", lambda profile: ai_mod.DeepSeekClient(
+                ai_mod.config_from_profile(profile, kind="text")).suggest_search_keywords(query))
+        return list(text or [])
+
+    def ai_suggest_edit_params(self, description: str) -> dict:
+        """自然语言修图需求 → 本地可执行参数（文字大模型，多配置降级）。"""
+        params, _profile = self._llm_router().run(
+            "text", lambda profile: ai_mod.DeepSeekClient(
+                ai_mod.config_from_profile(profile, kind="text")).suggest_edit_params(description))
+        return dict(params or {})
 
     # ------------------------------------------------------------------ 维护
 

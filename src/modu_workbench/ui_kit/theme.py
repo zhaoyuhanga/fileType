@@ -214,6 +214,33 @@ QLabel#chipPlanned {{
     font-weight: 600;
 }}
 
+/* ---------- 分组卡片与风格卡片 ---------- */
+QFrame#card {{
+    background: {t.surface_2};
+    border: 1px solid {t.border};
+    border-radius: {t.radius}px;
+}}
+QPushButton#styleChip {{
+    background: {t.surface};
+    border: 1px solid {t.border_strong};
+    border-radius: {t.radius_sm}px;
+    padding: 5px 12px;
+    color: {t.text};
+}}
+QPushButton#styleChip:hover {{
+    background: {t.accent_soft};
+    border-color: {t.accent};
+}}
+QPushButton#styleChipActive {{
+    background: {t.accent};
+    border: 1px solid {t.accent_strong};
+    border-radius: {t.radius_sm}px;
+    padding: 5px 12px;
+    color: #ffffff;
+    font-weight: 700;
+}}
+QPushButton#styleChipActive:hover {{ background: {t.accent_hover}; }}
+
 /* ---------- 输入控件 ---------- */
 QLineEdit, QTextEdit, QPlainTextEdit {{
     background: {t.surface};

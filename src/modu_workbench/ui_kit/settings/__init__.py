@@ -10,11 +10,13 @@ from typing import Callable
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -25,6 +27,7 @@ from .book import BookSettingsPage
 from .convert import ConvertSettingsPage
 from .gallery import GallerySettingsPage
 from .general import GeneralSettingsPage
+from .llm import LlmSettingsPage
 from .music import MusicSettingsPage
 from .video import VideoSettingsPage
 
@@ -33,6 +36,7 @@ PAGE_ROLE = Qt.ItemDataRole.UserRole
 # (key, 标题, 图标, 页面工厂)
 PAGE_FACTORIES: tuple[tuple[str, str, str, Callable[[], SettingsPage]], ...] = (
     ("general", "通用", "🧩", GeneralSettingsPage),
+    ("llm", "大模型", "🤖", LlmSettingsPage),
     ("book", "书库", "📚", BookSettingsPage),
     ("convert", "转换", "🔄", ConvertSettingsPage),
     ("music", "乐库", "🎧", MusicSettingsPage),
@@ -44,14 +48,21 @@ PAGE_TITLES = {key: title for key, title, _icon, _factory in PAGE_FACTORIES}
 
 
 class SettingsDialog(QDialog):
-    """统一设置入口：左侧按板块分区，右侧显示对应设置页。"""
+    """统一设置入口：左侧按板块分区，右侧显示对应设置页。
+
+    右侧每一页都套在 `QScrollArea` 里并且**操作条固定在底部**：
+    设置项多的板块（图库/大模型）在小窗口下会把内容撑高，
+    以前会把「保存 / 关闭」顶出可视区域，用户根本点不到。
+    """
 
     def __init__(self, parent: QWidget | None = None, *, initial: str = ""):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.resize(940, 640)
+        self.resize(980, 700)
+        self.setMinimumSize(760, 520)
         self._settings = app_settings()
         self._pages: dict[str, SettingsPage] = {}
+        self._scrolls: dict[str, QScrollArea] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -82,8 +93,15 @@ class SettingsDialog(QDialog):
         self._hint = QLabel("")
         self._hint.setObjectName("readerStatus")
         self._hint.setWordWrap(True)
-        self._hint.setContentsMargins(18, 0, 18, 6)
+        self._hint.setContentsMargins(18, 6, 18, 0)
         right.addWidget(self._hint)
+
+        # 操作条与内容之间加一条分隔线，滚动时视觉上"钉"在底部
+        separator = QFrame()
+        separator.setObjectName("hline")
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFixedHeight(1)
+        right.addWidget(separator)
 
         actions = QHBoxLayout()
         actions.setContentsMargins(18, 8, 18, 12)
@@ -117,7 +135,14 @@ class SettingsDialog(QDialog):
             # 用占位页把原因显示出来
             page = _ErrorPage(f"{PAGE_TITLES.get(key, key)} 设置加载失败：{error}")
         self._pages[key] = page
-        self._stack.addWidget(page)
+        # 内容套滚动区：页面再高也只会出现滚动条，不会把「保存/关闭」挤出窗口
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(page)
+        self._scrolls[key] = scroll
+        self._stack.addWidget(scroll)
         return page
 
     def _select(self, key: str) -> None:
@@ -135,7 +160,7 @@ class SettingsDialog(QDialog):
         key = entry.data(PAGE_ROLE)
         page = self._ensure_page(key)
         if page is not None:
-            self._stack.setCurrentWidget(page)
+            self._stack.setCurrentWidget(self._scrolls[key])
         self._hint.setText(page.hint() if page is not None else "")
 
     # ------------------------------------------------------------------ 保存

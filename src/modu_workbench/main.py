@@ -472,6 +472,80 @@ def _run_dependency_check(output_path: str) -> int:
 
         return bool(dedupe_ok and thumb_ok and store_ok and edit_ok and enhance_ok and hash_ok and ai_ok)
 
+    def check_llm_core() -> bool:
+        """大模型能力中心：多类型存储、优先级排序、失败自动降级、旧配置迁移。"""
+        import tempfile
+        from pathlib import Path as _Path
+
+        from modu_workbench.core.llm import (
+            KIND_IMAGE,
+            KIND_TEXT,
+            LlmRequestError,
+            LlmStorage,
+            ModelProfile,
+            ModelRouter,
+        )
+
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                store = LlmStorage(_Path(folder) / "llm.db")
+                try:
+                    # 1) 同类型多份配置，按添加顺序即优先级
+                    store.save_profile(ModelProfile(
+                        kind=KIND_TEXT, name="主力", provider="deepseek",
+                        base_url="https://x/v1", api_key="k1", model="m1"))
+                    store.save_profile(ModelProfile(
+                        kind=KIND_TEXT, name="备用", provider="deepseek",
+                        base_url="https://x/v1", api_key="k2", model="m2"))
+                    store.save_profile(ModelProfile(
+                        kind=KIND_IMAGE, name="看图", provider="deepseek",
+                        base_url="https://x/v1", api_key="k3", model="m3"))
+
+                    order_ok = [p.name for p in store.list_profiles(KIND_TEXT)] == ["主力", "备用"]
+
+                    # 2) 上移/下移真的改优先级，且不跨类型
+                    moved = store.move_profile(store.list_profiles(KIND_TEXT)[1].id, -1)
+                    move_ok = moved and [p.name for p in store.list_profiles(KIND_TEXT)] == ["备用", "主力"]
+                    move_ok = move_ok and store.move_profile(
+                        store.list_profiles(KIND_IMAGE)[0].id, -1) is False
+
+                    # 3) 停用后不再参与调用
+                    store.set_enabled(store.list_profiles(KIND_TEXT)[0].id, False)
+                    router = ModelRouter(store)
+                    disable_ok = len(router.usable_profiles(KIND_TEXT)) == 1
+                    store.set_enabled(store.list_profiles(KIND_TEXT)[0].id, True)
+
+                    # 4) 降级：第一份必然失败（地址不可解析），应自动落到第二份并给出合并错误
+                    for profile in store.list_profiles(KIND_TEXT):
+                        profile.timeout = 3.0
+                        store.save_profile(profile)
+                    first = store.list_profiles(KIND_TEXT)[0]
+                    first.base_url = "http://127.0.0.1:9/definitely-not-listening"
+                    store.save_profile(first)
+                    fallback_ok = False
+                    try:
+                        router.chat(KIND_TEXT, [{"role": "user", "content": "hi"}])
+                    except LlmRequestError:
+                        fallback_ok = True          # 两份都失败 → 合并报错（说明确实逐个试过）
+                    except Exception:               # noqa: BLE001
+                        fallback_ok = False
+
+                    # 5) 旧版图库配置能迁移成文字 + 图片两份配置
+                    legacy = LlmStorage(_Path(folder) / "legacy.db")
+                    try:
+                        migrated = legacy.migrate_legacy(
+                            api_key="sk-old", model="deepseek-chat",
+                            vision_model="deepseek-vl")
+                        kinds = {p.kind for p in legacy.list_profiles()}
+                        migrate_ok = migrated and kinds == {KIND_TEXT, KIND_IMAGE}
+                    finally:
+                        legacy.close()
+                finally:
+                    store.close()
+            return bool(order_ok and move_ok and disable_ok and fallback_ok and migrate_ok)
+        except Exception:  # noqa: BLE001
+            return False
+
     def check_branding_icon() -> bool:
         """品牌图标：随包 app.ico 可定位，且能加载出多尺寸 QIcon（窗口/任务栏图标）。"""
         try:
@@ -501,6 +575,7 @@ def _run_dependency_check(output_path: str) -> int:
     record("music_core", check_music_core)
     record("video_core", check_video_core)
     record("gallery_core", check_gallery_core)
+    record("llm_core", check_llm_core)
     record("ffmpeg_tools", check_ffmpeg_tools)
     record("branding_icon", check_branding_icon)
 

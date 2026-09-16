@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -103,45 +105,89 @@ class EnhanceDialog(QDialog):
         body.addWidget(self._list)
 
         right = QVBoxLayout()
+        right.setSpacing(8)
         self._desc = QLabel("")
         self._desc.setObjectName("readerStatus")
         self._desc.setWordWrap(True)
         right.addWidget(self._desc)
 
-        # 参数区（按选中能力显示/隐藏）
-        self._params_row = QHBoxLayout()
+        # 参数区：每个参数独占一行（以前挤在一行里，下拉框又窄又难看）
+        self._params_card = QFrame()
+        self._params_card.setObjectName("card")
+        params_layout = QVBoxLayout(self._params_card)
+        params_layout.setContentsMargins(12, 10, 12, 10)
+        params_layout.setSpacing(8)
+
+        self._params_title = QLabel("参数")
+        self._params_title.setObjectName("sectionTitle")
+        params_layout.addWidget(self._params_title)
+
+        row_scale = QHBoxLayout()
         self._scale_label = QLabel("放大倍数")
         self._scale = QComboBox()
         for factor in (2, 3, 4):
             self._scale.addItem(f"{factor}x", factor)
-        self._params_row.addWidget(self._scale_label)
-        self._params_row.addWidget(self._scale)
+        row_scale.addWidget(self._scale_label)
+        row_scale.addWidget(self._scale)
+        row_scale.addStretch(1)
+        params_layout.addLayout(row_scale)
 
+        row_strength = QHBoxLayout()
         self._strength_label = QLabel("强度")
         self._strength = QSpinBox()
         self._strength.setRange(1, 20)
         self._strength.setValue(10)
-        self._params_row.addWidget(self._strength_label)
-        self._params_row.addWidget(self._strength)
+        self._strength.setSuffix(" / 20")
+        self._strength.setMinimumWidth(120)
+        row_strength.addWidget(self._strength_label)
+        row_strength.addWidget(self._strength)
+        row_strength.addStretch(1)
+        params_layout.addLayout(row_strength)
 
+        # 风格：改成可视化卡片（点一下就选中），比下拉框直观得多
+        self._style_box = QWidget()
+        style_layout = QVBoxLayout(self._style_box)
+        style_layout.setContentsMargins(0, 0, 0, 0)
+        style_layout.setSpacing(6)
         self._style_label = QLabel("风格")
-        self._style = QComboBox()
-        for key, (label, tip) in STYLE_PRESETS.items():
+        style_layout.addWidget(self._style_label)
+        chips = QGridLayout()
+        chips.setSpacing(6)
+        self._style_buttons: dict[str, QPushButton] = {}
+        self._style = QComboBox()          # 仍保留一个隐藏控件，便于程序化读写
+        self._style.setVisible(False)
+        for index, (key, (label, tip)) in enumerate(STYLE_PRESETS.items()):
             self._style.addItem(label, key)
-            self._style.setItemData(self._style.count() - 1, tip, Qt.ItemDataRole.ToolTipRole)
-        self._params_row.addWidget(self._style_label)
-        self._params_row.addWidget(self._style)
+            self._style.setItemData(index, tip, Qt.ItemDataRole.ToolTipRole)
+            button = QPushButton(label)
+            button.setObjectName("styleChip")
+            button.setCheckable(True)
+            button.setToolTip(tip)
+            button.setMinimumHeight(30)
+            button.clicked.connect(lambda _=False, k=key: self._pick_style(k))
+            chips.addWidget(button, index // 4, index % 4)
+            self._style_buttons[key] = button
+        style_layout.addLayout(chips)
+        self._style_hint = QLabel("")
+        self._style_hint.setObjectName("readerStatus")
+        self._style_hint.setWordWrap(True)
+        style_layout.addWidget(self._style_hint)
+        params_layout.addWidget(self._style_box)
 
+        row_background = QHBoxLayout()
         self._bg_label = QLabel("背景")
         self._background = QComboBox()
         self._background.addItem("透明（PNG）", "transparent")
         self._background.addItem("白色", "white")
         self._background.addItem("黑色", "black")
         self._background.addItem("浅灰", "gray")
-        self._params_row.addWidget(self._bg_label)
-        self._params_row.addWidget(self._background)
-        self._params_row.addStretch(1)
-        right.addLayout(self._params_row)
+        row_background.addWidget(self._bg_label)
+        row_background.addWidget(self._background)
+        row_background.addStretch(1)
+        params_layout.addLayout(row_background)
+
+        right.addWidget(self._params_card)
+        self._pick_style(next(iter(STYLE_PRESETS)))
 
         # 前后对比
         compare = QHBoxLayout()
@@ -230,19 +276,48 @@ class EnhanceDialog(QDialog):
         self._desc.setText(f"【{spec.label}】{spec.description}"
                            f"　保真度：{spec.fidelity_label}　耗时：{spec.cost}")
         accepts = set(spec.accepts)
-        self._scale_label.setVisible("scale" in accepts)
-        self._scale.setVisible("scale" in accepts)
-        self._strength_label.setVisible("strength" in accepts or "amount" in accepts)
-        self._strength.setVisible("strength" in accepts or "amount" in accepts)
-        self._style_label.setVisible("style" in accepts)
-        self._style.setVisible("style" in accepts)
-        self._bg_label.setVisible("background" in accepts)
-        self._background.setVisible("background" in accepts)
+        wants_scale = "scale" in accepts
+        wants_strength = bool({"strength", "amount"} & accepts)
+        wants_style = "style" in accepts
+        wants_background = "background" in accepts
+
+        self._scale_label.setVisible(wants_scale)
+        self._scale.setVisible(wants_scale)
+        self._strength_label.setVisible(wants_strength)
+        self._strength.setVisible(wants_strength)
+        self._style_box.setVisible(wants_style)
+        self._bg_label.setVisible(wants_background)
+        self._background.setVisible(wants_background)
+        # 一项参数都不需要的算法（一键增强/去雾/老照片…）直接把参数区收起来
+        self._params_card.setVisible(any((wants_scale, wants_strength, wants_style,
+                                     wants_background)))
+        self._params_title.setText(
+            "参数 · " + "、".join(name for name, flag in (
+                ("放大倍数", wants_scale), ("强度", wants_strength),
+                ("风格", wants_style), ("背景", wants_background)) if flag) or "参数")
+        if wants_style:
+            self._pick_style(str(self._style.currentData() or next(iter(STYLE_PRESETS))))
         if spec.fidelity == "approximate":
             self._status.setText(
                 f"注意：「{spec.label}」是**近似效果**（本地算法近似），复杂画面可能不理想；"
                 "满意后再保存。"
             )
+
+    def _pick_style(self, key: str) -> None:
+        """点风格卡片：互斥选中，并把风格说明写到下面。"""
+        index = self._style.findData(key)
+        if index >= 0:
+            self._style.setCurrentIndex(index)
+        for style_key, button in self._style_buttons.items():
+            active = style_key == key
+            button.setChecked(active)
+            button.setObjectName("styleChipActive" if active else "styleChip")
+            style = button.style()
+            if style is not None:
+                style.unpolish(button)
+                style.polish(button)
+        label, tip = STYLE_PRESETS.get(key, ("", ""))
+        self._style_hint.setText(f"{label}：{tip}" if label else "")
 
     def _params(self) -> dict:
         spec = self._current_spec()

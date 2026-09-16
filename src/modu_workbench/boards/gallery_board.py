@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTextBrowser,
@@ -82,7 +83,10 @@ class GalleryBoardPage(QWidget):
         self._toaster = Toaster(self)
         self._library: ImageLibrary = library or app_context.image_library()
 
-        self._items: list[ImageItem] = []
+        self._items: list[ImageItem] = []          # 当前页
+        self._all_items: list[ImageItem] = []      # 当前筛选条件下的全部结果
+        self._page = 1
+        self._page_size = self._preferred_page_size()
         self._browse_worker: ImportWorker | None = None
         self._url_worker: UrlCollectWorker | None = None
         self._enhance_worker: EnhanceWorker | None = None
@@ -213,6 +217,41 @@ class GalleryBoardPage(QWidget):
         filter_row.addWidget(self._dup_button)
 
         outer.addLayout(filter_row)
+
+        # ---- 分页条 ----
+        # 300+ 张图一次性塞进网格会又慢又乱，改成按页渲染：每页只建这么多控件，
+        # 缩略图当页就能全部补齐，滚动不再出现"半灰半图"的杂乱感。
+        page_row = QHBoxLayout()
+        page_row.setSpacing(8)
+        self._page_label = QLabel("")
+        self._page_label.setObjectName("readerStatus")
+        page_row.addWidget(self._page_label)
+
+        self._page_size_combo = QComboBox()
+        for size in (60, 120, 240, 480, 0):
+            self._page_size_combo.addItem("全部（不分页）" if size == 0 else f"{size} 张/页", size)
+        self._page_size_combo.setToolTip("每页显示多少张：每页越少越流畅")
+        self._page_size_combo.currentIndexChanged.connect(self._on_page_size_changed)
+        page_row.addWidget(self._page_size_combo)
+
+        self._prev_button = QPushButton("◀ 上一页")
+        self._prev_button.clicked.connect(lambda: self._turn_page(-1))
+        page_row.addWidget(self._prev_button)
+
+        self._next_button = QPushButton("下一页 ▶")
+        self._next_button.clicked.connect(lambda: self._turn_page(1))
+        page_row.addWidget(self._next_button)
+
+        page_row.addWidget(QLabel("跳至"))
+        self._page_spin = QSpinBox()
+        self._page_spin.setRange(1, 1)
+        self._page_spin.setFixedWidth(78)
+        self._page_spin.setToolTip("输入页码后回车跳转")
+        self._page_spin.editingFinished.connect(self._on_page_jump)
+        page_row.addWidget(self._page_spin)
+
+        page_row.addStretch(1)
+        outer.addLayout(page_row)
         return bar
 
     # ------------------------------------------------------------------ 浏览页
@@ -439,6 +478,8 @@ class GalleryBoardPage(QWidget):
             (("1",), self._viewer.actual_size),
             (("Space",), lambda: self._slide_toggle.toggle()),
             (("F5",), self.reload),
+            (("PgDown", "Ctrl+Right"), lambda: self._turn_page(1)),
+            (("PgUp", "Ctrl+Left"), lambda: self._turn_page(-1)),
         ):
             for key in keys:
                 shortcut = QShortcut(QKeySequence(key), self)
@@ -463,12 +504,13 @@ class GalleryBoardPage(QWidget):
     def _on_filter_changed(self) -> None:
         """用户手动改筛选条件时，清掉左侧树的「最近 N 天」范围，避免叠加成空结果。"""
         self._recent_days = 0
-        self.reload()
+        self._page = 1                      # 筛选条件变了就回到第一页
+        self.reload(keep_page=False)
 
     # ------------------------------------------------------------------ 数据
 
-    def reload(self) -> None:
-        """按当前筛选条件重新加载图库。"""
+    def reload(self, *, keep_page: bool = True) -> None:
+        """按当前筛选条件重新加载图库（分页：只把当前页交给网格）。"""
         self._refresh_filters()
         keyword = self._search.text().strip()
         album_id = self._kind_combo.currentData() or 0
@@ -477,7 +519,7 @@ class GalleryBoardPage(QWidget):
         order = self._sort_combo.currentData() or DEFAULT_SORT
         date_from = self._timeline_combo.currentData() or 0
 
-        self._items = self._library.list_images(
+        items = self._library.list_images(
             keyword=keyword, album_id=int(album_id) or None, tag=tag, source=source,
             favorite_only=self._favorite_only.isChecked(), order=order,
             date_from=int(date_from),
@@ -486,16 +528,113 @@ class GalleryBoardPage(QWidget):
         recent_days = getattr(self, "_recent_days", 0)
         if recent_days:
             cutoff = int(time.time()) - recent_days * 86400
-            self._items = [item for item in self._items if (item.added_at or 0) >= cutoff]
-        self._grid.set_items(self._items)
+            items = [item for item in items if (item.added_at or 0) >= cutoff]
+        self._all_items = items
+
+        # ---- 分页 ----
+        previous_page = self._page
+        pages = self.page_count
+        if not keep_page:
+            self._page = 1
+        self._page = max(1, min(pages, self._page))
+        page_changed = self._page != previous_page
+        self._items = self.page_items(self._page)
+        self._grid.set_items(self._items, keep_selection=keep_page and not page_changed)
+        if page_changed:
+            self._grid.scrollToTop()
+
         total = self._library.storage.count_images()
-        shown = len(self._items)
+        shown = len(self._all_items)
         suffix = f"（当前筛选 {shown} 张）" if shown != total else ""
         scope = self._scope_text()
         self._count_label.setText(
             f"{scope}共 {total} 张{suffix} · 磁盘 {format_size(self._library.disk_usage())}"
         )
+        self._refresh_page_bar()
         self._update_buttons()
+
+    # ------------------------------------------------------------------ 分页
+
+    @staticmethod
+    def _preferred_page_size() -> int:
+        from PySide6.QtCore import QSettings
+
+        value = QSettings("ModuWorkbench", "modu-workbench").value("gallery/page_size", 120)
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 120
+
+    @property
+    def page_size(self) -> int:
+        """每页张数；0 表示不分页。"""
+        return int(self._page_size)
+
+    @property
+    def page_count(self) -> int:
+        if not self._page_size:
+            return 1
+        return max(1, (len(self._all_items) + self._page_size - 1) // self._page_size)
+
+    def page_items(self, page: int) -> list[ImageItem]:
+        if not self._page_size:
+            return list(self._all_items)
+        start = max(0, (page - 1) * self._page_size)
+        return self._all_items[start:start + self._page_size]
+
+    def _refresh_page_bar(self) -> None:
+        pages = self.page_count
+        size_index = self._page_size_combo.findData(self._page_size)
+        if size_index >= 0 and size_index != self._page_size_combo.currentIndex():
+            self._page_size_combo.blockSignals(True)
+            self._page_size_combo.setCurrentIndex(size_index)
+            self._page_size_combo.blockSignals(False)
+        if self._page_size:
+            first = (self._page - 1) * self._page_size + 1 if self._all_items else 0
+            last = min(len(self._all_items), self._page * self._page_size)
+            self._page_label.setText(
+                f"第 {self._page} / {pages} 页 · 本页 {last - first + 1 if self._all_items else 0} 张"
+                f"（{first}-{last} / 共 {len(self._all_items)} 张）"
+            )
+        else:
+            self._page_label.setText(f"不分页 · 共 {len(self._all_items)} 张")
+        self._page_spin.blockSignals(True)
+        self._page_spin.setRange(1, pages)
+        self._page_spin.setValue(self._page)
+        self._page_spin.blockSignals(False)
+        self._prev_button.setEnabled(self._page > 1)
+        self._next_button.setEnabled(self._page < pages)
+
+    def _turn_page(self, delta: int) -> None:
+        target = self._page + int(delta)
+        if target < 1 or target > self.page_count or target == self._page:
+            return
+        self._page = target
+        self.reload()
+
+    def _on_page_jump(self) -> None:
+        target = int(self._page_spin.value())
+        if target != self._page:
+            self._page = target
+            self.reload()
+
+    def _on_page_size_changed(self) -> None:
+        size = self._page_size_combo.currentData()
+        self._page_size = int(size if size is not None else 120)
+        self._page = 1
+        self.reload(keep_page=False)
+
+    def goto_item_page(self, image_id: int) -> None:
+        """把包含该图片的那一页翻出来（上一张/下一张跨页时用）。"""
+        if not self._page_size:
+            return
+        for index, item in enumerate(self._all_items):
+            if item.id == image_id:
+                page = index // self._page_size + 1
+                if page != self._page:
+                    self._page = page
+                    self.reload()
+                return
 
     def _scope_text(self) -> str:
         """当前筛选范围的可读描述（让用户一眼知道自己在看哪个集合）。"""
@@ -690,7 +829,9 @@ class GalleryBoardPage(QWidget):
             self._sort_combo.setCurrentIndex(list(SORT_MODES).index("added"))
             self._sort_combo.blockSignals(False)
 
-        self.reload()
+        # 换了分类节点就从第一页看起
+        self._page = 1
+        self.reload(keep_page=False)
         # 树的重建延后执行：本次点击的节点此刻还在事件处理中，不能立即销毁
         self._schedule_side_refresh()
 
@@ -930,6 +1071,13 @@ class GalleryBoardPage(QWidget):
 
     # ------------------------------------------------------------------ 编辑/AI
 
+    @staticmethod
+    def _app_settings():  # noqa: ANN205
+        """应用级 QSettings（读图库浏览偏好的默认值）。"""
+        from PySide6.QtCore import QSettings
+
+        return QSettings("ModuWorkbench", "modu-workbench")
+
     def _open_editor(self) -> None:
         item = self._grid.current_item() or (self._grid.action_items() or [None])[0]
         if item is None:
@@ -977,23 +1125,27 @@ class GalleryBoardPage(QWidget):
             self._toaster.info("请先选择图片")
             return
         from modu_workbench.core.image import load_ai_config
-
-        config = load_ai_config(self._library.storage)
-        if not config.configured:
-            self._toaster.error("尚未配置 DeepSeek API Key（设置 → 图库 → AI 优化）")
+        from modu_workbench.core.llm import KIND_IMAGE, KIND_TEXT
+        router = app_context.llm_router()
+        allow_upload = load_ai_config(self._library.storage).allow_upload
+        if not (router.has_any(KIND_IMAGE) or router.has_any(KIND_TEXT)):
+            self._toaster.error("尚未配置大模型：请在「设置 → 大模型」里添加并填写 API Key")
             return
         if self._analyze_worker is not None and self._analyze_worker.isRunning():
             self._toaster.info("正在分析中")
             return
+        prefer_vision = self._app_settings().value("gallery/vision", True, type=bool)
         self._cancel_button.setEnabled(True)
         self._analyze_worker = AnalyzeWorker(self._library, items,
-                                            use_vision=config.allow_upload, parent=self)
+                                            use_vision=allow_upload, parent=self,
+                                            prefer_vision=prefer_vision)
         self._analyze_worker.progressed.connect(self._on_progress)
         self._analyze_worker.finishedAll.connect(self._on_analyze_done)
         self._analyze_worker.failed.connect(self._on_task_failed)
         self._analyze_worker.finished.connect(self._on_worker_finished)
         self._analyze_worker.start()
-        self._status.setText(f"AI 分析 {len(items)} 张（DeepSeek 文本能力）…")
+        self._status.setText(
+            f"AI 分析 {len(items)} 张（{'图片大模型看图' if allow_upload and prefer_vision else '文字大模型·仅元数据'}）…")
 
     def _on_analyze_done(self, ok: int, errors: list) -> None:
         self._progress.setValue(100)
@@ -1063,19 +1215,27 @@ class GalleryBoardPage(QWidget):
     def _step_viewer(self, delta: int) -> None:
         """切换上一张/下一张。
 
-        走的是「当前视图里的列表」而不是图库全量列表 —— 搜索/筛选后应当
-        只在结果集内翻页，否则会跳到用户没在看的图片上。
+        走的是「当前筛选结果集」（跨页），而不是只在本页里转圈：
+        搜索/筛选后应当只在结果集内翻页；翻到别的页时会自动把那一页翻出来。
         """
-        items = self._grid.items()
-        if not items:
+        if not self._all_items:
             self._toaster.info("当前没有可查看的图片（请先调整筛选条件）")
             return
-        current = self._grid.ensure_current()
-        index = items.index(current) if current in items else 0
-        target = max(0, min(len(items) - 1, index + delta))
-        self._grid.setCurrentRow(target)
+        current = self._grid.current_item() or self._grid.ensure_current()
+        if current is not None and current in self._all_items:
+            index = self._all_items.index(current)
+        else:
+            index = (self._page - 1) * self._page_size
+        target = max(0, min(len(self._all_items) - 1, index + delta))
+        item = self._all_items[target]
+        self.goto_item_page(item.id)          # 跨页时先把目标页翻出来
+        row = next((position for position, entry in enumerate(self._grid.items())
+                    if entry.id == item.id), -1)
+        if row >= 0:
+            self._grid.setCurrentRow(row)
+            self._grid.scrollToItem(self._grid.item(row))
         self.show_page(VIEWER_KEY)
-        self._show_in_viewer(items[target])
+        self._show_in_viewer(item)
 
     def _toggle_slideshow(self, enabled: bool) -> None:
         from PySide6.QtCore import QTimer
@@ -1149,19 +1309,16 @@ class GalleryBoardPage(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(item.path).parent)))
 
     def _ai_search_clicked(self) -> None:
-        """自然语言检索：DeepSeek 拆关键词 → 本地筛选。"""
-        from modu_workbench.core.image import load_ai_config
-
+        """自然语言检索：大模型（文字类型，多配置降级）拆关键词 → 本地筛选。"""
         query = self._search.text().strip()
         if not query:
             self._toaster.info("请先在搜索框输入一句话，例如：去年海边的照片")
             return
-        config = load_ai_config(self._library.storage)
-        if not config.configured:
-            self._toaster.error("尚未配置 DeepSeek API Key（设置 → 图库 → AI 优化）")
+        if not app_context.llm_router().has_any("text"):
+            self._toaster.error("尚未配置文字大模型（设置 → 大模型）")
             return
         try:
-            keywords = self._library.ai_client(config).suggest_search_keywords(query)
+            keywords = self._library.ai_suggest_keywords(query)
         except Exception as error:  # noqa: BLE001
             self._toaster.error(str(error))
             return

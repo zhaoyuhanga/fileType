@@ -98,6 +98,11 @@ def gallery_import_dir() -> Path:
     return path
 
 
+def llm_db_path() -> str:
+    """大模型配置数据库路径（所有板块共用同一份配置）。"""
+    return str(app_data_dir() / "llm.db")
+
+
 def legacy_db_path() -> Path | None:
     """win-e-book 旧库位置（%APPDATA%\\WinEBook\\library.db）。"""
     if not os.environ.get("APPDATA"):

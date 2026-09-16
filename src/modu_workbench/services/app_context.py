@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from modu_workbench.core.image import ImageLibrary, ImageStorage
+from modu_workbench.core.llm import LlmStorage, ModelRouter
 from modu_workbench.core.music import MusicLibrary, MusicRegistry, MusicPlayer, MusicStorage, registry
 from modu_workbench.core.reader import Library, Storage
 from modu_workbench.core.video import VideoLibrary, VideoRegistry, VideoStorage
@@ -16,6 +17,7 @@ from .config import (
     gallery_cache_dir,
     gallery_db_path,
     gallery_dir,
+    llm_db_path,
     music_db_path,
     music_dir,
     video_db_path,
@@ -33,6 +35,8 @@ _video_library: VideoLibrary | None = None
 _video_registry: VideoRegistry | None = None
 _image_storage: ImageStorage | None = None
 _image_library: ImageLibrary | None = None
+_llm_storage: LlmStorage | None = None
+_llm_router: ModelRouter | None = None
 
 
 def storage() -> Storage:
@@ -122,3 +126,20 @@ def image_library() -> ImageLibrary:
         _image_library = ImageLibrary(image_storage(), gallery_cache_dir(),
                                       image_dir=gallery_dir())
     return _image_library
+
+
+# ---------- 大模型（跨板块共用） ----------
+
+def llm_storage() -> LlmStorage:
+    global _llm_storage
+    if _llm_storage is None:
+        _llm_storage = LlmStorage(llm_db_path())
+    return _llm_storage
+
+
+def llm_router() -> ModelRouter:
+    """应用级大模型路由器（多类型 / 多配置 / 优先级降级）。"""
+    global _llm_router
+    if _llm_router is None:
+        _llm_router = ModelRouter(llm_storage())
+    return _llm_router

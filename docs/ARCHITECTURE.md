@@ -86,6 +86,12 @@
 - **卡片式绘制**（`ThumbnailDelegate`）：默认图标模式会把文件名压在缩略图底部，
   所以改为自绘卡片 —— 图片区恒为 `thumb×thumb`、文件名单独占 `TITLE_HEIGHT` 高的一条，
   几何上不可能重叠；配合 `_cell_size()` 统一算格子尺寸（改缩略图档位时一并更新）。
+  另外要在网格自己的样式表里把 `QListWidget::item` 的背景/内边距清成透明，
+  否则主题的 item 底色会和自绘卡片叠成两层色块（鼠标一滑就"很乱"）。
+- **分页**：`GalleryBoardPage._all_items` 是当前筛选结果集，`page_items(page)` 切出当前页交给网格，
+  `page_count` / `_turn_page` / `_on_page_jump` / `goto_item_page` 组成分页条；
+  每页默认 120 张（`gallery/page_size`，0＝不分页）。这样网格里的控件数与缩略图解码量都有上限，
+  300+ 张不再"越滚越卡"；上一张/下一张走 `_all_items`，跨页时 `goto_item_page` 自动翻页。
 - **大图查看的缩放模型**（`ImageViewer`）：状态是「模式 + 百分比」而不是「系数 + 是否自适应」。
   `fit` 模式按窗口自适应；`manual` 模式记住百分比，**翻页时保持同一比例**；
   从 fit 按 +/− 时先把当前适应百分比换算出来再乘系数，画面连续不跳变。
@@ -110,12 +116,33 @@
   避免做成"点了没反应"的按钮。默认关闭图片上传，关闭时只发送元数据。
 - **后台任务**：导入扫描 / 增强 / AI 分析 / 重复检测均为 `QThread`，支持取消与进度回报。
 
+## 大模型能力中心（core/llm）
+
+需求是"模型配置要单独一块，并能按类型配多个、按优先级调用、异常降级"，因此抽成独立包：
+
+- `models.py`：`KIND_LABELS`（文字/图片/视频）+ `PROVIDER_PRESETS`（DeepSeek/OpenAI/DashScope/
+  智谱/Kimi/硅基流动/Ollama/自定义）+ `ModelProfile` + `LlmStorage`（独立 `llm.db`，
+  `priority` 升序即调用顺序，`move_profile` 只在同类型内交换优先级）。
+- `router.py`：`OpenAiCompatClient`（单份配置的对话客户端）与 `ModelRouter`。
+  **降级逻辑集中在 `ModelRouter.run(kind, task)`**：按优先级逐个执行 `task(profile)`，
+  抛异常就记下原因并换下一份，全部失败抛 `LlmRequestError`（消息里带每一次的失败原因）。
+  `chat()` 只是 `run()` 的一个特例，所以看图/关键词/参数建议等任意任务都自带降级能力。
+- 与 `core/image/ai.py` 的分工：那边是**提示词与解析**（描述/标签/关键词/参数），
+  通过 `config_from_profile()` 把一份配置适配成 `AiConfig` 复用；这边只管"选谁、按什么顺序试"。
+- 图库的调用链：`ai_analyze` → 图片类型（允许上传时）→ 文字类型（只发元数据）→ 逐份降级；
+  `ai_suggest_keywords` / `ai_suggest_edit_params` 走文字类型。
+- 旧版图库里的 DeepSeek Key 会在首次打开「大模型」页时迁移成文字 + 图片两份配置。
+
 ## 设置分区
 
 设置页从"一个混合对话框"改为 `ui_kit/settings/` 下的**分板块页面**：
 每页实现 `SettingsPage` 的 `load()` / `save()` / `hint()`，统一对话框左侧分页装配；
 各板块顶栏的「⚙ 板块设置」用 `SettingsDialog(initial=<板块key>)` 直达本板块页。
 单页构造失败会用占位页显示原因，不影响其它板块。
+
+**每一页都套在 `QScrollArea` 里，操作条（保存/关闭）用分隔线固定在底部**：
+设置项多的页面（图库/大模型）在 560px 高的窗口里会把内容撑高，
+不套滚动区就会把按钮顶出可视区域 —— 用户根本点不到保存。
 
 ## 行为对齐清单（fileType → Python）
 

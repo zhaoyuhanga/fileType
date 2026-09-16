@@ -203,10 +203,14 @@ class ThumbnailGrid(QListWidget):
         self.setSpacing(2)
         self.setWordWrap(False)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        # 浅灰底 + 白色卡片：没有底色时卡片与空白糊在一起，看起来"很丑"
+        # 浅灰底 + 白色卡片：没有底色时卡片与空白糊在一起，看起来"很丑"。
+        # ::item 的默认底色/内边距要清掉 —— 卡片是自己画的，套上主题的
+        # item 背景会让悬停/选中出现两层色块（鼠标一滑就"很乱"）。
         self.setStyleSheet(
             "QListWidget { background: #eef1f7; border: 1px solid #e3e8f2;"
             " border-radius: 10px; padding: 6px; }"
+            " QListWidget::item { background: transparent; border: none; padding: 0; }"
+            " QListWidget::item:hover, QListWidget::item:selected { background: transparent; }"
         )
         self._delegate = ThumbnailDelegate(self)
         self.setItemDelegate(self._delegate)
@@ -735,7 +739,7 @@ class EnhanceWorker(QThread):
 
 
 class AnalyzeWorker(QThread):
-    """DeepSeek 文本分析（生成描述/标签），逐张执行。"""
+    """大模型分析（生成描述/标签），逐张执行；每张内部按优先级降级选模型。"""
 
     progressed = Signal(int, int, str)
     finishedOne = Signal(int, str, str)   # (image_id, caption, tags)
@@ -743,11 +747,12 @@ class AnalyzeWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, library: ImageLibrary, items: list[ImageItem], *,
-                 use_vision: bool = True, parent=None):
+                 use_vision: bool = True, prefer_vision: bool = True, parent=None):
         super().__init__(parent)
         self._library = library
         self._items = list(items)
         self._use_vision = use_vision
+        self._prefer_vision = prefer_vision
         self._cancel = threading.Event()
 
     def cancel(self) -> None:
@@ -764,7 +769,9 @@ class AnalyzeWorker(QThread):
                     break
                 self.progressed.emit(index - 1, total, f"[{index}/{total}] 分析：{item.display()}")
                 try:
-                    result = self._library.ai_analyze(item, use_vision=self._use_vision)
+                    result = self._library.ai_analyze(
+                        item, use_vision=self._use_vision,
+                        prefer_vision=self._prefer_vision)
                     ok += 1
                     self.finishedOne.emit(item.id, str(result.get("caption") or ""),
                                           ",".join(result.get("tags") or []))

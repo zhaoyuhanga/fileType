@@ -208,7 +208,9 @@ $required = @(
     "modu_workbench.boards.gallery_enhance",
     "modu_workbench.core.image.library",
     "modu_workbench.core.image.enhance",
-    "modu_workbench.core.image.ai"
+    "modu_workbench.core.image.ai",
+    "modu_workbench.core.llm.router",
+    "modu_workbench.ui_kit.settings.llm"
 )
 $missing = @()
 foreach ($name in $required) {
@@ -217,7 +219,7 @@ foreach ($name in $required) {
 if ($missing.Count -gt 0) {
     Fail ("打包产物缺少板块模块：" + ($missing -join ", ") + "`n    请确认 workbench.spec 的 hiddenimports 未被改动。")
 }
-Write-Ok "影视 / 图库模块已随包（$($required.Count) 项全部命中）"
+Write-Ok "影视 / 图库 / 大模型模块已随包（$($required.Count) 项全部命中）"
 
 # 真正跑一次打包产物：MODU_CHECK_DEPS 会输出各能力自检结果（含 video_core）
 Write-Step "运行打包产物做能力自检"

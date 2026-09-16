@@ -249,6 +249,27 @@ class DeepSeekClient:
 # --------------------------------------------------------------------------- 解析工具
 
 
+def config_from_profile(profile, *, kind: str = "", allow_upload: bool = False) -> AiConfig:
+    """把「大模型」里的一份配置适配成 `AiConfig`（复用本模块的提示词逻辑）。
+
+    图片类型配置的 `model` 就是多模态模型名，所以两种类型都能直接映射。
+    """
+    model = str(getattr(profile, "model", "") or DEFAULT_MODEL)
+    vision = str(getattr(profile, "vision_model", "") or "")
+    if kind == "image":
+        vision = model
+    return AiConfig(
+        api_key=str(getattr(profile, "api_key", "") or ""),
+        base_url=str(getattr(profile, "base_url", "") or DEFAULT_BASE_URL),
+        model=model,
+        vision_model=vision or DEFAULT_VISION_MODEL,
+        timeout=float(getattr(profile, "timeout", 60.0) or 60.0),
+        max_tokens=int(getattr(profile, "max_tokens", 1024) or 1024),
+        temperature=float(getattr(profile, "temperature", 0.3) or 0.3),
+        allow_upload=allow_upload,
+    )
+
+
 def _strip_code_fence(text: str) -> str:
     """去掉 ```json ... ``` 包裹。"""
     cleaned = (text or "").strip()
@@ -302,5 +323,6 @@ __all__ = [
     "AiConfigError",
     "AiRequestError",
     "DeepSeekClient",
+    "config_from_profile",
     "image_digest",
 ]

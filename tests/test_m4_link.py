@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from modu_workbench.boards.book_online import OnlineDownloadPage
 from modu_workbench.core.reader import Library
@@ -44,12 +44,43 @@ def test_settings_dialog_has_all_board_pages(qapp: QApplication) -> None:
     from modu_workbench.ui_kit.settings import PAGE_FACTORIES
 
     keys = [key for key, _title, _icon, _factory in PAGE_FACTORIES]
-    assert keys == ["general", "book", "convert", "music", "video", "gallery"]
+    assert keys == ["general", "llm", "book", "convert", "music", "video", "gallery"]
 
     dialog = SettingsDialog(initial="gallery")
     try:
         entry = dialog._nav.currentItem()                        # noqa: SLF001
         assert entry is not None and entry.data(PAGE_ROLE) == "gallery"
+    finally:
+        dialog.close()
+
+
+def test_settings_pages_scroll_and_keep_buttons_visible(qapp: QApplication) -> None:
+    """设置项多的板块必须能滚动，且「保存/关闭」永远在可视区域内。"""
+    from PySide6.QtWidgets import QScrollArea
+
+    dialog = SettingsDialog(initial="llm")
+    dialog.resize(820, 560)          # 刻意用较小的窗口
+    dialog.show()
+    qapp.processEvents()
+    try:
+        # 每一页都套在滚动区里
+        for key in ("general", "llm", "gallery"):
+            dialog._select(key)                                  # noqa: SLF001
+            qapp.processEvents()
+            page = dialog._ensure_page(key)                      # noqa: SLF001
+            assert page is not None
+            assert isinstance(dialog._scrolls[key], QScrollArea)  # noqa: SLF001
+            assert dialog._stack.currentWidget() is dialog._scrolls[key]  # noqa: SLF001
+
+        # 操作条上的两个按钮必须落在对话框可视矩形内（曾经被内容顶出窗口）
+        from PySide6.QtCore import QPoint, QRect
+
+        for label in ("保存", "关闭"):
+            button = next(btn for btn in dialog.findChildren(QPushButton)
+                          if btn.text() == label and btn.isVisible())
+            rect = QRect(button.mapTo(dialog, QPoint(0, 0)), button.size())
+            assert dialog.rect().contains(rect.center()), f"{label} 被内容挤出可视区"
+            assert rect.bottom() <= dialog.rect().bottom(), f"{label} 溢出对话框底部"
     finally:
         dialog.close()
 
