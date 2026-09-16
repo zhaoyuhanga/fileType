@@ -101,6 +101,159 @@ _CODE_FENCE = re.compile(r"<pre><code(?: class=\"language-([\\w+-]+)\")?>(.*?)</
 _INLINE_CODE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
 
 
+# ---------- Qt 富文本排版（QTextBrowser 只认 HTML 属性 + 少量 CSS） ----------
+
+_UI_FONT = "Microsoft YaHei UI, Microsoft YaHei, PingFang SC, sans-serif"
+_BODY_SIZE = 10.5          # pt
+_MONO_SIZE = 9.5           # pt
+_LINE_HEIGHT = 165         # 百分比
+_ACCENT = "#4f6ef7"
+_BORDER = "#e0e5f0"
+_ZEBRA = "#fafbfe"
+_HEAD_BG = "#eef1f8"
+_CODE_BG = "#f6f8fc"
+_QUOTE_BG = "#f7f9fd"
+_INLINE_BG = "#f1f3f9"
+_INLINE_FG = "#b02f60"
+
+
+def _hrule(height: int = 1) -> str:
+    """Qt 认 <hr>，但对颜色/粗细控制有限：用细表格行做"发丝线"最稳。"""
+    return (
+        f"<table width='100%' cellspacing='0' cellpadding='0'>"
+        f"<tr><td bgcolor='{_BORDER}' height='{height}'>"
+        f"<span style='font-size:1px;'>&nbsp;</span></td></tr></table>"
+    )
+
+
+def _panel(inner: str, *, bg: str = _CODE_BG, padding: int = 10, accent: str = "") -> str:
+    """把内容放进带背景的单元格（Qt 可靠的"卡片"做法，可带左侧色条）。"""
+    cells = f"<td width='4' bgcolor='{accent}'></td>" if accent else ""
+    return (
+        f"<table width='100%' cellspacing='0' cellpadding='0'>"
+        f"<tr>{cells}<td bgcolor='{bg}' style='padding:{padding}px;'>{inner}</td></tr></table>"
+    )
+
+
+def _qt_style_html(html: str) -> str:
+    """把 Markdown 生成的 HTML 改写成 QTextBrowser 能正确渲染的形态。"""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # ---- 表格：表头加粗底色、隔行浅底、细边框（Qt 对 border/bgcolor 可靠） ----
+    for table in soup.find_all("table"):
+        table["border"] = "1"
+        table["cellspacing"] = "0"
+        table["cellpadding"] = "7"
+        table["width"] = "100%"
+        table["style"] = f"border-color:{_BORDER};"
+        for wrapper in table.find_all(["thead", "tbody", "tfoot"]):
+            wrapper.unwrap()
+        rows = table.find_all("tr")
+        for index, row in enumerate(rows):
+            head_row = index == 0 and row.find("th") is not None
+            for cell in row.find_all(["th", "td"]):
+                content = cell.decode_contents().strip()
+                is_head = head_row or cell.name == "th"
+                cell.name = "td"
+                cell.clear()
+                if is_head:
+                    cell["bgcolor"] = _HEAD_BG
+                    bold = soup.new_tag("b")
+                    bold.append(BeautifulSoup(content or "&nbsp;", "html.parser"))
+                    cell.append(bold)
+                else:
+                    if index % 2 == 0:
+                        cell["bgcolor"] = _ZEBRA
+                    cell.append(BeautifulSoup(content or "&nbsp;", "html.parser"))
+
+    # ---- 标题：显式字号/字重/颜色（Qt 认 font-size/font-weight/color） ----
+    heading_sizes = {"h1": 20, "h2": 17, "h3": 15, "h4": 13.5, "h5": 12.5, "h6": 11.5}
+    for level, size in heading_sizes.items():
+        for tag in soup.find_all(level):
+            tag["style"] = (
+                f"font-size:{size}pt; font-weight:700; color:#141b2e; margin-top:16px;"
+            )
+            if level in ("h1", "h2"):
+                line = BeautifulSoup(_hrule(), "html.parser").find("table")
+                tag.insert_after(line)
+
+    # ---- 行内代码 ----
+    for tag in soup.find_all("code"):
+        if tag.find_parent("pre") is not None:
+            continue
+        tag["style"] = (
+            f"font-family:{_MONO}; font-size:{_MONO_SIZE}pt;"
+            f" color:{_INLINE_FG}; background-color:{_INLINE_BG};"
+        )
+
+    # ---- 代码块：pre 外包一层带底色的单元格（Qt 对 pre 背景支持不稳） ----
+    for pre in soup.find_all("pre"):
+        pre["style"] = f"font-family:{_MONO}; font-size:{_MONO_SIZE}pt; margin:0;"
+        panel = BeautifulSoup(_panel(str(pre)), "html.parser").find("table")
+        if panel is not None:
+            pre.replace_with(panel)
+
+    # ---- 引用块：左侧色条 + 浅底 ----
+    for quote in soup.find_all("blockquote"):
+        quote["style"] = "color:#47526a; margin:0;"
+        panel = BeautifulSoup(_panel(str(quote), bg=_QUOTE_BG, accent=_ACCENT), "html.parser").find("table")
+        if panel is not None:
+            quote.replace_with(panel)
+
+    # ---- 分隔线 ----
+    for rule in soup.find_all("hr"):
+        line = BeautifulSoup(_hrule(), "html.parser").find("table")
+        if line is not None:
+            rule.replace_with(line)
+
+    # ---- 嵌套列表：Qt 会把子列表挤在同一行，先补一个换行 ----
+    for item in soup.find_all("li"):
+        nested = item.find(["ul", "ol"], recursive=False)
+        if nested is not None:
+            nested.insert_before(soup.new_tag("br"))
+
+    # ---- 链接与段落 ----
+    for link in soup.find_all("a"):
+        link["style"] = f"color:{_ACCENT}; text-decoration:none;"
+    for para in soup.find_all("p"):
+        para["style"] = "margin:6px 0;"
+
+    return str(soup)
+
+
+def _apply_document_style(browser) -> None:  # noqa: ANN001  QTextBrowser
+    """对已 setHtml 的文档做 Qt 侧排版：行距、表格内边距、默认字体。"""
+    from PySide6.QtGui import QFont, QTextBlockFormat, QTextCursor, QTextFrameFormat, QTextTable
+
+    document = browser.document()
+    document.setDefaultFont(QFont(_UI_FONT.split(",")[0].strip(), int(_BODY_SIZE)))
+
+    # 行距：QTextDocument 不支持 CSS line-height，只能用 QTextBlockFormat
+    block_format = QTextBlockFormat()
+    block_format.setLineHeight(_LINE_HEIGHT, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+    cursor = QTextCursor(document)
+    cursor.select(QTextCursor.SelectionType.Document)
+    cursor.mergeBlockFormat(block_format)
+
+    # 表格：内边距 + 边框 + 尽量铺满宽度
+    # PySide6 的 QTextTable 没有 toTable()/isFrame()，必须用 isinstance 判断
+    queue = list(document.rootFrame().childFrames())
+    while queue:
+        current = queue.pop(0)
+        queue.extend(current.childFrames())
+        if not isinstance(current, QTextTable):
+            continue
+        fmt = current.format()
+        fmt.setBorder(1)
+        fmt.setBorderStyle(QTextFrameFormat.BorderStyle.BorderStyle_Solid)
+        fmt.setCellPadding(7)
+        fmt.setCellSpacing(0)
+        current.setFormat(fmt)
+
+
+
 def _wrap_page(inner: str) -> str:
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -150,7 +303,7 @@ def highlight_code(code: str, language: str | None = None) -> str:
     except Exception:  # noqa: BLE001
         lexer = TextLexer()
     body = _pyg_highlight(code, lexer, HtmlFormatter(nowrap=True, noclasses=True))
-    return f"<pre style=\"font-family:{_MONO};font-size:13px;\">{body}</pre>"
+    return f"<pre style=\"font-family:{_MONO};font-size:{_MONO_SIZE}pt;\">{body}</pre>"
 
 
 def _render_markdown(content: str) -> str:
@@ -181,10 +334,9 @@ def _render_markdown(content: str) -> str:
         return highlight_code(raw, language)
 
     html = _CODE_FENCE.sub(replace_block, html)
-    html = _INLINE_CODE.sub(
-        lambda m: f"<code style=\"color:#b02f60;\">{m.group(1)}</code>",
-        html,
-    )
+    html = _INLINE_CODE.sub(lambda m: m.group(0), html)
+    # 关键：把 HTML 改写成 QTextBrowser 能正确渲染的形态（表格/代码块/引用/标题/分隔线）
+    html = _qt_style_html(html)
     return _wrap_page(html)
 
 
@@ -195,12 +347,14 @@ def _render_json(content: str) -> str:
     except JsonFormatError as error:
         pretty = content
         warn = f"<div class='warn'>JSON 无效：{html_mod.escape(str(error))}</div>"
-    return _wrap_page(warn + highlight_code(pretty, "json"))
+    return _wrap_page(warn + _qt_style_html(highlight_code(pretty, "json")))
 
 
 def _render_txt(content: str) -> str:
     escaped = html_mod.escape(content, quote=False)
-    return _wrap_page(f"<pre style='font-family:{_MONO};font-size:13px;white-space:pre-wrap;'>{escaped}</pre>")
+    return _wrap_page(
+        f"<pre style='font-family:{_MONO};font-size:{_MONO_SIZE}pt;white-space:pre-wrap;'>{escaped}</pre>"
+    )
 
 
 def _make_preview_widget(parent: QWidget) -> QWidget:
@@ -408,6 +562,9 @@ class DocViewerDialog(QDialog):
             self._preview.setHtml(_render_json(content))
         else:
             self._preview.setHtml(_render_txt(content))
+        # setHtml 之后再做 Qt 侧排版（行距/表格内边距/正文字体）——
+        # 这些用 CSS 表达不了：QTextDocument 不支持 line-height，表格也要用 QTextTableFormat
+        _apply_document_style(self._preview)
         self._hint_label.setText(
             f"预览引擎：{self._engine}（预览只读；切换到「编辑」后可修改，Ctrl+S 保存）"
         )

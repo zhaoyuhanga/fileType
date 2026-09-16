@@ -47,6 +47,25 @@
 - **逐个格式动作核对**（新增测试 `test_convert_actions_for_each_format`）：
   txt / md / json / html / csv / png / mp4 / zip / pdf 均有可用动作。
 
+### 墨软转换：Markdown 预览排版升级（对标 MarkText）✅
+
+`QTextBrowser` 只支持 HTML4 + CSS 2.1 子集（`line-height`/`border-radius`/`padding` 基本被忽略），
+所以改成「HTML 属性化 + 文档后处理」两条腿：
+
+- **表格**：表头加粗 + 浅底、隔行浅底、细边框、单元格内边距 7px、列宽铺满（`QTextTableFormat`）；
+- **标题**：h1~h6 明确字号/字重/颜色，h1/h2 下方加发丝分隔线；
+- **行内代码**：等宽字体 + 淡底 + 品红字；**代码块**：包进带底色的单元格（Qt 对 `pre` 背景支持不稳），
+  保留 Pygments 语法高亮；
+- **引用块**：左侧 4px 色条 + 浅底（Qt 不认 `border-left`，用双格表格实现）；
+- **分隔线**：`<hr>` 换成 1px 高的表格行（颜色可控）；
+- **列表**：嵌套列表前补 `<br>`（否则 Qt 会把子列表挤在同一行）；
+- **正文排版**：默认字体（微软雅黑 UI）、行距 165%（CSS 表达不了，用 `QTextBlockFormat` 设置）、
+  段间距统一；
+- 对照截图：`docs/ui/md-preview-before.png`（旧渲染：表格无边框/无底色、代码块无背景、引用只是缩进）
+  与 `docs/ui/md-preview-after.png`（新渲染）。
+- 新增测试 `tests/board_convert/test_doc_preview.py`：表头加粗与底色、隔行底色、等宽字体、
+  代码块底色、引用色条、`<hr>` 已替换、嵌套列表换行、文本不丢失、行距 165% 与表格内边距 7px。
+
 ### 版本
 
 - 版本号 1.0.0 → **1.0.1**（`__init__.py` / `pyproject.toml` 单一来源）；
