@@ -5,6 +5,8 @@ from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from modu_workbench.core.book import Library
 from . import context as app_context
+from modu_workbench.ui_kit.components import TaskBar
+from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
@@ -27,9 +29,11 @@ class BookBoardPage(QWidget):
         self._library = app_context.library()
         self._toaster = Toaster(self)
 
+        # 统一任务条：在线书库的下载进度与状态汇总到这里（空闲自动收起）
+        self._task_bar = TaskBar("就绪。可导入本地 TXT / EPUB，或从在线书库下载。")
         self._shelf = ShelfView(self._library, self._toaster)
         self._shelf.open_book.connect(self._open_reader)
-        self._online = OnlineDownloadPage(self._library, self._toaster)
+        self._online = OnlineDownloadPage(self._library, self._toaster, task_bar=self._task_bar)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -37,8 +41,8 @@ class BookBoardPage(QWidget):
 
         self._mode_bar = QWidget()
         mode_row = QHBoxLayout(self._mode_bar)
-        mode_row.setContentsMargins(16, 8, 16, 4)
-        mode_row.setSpacing(8)
+        mode_row.setContentsMargins(PAGE_MARGIN, SPACE["md"], PAGE_MARGIN, SPACE["sm"])
+        mode_row.setSpacing(ROW_GAP)
         self._mode_buttons: dict[str, QWidget] = {}
         for key, label in ((SHELF_KEY, "📚 书架"), (ONLINE_KEY, "🌐 在线书库")):
             button = make_nav_button(label)
@@ -58,10 +62,16 @@ class BookBoardPage(QWidget):
         self._online_index = self._stack.addWidget(self._online)
         self._reader: ReaderView | None = None
         layout.addWidget(self._stack, 1)
+        layout.addWidget(self._task_bar)
 
         self._show_mode(SHELF_KEY)
 
     # ---------- 模式切换 ----------
+
+    def show_page(self, key: str) -> None:
+        """与其他板块一致的子页切换入口（shelf / online），便于截图与自动化。"""
+        if key in (SHELF_KEY, ONLINE_KEY):
+            self._show_mode(key)
 
     def _show_mode(self, key: str) -> None:
         index = self._shelf_index if key == SHELF_KEY else self._online_index

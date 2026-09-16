@@ -62,15 +62,17 @@ def test_property_decorator_is_attached(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", board_files(), ids=lambda path: path.name)
-def test_status_property_not_reassigned(path: Path) -> None:
-    """定义了只读 `_status` 属性的类，不得再给 self._status 赋值。"""
+def test_readonly_properties_not_reassigned(path: Path) -> None:
+    """定义了只读 `_status` / `_progress` 属性的类，不得再给它们赋值。"""
     text = path.read_text(encoding="utf-8")
     for node in classes_of(path):
         methods = methods_of(node)
-        if "_status" not in methods:
-            continue
-        # 类体内出现 self._status = ... 就会被属性拦住
-        assert not re.search(r"self\._status\s*=", text), f"{path.name} 的 {node.name} 给只读属性 _status 赋值"
+        for name in ("_status", "_progress"):
+            if name not in methods:
+                continue
+            assert not re.search(rf"self\.{name}\s*=", text), (
+                f"{path.name} 的 {node.name} 给只读属性 {name} 赋值（会抛 property has no setter）"
+            )
 
 
 def test_pages_expose_task_bar_parameter() -> None:

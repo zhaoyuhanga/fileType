@@ -77,10 +77,50 @@ class _DownloadWorker(QThread):
 class OnlineDownloadPage(QWidget):
     """在线书库页：URL 输入 → 后台下载 → 完成自动入库。"""
 
-    def __init__(self, library: Library, toaster: Toaster, parent: QWidget | None = None):
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在任务条上。"""
+        bar = getattr(self, "_task_bar", None)
+        return bar._label if bar is not None else self._fallback_status      # noqa: SLF001
+
+    @property
+    def _progress(self) -> QProgressBar:
+        """兼容旧引用：进度来自任务条。"""
+        return self._task_bar._progress                                       # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        bar = getattr(self, "_task_bar", None)
+        if bar is None:
+            return
+        if done or total:
+            bar.report(message, done, total)
+        else:
+            bar.note(message)
+
+    def _busy(self, message: str) -> None:
+        """进行中（未知时长）：下载/解析这类任务。"""
+        self._fallback_status.setText(message)
+        bar = getattr(self, "_task_bar", None)
+        if bar is not None:
+            bar.busy(message)
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        bar = getattr(self, "_task_bar", None)
+        if bar is not None:
+            bar.idle(message)
+
+    def __init__(self, library: Library, toaster: Toaster, parent: QWidget | None = None,
+                 *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._toaster = toaster
+        self._task_bar = task_bar
+        self._fallback_status = QLabel("就绪。粘贴 URL 后开始下载。")
         self._worker: _DownloadWorker | None = None
 
         layout = QVBoxLayout(self)
@@ -137,14 +177,7 @@ class OnlineDownloadPage(QWidget):
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        layout.addWidget(self._progress)
-
-        self._status = QLabel("就绪。粘贴 URL 后开始下载。")
-        self._status.setObjectName("readerStatus")
-        layout.addWidget(self._status)
+        # 状态与进度统一显示在板块任务条上（页内不再自建控件）
 
         layout.addStretch(1)
 
@@ -184,20 +217,17 @@ class OnlineDownloadPage(QWidget):
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._on_worker_finished)
 
-        self._progress.setValue(0)
-        self._status.setText("正在连接书站…")
+        self._busy("正在连接书站…")
         self._start_button.setText("下载中…")
         self._update_ui()
         self._worker.start()
 
     def _on_progress(self, current: int, total: int, detail: str) -> None:
         percent = min(100, int(current * 100 / total)) if total else 0
-        self._progress.setValue(percent)
-        self._status.setText(f"{percent}% · {detail or '下载中'}")
+        self._report(f"{percent}% · {detail or '下载中'}", percent, 100)
 
     def _on_completed(self, save_path: str) -> None:
-        self._progress.setValue(100)
-        self._status.setText(f"已保存：{save_path}")
+        self._idle(f"已保存：{save_path}")
         self._open_button.setEnabled(True)
         try:
             self._library.import_path(save_path)
@@ -206,7 +236,7 @@ class OnlineDownloadPage(QWidget):
             self._toaster.info(f"已下载：{save_path}（自动导入失败：{error}，可手动导入）")
 
     def _on_failed(self, message: str) -> None:
-        self._status.setText(message)
+        self._idle(message)
         self._toaster.error(message)
 
     def _on_worker_finished(self) -> None:

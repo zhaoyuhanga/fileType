@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.book import BookRecord, Library
 from modu_workbench.core.book.files import walk_book_files
+from modu_workbench.ui_kit.components import EmptyState
 from modu_workbench.ui_kit.toast import Toaster
 
 
@@ -203,13 +204,15 @@ class ShelfView(QWidget):
             grid.setRowStretch(row, 1)
         else:
             layout = QVBoxLayout(host)
-            hint = QLabel(
-                "书架空空如也" if not self._filter else "没有匹配的书"
+            empty = EmptyState(
+                "📚",
+                "书架空空如也" if not self._filter else "没有匹配的书",
+                "用上方「导入文件 / 导入文件夹」把 TXT / EPUB 加进来"
+                if not self._filter else "换个关键词试试，或清空搜索框",
             )
-            hint.setObjectName("shelfHint")
-            hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setMaximumHeight(240)
             layout.addStretch(1)
-            layout.addWidget(hint)
+            layout.addWidget(empty)
             layout.addStretch(1)
 
         old = self._scroll.takeWidget()
