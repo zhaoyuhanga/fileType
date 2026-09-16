@@ -133,6 +133,20 @@
 - **测试**：`test_web_bridge.py` → `tests/test_convert_files.py`（保留文件扫描用例），
   版本单一来源测试独立为 `tests/test_version.py` 并改为校验"安装包版本由打包脚本注入"。
 
+### P6 测试与文档规范
+
+- **测试目录分层**（`git mv` 保留历史，30 个文件）：
+  `tests/architecture/`（架构与规范闸门）、`tests/platform/`（单库与迁移）、
+  `tests/board_<板块>/`（六个板块）、`tests/smoke/`（主壳与跨板块联动）、`tests/helpers/`（辅助脚本）；
+  里程碑式命名 `test_m0_smoke` / `test_m4_link` 改为 `test_shell_smoke` / `test_cross_board_link`。
+- `pyproject.toml` 的 `pythonpath` 增加 `tests`（辅助脚本按模块名导入）；
+  移动后修正了仓库根相对路径（`parents[1]` → `parents[2]`）。
+- **新增规范文档**：`docs/TESTING.md`（分层/约定/命令/每板块冒烟清单）、
+  `docs/RELEASE.md`（发版检查、打包三道自检、环境限制、数据兼容）、
+  `tests/README.md`（目录说明），并按板块生成 `docs/BOARDS/{book,convert,music,video,gallery}.md`
+  （目录清单、数据表、界面约定、测试与变更须知——文件清单与表名由脚本从代码提取，避免过期）。
+- README 增加文档索引表。
+
 ## v0.3.1 — 墨软影视修复版
 
 ### 修复：影视板块「播放和下载都失败」

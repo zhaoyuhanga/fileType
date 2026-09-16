@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
+SRC = Path(__file__).resolve().parents[2] / "src"
 
 # 影视板块涉及的全部模块（新增代码的主要风险面）
 VIDEO_MODULES = [

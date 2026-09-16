@@ -8,7 +8,7 @@ from PIL import Image
 
 from modu_workbench.services import assets
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSETS = REPO_ROOT / "src" / "modu_workbench" / "assets"
 
 

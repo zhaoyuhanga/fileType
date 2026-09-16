@@ -9,7 +9,7 @@ from pathlib import Path
 
 from modu_workbench import __version__
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_version_single_source() -> None:

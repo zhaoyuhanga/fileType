@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 BOARDS = REPO / "src" / "modu_workbench" / "boards"
 
 HELPERS = ("_report", "_busy", "_idle", "_set_progress")

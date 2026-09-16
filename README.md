@@ -386,6 +386,18 @@ archive/electron-formatflow/   # 旧 Electron 版归档（前端源码 + 主进�
 docs/ARCHITECTURE.md           # 架构与合并方案
 ```
 
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| `docs/ARCHITECTURE.md` | 顶层结构、依赖规则、各板块设计要点 |
+| `docs/DATABASE.md` | 单库表结构、迁移与备份约定 |
+| `docs/UI_GUIDE.md` | 设计令牌、组件库、页面模板、截图验收 |
+| `docs/TESTING.md` | 测试分层、写测试约定、每板块冒烟清单 |
+| `docs/RELEASE.md` | 发版检查、打包与自检、环境限制 |
+| `docs/REFACTOR_PLAN.md` | v1.0.0 重构方案与阶段验收 |
+| `docs/BOARDS/<板块>.md` | 各板块的目录、数据表、界面约定与变更须知 |
+
 ## 里程碑
 
 | 阶段 | 内容 | 状态 |

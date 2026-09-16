@@ -1259,7 +1259,7 @@ def test_download_hls_decrypts_aes128_without_ffmpeg(monkeypatch: pytest.MonkeyP
     """AES-128 加密流应当能自行解密下载（不依赖 ffmpeg）。"""
     import binascii
 
-    from tests.aes_encrypt_ref import aes128_cbc_encrypt_ref
+    from helpers.aes_encrypt_ref import aes128_cbc_encrypt_ref
 
     from modu_workbench.core.video import downloader as downloader_module
     from modu_workbench.core.video.aes import aes128_cbc_decrypt

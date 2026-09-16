@@ -6,7 +6,7 @@ from pathlib import Path
 
 from modu_workbench.core.platform.files import SUPPORTED_IMPORT_EXTENSIONS, scan_paths
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---- 文件扫描 ----
