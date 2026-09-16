@@ -28,7 +28,10 @@ a = Analysis(
     ["src/modu_workbench/__main__.py"],
     pathex=["src"],
     binaries=[],
-    datas=[("src/modu_workbench/webfront", "modu_workbench/webfront")],
+    datas=[
+        ("src/modu_workbench/webfront", "modu_workbench/webfront"),
+        ("src/modu_workbench/assets", "modu_workbench/assets"),
+    ],
     hiddenimports=[
         "modu_workbench.boards.book_online",
         "modu_workbench.boards.book_reader",
@@ -93,7 +96,8 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="ModuWorkbench.app",
-    icon=None,
+    # macOS 使用 .icns；PyInstaller 可借 Pillow 由 .ico 转换（若失败可先转成 app.icns）
+    icon="src/modu_workbench/assets/app.ico",
     bundle_identifier="com.internal.moduworkbench",
     info_plist={
         "NSHighResolutionCapable": True,

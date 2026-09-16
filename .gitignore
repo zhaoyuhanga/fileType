@@ -26,3 +26,7 @@ Thumbs.db
 # PyInstaller ä¸­è½¬è¾“å‡ºï¼ˆæ‰“åŒ…åäº¤æ¢è¿› dist/ï¼‰
 out-dist/
 out-build/
+
+# Í¼±êÔ¤ÀÀ£¨ÓÉ packaging/icon_preview.py Éú³É£©
+.icon_preview.png
+.icon_installer_preview.png

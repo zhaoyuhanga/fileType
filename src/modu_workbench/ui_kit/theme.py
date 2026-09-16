@@ -469,6 +469,7 @@ def apply_theme(app) -> None:
     """套用墨软·工作台浅色主题（Fusion 风格保证一致性）。"""
     app.setStyle("Fusion")
     app.setStyleSheet(app_qss(TOKENS))
+    _apply_app_icon(app)
     # 兜底：原生控件（勾选框、单选框箭头等）用相近的浅色调色板
     from PySide6.QtGui import QColor, QPalette
 
@@ -486,3 +487,17 @@ def apply_theme(app) -> None:
     palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#141b2e"))
     palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#ffffff"))
     app.setPalette(palette)
+
+
+def _apply_app_icon(app) -> None:
+    """设置应用/任务栏图标（随包资源，缺失时静默跳过）。"""
+    try:
+        from PySide6.QtGui import QIcon
+
+        from modu_workbench.services.assets import app_icon_path
+
+        path = app_icon_path()
+        if path is not None:
+            app.setWindowIcon(QIcon(str(path)))
+    except Exception:  # noqa: BLE001
+        return

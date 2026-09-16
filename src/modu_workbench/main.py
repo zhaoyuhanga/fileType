@@ -210,6 +210,23 @@ def _run_dependency_check(output_path: str) -> int:
             match_ok = False
         return bool(ok and expected.issubset(set(providers)) and match_ok)
 
+    def check_branding_icon() -> bool:
+        """品牌图标：随包 app.ico 可定位，且能加载出多尺寸 QIcon（窗口/任务栏图标）。"""
+        try:
+            from PySide6.QtGui import QIcon
+            from PySide6.QtWidgets import QApplication
+
+            from modu_workbench.services.assets import app_icon_path
+
+            QApplication.instance() or QApplication([])   # QIcon/QPixmap 需要 GUI 应用实例
+            path = app_icon_path()
+            if path is None or not path.is_file():
+                return False
+            icon = QIcon(str(path))
+            return (not icon.isNull()) and bool(icon.availableSizes())
+        except Exception:  # noqa: BLE001
+            return False
+
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
@@ -220,6 +237,7 @@ def _run_dependency_check(output_path: str) -> int:
     record("multimedia", check_multimedia)
     record("multimedia_playback", check_multimedia_playback)
     record("music_core", check_music_core)
+    record("branding_icon", check_branding_icon)
 
     try:
         with open(output_path, "w", encoding="utf-8") as fp:

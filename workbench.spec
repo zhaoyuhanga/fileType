@@ -36,7 +36,11 @@ a = Analysis(
     ["src/modu_workbench/__main__.py"],
     pathex=["src"],
     binaries=[],
-    datas=[("src/modu_workbench/webfront", "modu_workbench/webfront")],
+    datas=[
+        ("src/modu_workbench/webfront", "modu_workbench/webfront"),
+        # 应用图标与安装包图形（services/assets.py 定位）
+        ("src/modu_workbench/assets", "modu_workbench/assets"),
+    ],
     hiddenimports=[
         "modu_workbench.boards.book_online",
         "modu_workbench.boards.book_reader",
@@ -127,6 +131,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="src/modu_workbench/assets/app.ico",
 )
 coll = COLLECT(
     exe,

@@ -84,6 +84,28 @@ pwsh -ExecutionPolicy Bypass -File packaging\build_webfront.ps1   # 首次会 np
 `python -m modu_workbench.services.web_prepare`（清理旧产物、写入 `qtwebchannel.js`/`bridge_shim.js`、注入版本号）。
 纯 Python 改动无需重建前端。
 
+## 品牌图形（应用图标 / 安装包图形）
+
+图标由脚本生成，可随时重出：
+
+```powershell
+python packaging\make_icons.py          # 生成 src/modu_workbench/assets/ 下的图标与安装包图形
+python packaging\icon_preview.py        # 生成 .icon_preview.png（各尺寸放大预览，便于检查小图标可读性）
+```
+
+产物与用途：
+
+| 文件 | 用途 |
+|---|---|
+| `src/modu_workbench/assets/app.ico` | Windows 应用图标（16/24/32/48/64/128/256）→ PyInstaller `icon=`、NSIS `MUI_ICON` |
+| `src/modu_workbench/assets/app.png` | 512×512 源图（文档 / 其他平台） |
+| `src/modu_workbench/assets/installer_header.bmp` | 安装向导页眉图 150×57 |
+| `src/modu_workbench/assets/installer_welcome.bmp` | 安装向导欢迎页左图 164×314 |
+
+设计说明：白色圆角底 + 蓝色双向箭头（浅蓝指向右上、深蓝指向左下），
+呼应「阅读 / 转换 / 音乐」的双向流动语义；`assets/` 随包分发，
+运行时由 `services/assets.py` 定位并设置窗口/任务栏图标。
+
 ## 打包 Windows
 
 ```powershell

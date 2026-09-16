@@ -13,6 +13,18 @@ Unicode true
 !ifndef OUTPUT_DIR
   !define OUTPUT_DIR "${__FILEDIR__}\..\dist"
 !endif
+!ifndef ASSETS_DIR
+  !define ASSETS_DIR "${__FILEDIR__}\..\src\modu_workbench\assets"
+!endif
+
+; 品牌图形（由 packaging/make_icons.py 生成）
+!define MUI_ICON "${ASSETS_DIR}\app.ico"
+!define MUI_UNICON "${ASSETS_DIR}\app.ico"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_BITMAP "${ASSETS_DIR}\installer_header.bmp"
+!define MUI_HEADERIMAGE_RIGHT
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${ASSETS_DIR}\installer_welcome.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${ASSETS_DIR}\installer_welcome.bmp"
 
 Name "墨软·工作台"
 OutFile "${OUTPUT_DIR}\墨软工作台-Setup-${APP_VERSION}.exe"
