@@ -90,8 +90,14 @@ class OnlineDownloadPage(QWidget):
         """兼容旧引用：进度来自任务条。"""
         return self._task_bar._progress                                       # noqa: SLF001
 
+    def _note_fallback(self, message: str) -> None:
+        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
+        label = getattr(self, "_fallback_status", None)
+        if label is not None:
+            label.setText(message)
+
     def _report(self, message: str, done: int = 0, total: int = 0) -> None:
-        self._fallback_status.setText(message)
+        self._note_fallback(message)
         bar = getattr(self, "_task_bar", None)
         if bar is None:
             return
@@ -102,14 +108,14 @@ class OnlineDownloadPage(QWidget):
 
     def _busy(self, message: str) -> None:
         """进行中（未知时长）：下载/解析这类任务。"""
-        self._fallback_status.setText(message)
+        self._note_fallback(message)
         bar = getattr(self, "_task_bar", None)
         if bar is not None:
             bar.busy(message)
 
     def _idle(self, message: str = "") -> None:
         if message:
-            self._fallback_status.setText(message)
+            self._note_fallback(message)
         bar = getattr(self, "_task_bar", None)
         if bar is not None:
             bar.idle(message)

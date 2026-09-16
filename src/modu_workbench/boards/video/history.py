@@ -131,8 +131,14 @@ class VideoHistoryPage(QWidget):
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
         return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
 
+    def _note_fallback(self, message: str) -> None:
+        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
+        label = getattr(self, "_fallback_status", None)
+        if label is not None:
+            label.setText(message)
+
     def _report(self, message: str) -> None:
-        self._fallback_status.setText(message)
+        self._note_fallback(message)
         if self._task is not None:
             self._task.idle(message)
 
@@ -164,7 +170,7 @@ class VideoHistoryPage(QWidget):
         self._table.setVisible(bool(self._entries))
         self._set_tail_stretch(not self._entries)
         if not self._entries:
-            self._fallback_status.setText("还没有记录。去「搜索下载」找一部片子看看？")
+            self._note_fallback("还没有记录。去「搜索下载」找一部片子看看？")
         self._update_buttons()
 
     def _selected_entry(self):  # noqa: ANN201

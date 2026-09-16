@@ -342,7 +342,7 @@ NETEASE_SEARCH = {"result": {"songs": [
 
 def test_netease_search_and_download_url() -> None:
     http = FakeHttp({
-        ("POST", "/api/search/get/web"): FakeResponse(payload=NETEASE_SEARCH),
+        ("POST", "/api/search/get"): FakeResponse(payload=NETEASE_SEARCH),
         ("POST", "enhance/player/url"): FakeResponse(payload={"data": [{"url": "https://m7.music.126.net/real.mp3"}]}),
     })
     source = NeteaseSource(http=http)

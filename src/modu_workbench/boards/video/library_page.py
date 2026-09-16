@@ -406,8 +406,14 @@ class VideoLibraryPage(QWidget):
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
         return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
 
+    def _note_fallback(self, message: str) -> None:
+        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
+        label = getattr(self, "_fallback_status", None)
+        if label is not None:
+            label.setText(message)
+
     def _report(self, message: str, done: int = 0, total: int = 0) -> None:
-        self._fallback_status.setText(message)
+        self._note_fallback(message)
         if self._task is not None:
             if done or total:
                 self._task.report(message, done, total)
@@ -416,13 +422,13 @@ class VideoLibraryPage(QWidget):
 
     def _busy(self, message: str) -> None:
         """进行中提示（搜索/导入/解析这类未知时长）。"""
-        self._fallback_status.setText(message)
+        self._note_fallback(message)
         if self._task is not None:
             self._task.busy(message)
 
     def _idle(self, message: str = "") -> None:
         if message:
-            self._fallback_status.setText(message)
+            self._note_fallback(message)
         if self._task is not None:
             self._task.idle(message)
 

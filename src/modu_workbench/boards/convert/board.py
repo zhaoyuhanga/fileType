@@ -22,8 +22,13 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.convert import engine as convert_engine
 from modu_workbench.core.convert.formats import TARGET_EXTENSION, format_from_extension, format_label
-from modu_workbench.core.convert.registry import ConverterAction, common_actions, get_action
-from modu_workbench.ui_kit.components import EmptyState, PageHeader
+from modu_workbench.core.convert.registry import (
+    ConverterAction,
+    common_actions,
+    get_action,
+    union_actions,
+)
+from modu_workbench.ui_kit.components import EmptyState, PageHeader, TaskBar
 from modu_workbench.ui_kit.settings import app_settings
 from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SECTION_GAP, SPACE
 from modu_workbench.ui_kit.toast import Toaster
@@ -77,6 +82,10 @@ class ConvertBoardPage(QWidget):
             "本地离线转换：文本 / 文档 / 表格 / 图片 / 媒体 / 归档；双击文件可在本地查看或编辑。",
         )
         layout.addWidget(self._header)
+
+        # 统一任务条：转换进度与完成汇总（空闲自动收起），解决"点了没反应"的反馈缺失
+        self._task_bar = TaskBar("就绪。添加文件后选择动作，点「开始转换」。")
+        self._task_bar.cancelled.connect(self._cancel)
 
         toolbar = QHBoxLayout()
         add_files = QPushButton("添加文件")
@@ -145,8 +154,10 @@ class ConvertBoardPage(QWidget):
         right_layout.setSpacing(8)
         title_label = QLabel("可用转换动作")
         title_label.setObjectName("sectionTitle")
-        sub_label = QLabel("按列表中的文件自动匹配")
-        sub_label.setObjectName("readerStatus")
+        # 动作区提示：动态说明"为什么没有动作"（多格式勾选/未知格式）
+        self._action_hint = QLabel("按列表中的文件自动匹配")
+        self._action_hint.setObjectName("readerStatus")
+        self._action_hint.setWordWrap(True)
         actions_host = QWidget()
         self._actions_box = QVBoxLayout(actions_host)
         self._actions_box.setContentsMargins(0, 2, 2, 2)
@@ -155,7 +166,7 @@ class ConvertBoardPage(QWidget):
         actions_scroll.setWidgetResizable(True)
         actions_scroll.setWidget(actions_host)
         right_layout.addWidget(title_label)
-        right_layout.addWidget(sub_label)
+        right_layout.addWidget(self._action_hint)
         right_layout.addWidget(actions_scroll, 1)
 
         run_row = QHBoxLayout()
@@ -180,6 +191,7 @@ class ConvertBoardPage(QWidget):
         self._hint.setObjectName("readerStatus")
         right_layout.addWidget(self._hint)
         splitter.addWidget(right)
+        layout.addWidget(self._task_bar)
         splitter.setSizes([720, 300])
         layout.addWidget(splitter, 1)
 
@@ -315,6 +327,11 @@ class ConvertBoardPage(QWidget):
                 item.widget().deleteLater()
         formats = [row["format"] for row in self._rows if row["checked"] and row["format"] != "unknown"]
         actions = common_actions(formats) if formats else []
+        self._mixed_mode = False
+        if not actions and formats:
+            # 勾选了多种格式且没有"共同动作"：退化为并集（每个文件用自己适用的动作）
+            actions = union_actions(formats)
+            self._mixed_mode = bool(actions)
         self._current_actions: list[ConverterAction] = actions
         self._action_buttons: list[QPushButton] = []
         for action in actions:
@@ -325,6 +342,11 @@ class ConvertBoardPage(QWidget):
             self._actions_box.addWidget(button)
             self._action_buttons.append(button)
         self._selected_action = next((a for a in actions if a.id == previous_id), actions[0] if actions else None)
+        self._action_hint.setText(
+            "" if actions else
+            ("勾选的文件没有可用动作（可能是未知格式）；先右侧「添加文件」选择受支持的类型"
+             if not formats else "已选格式暂无可用动作")
+        )
         if self._selected_action is not None and self._action_buttons:
             for button, candidate in zip(self._action_buttons, self._current_actions):
                 active = candidate.id == self._selected_action.id
@@ -346,7 +368,21 @@ class ConvertBoardPage(QWidget):
     def _start(self) -> None:
         if self._worker is not None or self._selected_action is None:
             return
-        files = self._checked_files()
+        action = self._selected_action
+        checked = self._checked_files()
+        applicable = [p for p in checked
+                      if action is not None and action.matches(
+                          next((row["format"] for row in self._rows if row["path"] == p), ""))]
+        skipped = [p for p in checked if p not in applicable]
+        for path in skipped:
+            for row in self._rows:
+                if row["path"] == path:
+                    row["status"] = "跳过"
+                    row["detail"] = f"「{action.label if action else '该动作'}」不适用于此格式"
+        if skipped:
+            self._rebuild_table()
+            self._toaster.info(f"已跳过 {len(skipped)} 个不适用该动作的文件")
+        files = applicable
         if not files:
             self._toaster.info("请先勾选要转换的文件")
             return
@@ -366,6 +402,10 @@ class ConvertBoardPage(QWidget):
         worker.start()
 
     def _on_started(self, path: str) -> None:
+        name = Path(path).name
+        index = next((i for i, row in enumerate(self._rows) if row["path"] == path), 0)
+        total = max(1, len([row for row in self._rows if row["status"] in ("排队中", "转换中…")]))
+        self._task_bar.report(f"正在转换（{index + 1}/{total}）：{name}", index, total)
         for row in self._rows:
             if row["path"] == path:
                 row["status"] = "转换中…"
@@ -401,6 +441,15 @@ class ConvertBoardPage(QWidget):
             self._toaster.info("正在取消剩余转换…")
 
     def _on_worker_finished(self) -> None:
+        ok = len([row for row in self._rows if row["status"] == "成功"])
+        failed = len([row for row in self._rows if row["status"] == "失败"])
+        skipped = len([row for row in self._rows if row["status"] == "跳过"])
+        summary = f"转换完成：成功 {ok}，失败 {failed}" + (f"，跳过 {skipped}" if skipped else "")
+        self._task_bar.idle(summary)
+        if ok:
+            self._toaster.success(summary)
+        elif failed:
+            self._toaster.error(summary + "（可查看状态列的失败原因）")
         self._worker = None
         self._run_button.setEnabled(bool(self._current_actions))
         self._cancel_button.setEnabled(False)

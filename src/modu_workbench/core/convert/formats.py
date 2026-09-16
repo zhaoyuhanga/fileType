@@ -3,6 +3,8 @@ from __future__ import annotations
 
 # 转换族
 TEXT_FORMATS = ("txt", "markdown", "html")
+# PDF 作为「输入」格式（v1.0.0：此前只能作为输出目标，导致 pdf 文件没有任何动作）
+PDF_FORMATS = ("pdf",)
 WORD_FORMATS = ("docx", "doc")
 SHEET_FORMATS = ("xlsx", "xls", "csv")
 IMAGE_FORMATS = ("jpg", "png", "webp", "bmp", "gif")
@@ -12,7 +14,8 @@ MEDIA_FORMATS = VIDEO_FORMATS + AUDIO_FORMATS
 ARCHIVE_FORMATS = ("zip", "tar", "rar")
 
 SUPPORTED_FORMATS = (
-    TEXT_FORMATS + WORD_FORMATS + SHEET_FORMATS + IMAGE_FORMATS + MEDIA_FORMATS + ARCHIVE_FORMATS + ("json",)
+    TEXT_FORMATS + WORD_FORMATS + SHEET_FORMATS + IMAGE_FORMATS + MEDIA_FORMATS
+    + ARCHIVE_FORMATS + ("json",) + PDF_FORMATS
 )
 
 # 转换输出的目标格式 → 扩展名（归档解压输出为目录，不入此表）

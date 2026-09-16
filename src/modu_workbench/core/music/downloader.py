@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 import requests
 
 from .models import RemoteTrack, safe_filename
+from modu_workbench.core.platform.media import probe_duration_ms
+
 from .sources import MusicSource, SourceError, clean_lyrics, describe_network_error, get_source
 
 ProgressFn = Callable[[int, int, str], None]  # written, total, message
@@ -224,6 +226,18 @@ def _download_resolved(
             raise SourceError(
                 f"下载到的不是有效音频（{content_type or '未知类型'}，{written // 1024} KB）："
                 "该曲目可能受版权限制、需要 VIP 或链接已失效"
+            )
+
+        # 校验时长：部分音源（酷我 VIP、iTunes 等）只给 11~30 秒试听片段，
+        # 直接入库会让用户以为"下载成功但只有几秒"。这里给出明确原因并让注册表换源重试。
+        nominal_ms = int(getattr(track, "duration_ms", 0) or 0)
+        actual_ms = probe_duration_ms(target)
+        if nominal_ms >= 45_000 and actual_ms and actual_ms < nominal_ms * 0.6:
+            target.unlink(missing_ok=True)
+            raise SourceError(
+                f"该音源只提供 {actual_ms // 1000} 秒试听片段"
+                f"（完整曲目约 {nominal_ms // 1000} 秒），可能是 VIP/付费曲目；"
+                "已自动尝试其他音源"
             )
 
     if save_cover and track.cover_url:

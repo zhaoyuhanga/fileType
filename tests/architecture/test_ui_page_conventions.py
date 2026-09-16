@@ -16,7 +16,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 BOARDS = REPO / "src" / "modu_workbench" / "boards"
 
-HELPERS = ("_report", "_busy", "_idle", "_set_progress")
+HELPERS = ("_report", "_busy", "_idle", "_set_progress", "_note_fallback")
 
 
 def board_files() -> list[Path]:

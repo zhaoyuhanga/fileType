@@ -96,6 +96,22 @@ def _run_dependency_check(output_path: str) -> int:
                     return False
         return not (root / "webfront").exists()
 
+    def check_pdf_convert() -> bool:
+        """墨软转换：PDF 文本抽取依赖 pypdf（打包时必须随包）。"""
+        try:
+            from pypdf import PdfWriter, PdfReader
+
+            import io
+
+            writer = PdfWriter()
+            writer.add_blank_page(width=200, height=200)
+            buffer = io.BytesIO()
+            writer.write(buffer)
+            buffer.seek(0)
+            return len(PdfReader(buffer).pages) == 1
+        except Exception:  # noqa: BLE001
+            return False
+
     def check_multimedia() -> bool:
         """墨软乐库播放依赖 QtMultimedia（打包必须带上）。"""
         try:
@@ -562,6 +578,7 @@ def _run_dependency_check(output_path: str) -> int:
     record("json_highlight", check_json_highlight)
     record("lexer_by_name", check_lexer_by_name)
     record("single_qt_stack", check_single_qt_stack)
+    record("pdf_convert", check_pdf_convert)
     record("multimedia", check_multimedia)
     record("multimedia_playback", check_multimedia_playback)
     record("music_core", check_music_core)

@@ -75,6 +75,8 @@ class HomePage(QWidget):
         entry = SectionCard("选择板块开始", actions=[chip(f"共 {len(ACTIVE_BOARDS)} 个板块")])
         entry.add_layout(self._grid)
         self._page.add(entry)
+        # 让板块区吃掉窗口多余高度（卡片随之变高），避免全屏时下方大片空白
+        self._page.body.setStretchFactor(entry, 1)
 
         # 使用提示（把"空白"换成有用的信息，避免首页下方出现大片留白）
         tips = SectionCard("使用提示")
@@ -105,6 +107,7 @@ class HomePage(QWidget):
         self._columns = columns
         while self._grid.count():
             self._grid.takeAt(0)
+        self._grid.setRowStretch(max(0, (len(self._cards) - 1) // max(1, columns)), 1)
         for index, card in enumerate(self._cards):
             row, column = divmod(index, columns)
             # 幽灵卡（最后一张）横向铺满本行剩余列：首页不允许出现大片空白

@@ -108,6 +108,27 @@ def _build_actions() -> list[ConverterAction]:
                 id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 提取 {_fmt_name(target)}",
                 source_formats=(source,), target_format=target, category="audio", kind="media",
             ))
+    # JSON（v1.0.0 新增：此前 json 没有任何可转换动作）
+    actions.extend([
+        ConverterAction(id="json-to-txt", label="JSON 转 TXT（美化）",
+                        source_formats=("json",), target_format="txt",
+                        category="document", kind="text"),
+        ConverterAction(id="json-to-csv", label="JSON 转 CSV（对象数组）",
+                        source_formats=("json",), target_format="csv",
+                        category="document", kind="text"),
+        ConverterAction(id="json-to-pdf", label="JSON 转 PDF",
+                        source_formats=("json",), target_format="pdf",
+                        category="document", kind="text"),
+    ])
+    # PDF 输入（v1.0.0 新增：此前 pdf 只能当输出，源文件加进来没有动作）
+    actions.extend([
+        ConverterAction(id="pdf-to-txt", label="PDF 提取文本（TXT）",
+                        source_formats=("pdf",), target_format="txt",
+                        category="document", kind="pdf"),
+        ConverterAction(id="pdf-to-markdown", label="PDF 提取文本（Markdown）",
+                        source_formats=("pdf",), target_format="markdown",
+                        category="document", kind="pdf"),
+    ])
     # 归档族
     archive_all = TEXT_FORMATS + WORD_FORMATS + SHEET_FORMATS + IMAGE_FORMATS + VIDEO_FORMATS + AUDIO_FORMATS + ARCHIVE_FORMATS
     actions.extend([
@@ -134,6 +155,20 @@ def get_action(action_id: str) -> ConverterAction | None:
 
 def actions_for_format(source_format: str) -> list[ConverterAction]:
     return [a for a in ACTIONS if a.matches(source_format)]
+
+
+def union_actions(source_formats: list[str]) -> list[ConverterAction]:
+    """各格式各自可用动作的并集（按 id 去重）。
+
+    用途：用户同时勾选了多种格式时，"共同动作"往往为空（例如 md + png 没有交集），
+    此时退化为并集，让每个文件用它自己适用的动作，而不是整块面板空白、按钮不可点。
+    """
+    seen: dict[str, ConverterAction] = {}
+    for fmt in dict.fromkeys(source_formats):
+        for action in ACTIONS:
+            if action.matches(fmt) and action.id not in seen:
+                seen[action.id] = action
+    return list(seen.values())
 
 
 def common_actions(source_formats: list[str]) -> list[ConverterAction]:

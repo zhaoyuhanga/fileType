@@ -59,6 +59,8 @@ def run_conversion(
             from . import media_io
 
             media_io.convert_media(source, target, output_path, cancel)
+        elif action.kind == "pdf":
+            output_path = _run_pdf(action, source, output_dir_path)
         elif action.kind == "archive":
             return _run_archive(action, source, output_dir_path, cancel)
         else:
@@ -101,6 +103,9 @@ def _unique_dir(output_dir: Path, stem: str) -> Path:
 # ---------- 文本族 ----------
 
 def _run_text(source: Path, source_format: str, target: str, output: Path, title: str) -> None:
+    if source_format == "json":
+        _run_json(source, target, output, title)
+        return
     if source_format not in ("txt", "markdown", "html"):
         raise ValueError("该文本转换需要 txt / md / html 源文件")
 
@@ -153,6 +158,86 @@ def _run_text(source: Path, source_format: str, target: str, output: Path, title
         return
 
     raise ValueError(f"不支持的文本目标：{target}")
+
+
+def _run_json(source: Path, target: str, output: Path, title: str) -> None:
+    """JSON → txt / csv / pdf（v1.0.0 新增）。"""
+    import csv
+    import json
+    import io
+
+    from . import text_io
+
+    raw = text_io.read_text_smart(source)
+    try:
+        data = json.loads(raw)
+    except ValueError as error:
+        raise ValueError(f"不是有效 JSON：{error}") from error
+
+    if target in ("txt", "markdown"):
+        pretty = json.dumps(data, ensure_ascii=False, indent=2)
+        text_io.write_text(output, pretty if target == "txt" else f"```json\n{pretty}\n```\n")
+        return
+    if target == "pdf":
+        pretty = json.dumps(data, ensure_ascii=False, indent=2)
+        from .pdf_out import render_text_pdf
+
+        render_text_pdf(pretty, output, title=title or source.stem)
+        return
+    if target == "csv":
+        rows = data
+        if isinstance(data, dict):
+            # 常见包装：{"items": [...]} / {"data": [...]} / {"list": [...]}
+            for key in ("items", "data", "list", "records", "rows"):
+                if isinstance(data.get(key), list):
+                    rows = data[key]
+                    break
+            else:
+                rows = [data]
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("JSON 里没有可导出的数组（需要对象数组）")
+        if not all(isinstance(item, dict) for item in rows):
+            raise ValueError("JSON 转 CSV 需要「对象数组」，当前元素不是对象")
+        columns: list[str] = []
+        for item in rows:
+            for key in item:
+                if key not in columns:
+                    columns.append(str(key))
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        for item in rows:
+            writer.writerow({key: item.get(key, "") for key in columns})
+        text_io.write_text(output, buffer.getvalue())
+        return
+    raise ValueError(f"不支持的 JSON 目标：{target}")
+
+
+def _run_pdf(action, source: Path, output_dir: Path) -> Path:  # noqa: ANN001
+    """PDF → TXT / Markdown（pypdf 抽取文本）。"""
+    try:
+        from pypdf import PdfReader
+    except ImportError as error:  # pragma: no cover - 依赖缺失时给出可操作提示
+        raise ValueError("PDF 文本抽取需要 pypdf：请执行 pip install pypdf") from error
+
+    from . import text_io
+
+    try:
+        reader = PdfReader(str(source))
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    except Exception as error:  # noqa: BLE001
+        raise ValueError(f"PDF 读取失败：{error}") from error
+    text = "\n\n".join(page for page in pages if page)
+    if not text.strip():
+        raise ValueError("这个 PDF 里没有可抽取的文本（可能是扫描件/图片型 PDF）")
+
+    extension = TARGET_EXTENSION.get(action.target_format, ".txt")
+    output = _unique_output(output_dir, source.stem, extension)
+    if action.target_format == "markdown":
+        text_io.write_text(output, text)
+    else:
+        text_io.write_text(output, text)
+    return output
 
 
 # ---------- 文档族（word / sheet） ----------

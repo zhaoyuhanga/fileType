@@ -22,6 +22,9 @@ class NeteaseSource(MusicSource):
         homepage="https://music.163.com",
     )
     BASE = "https://music.163.com"
+    # v1.0.0：`/api/search/get/web` 已改为返回加密字符串（result 不是对象），
+    # 继续用它会直接 AttributeError；`/api/search/get` 仍返回明文 JSON（song/artist/playlist 通用）。
+    SEARCH_URL = "https://music.163.com/api/search/get"
 
     def default_headers(self) -> dict:
         return dict(NETEASE_HEADERS)
@@ -38,12 +41,29 @@ class NeteaseSource(MusicSource):
             return self._search_playlist_tracks(keyword, limit)
         search_type = 10 if kind == "album" else 1
         payload = self.http.post(
-            f"{self.BASE}/api/search/get/web",
+            self.SEARCH_URL,
             data={"s": keyword, "type": search_type, "offset": 0, "limit": max(1, min(limit, 50))},
         ).json()
-        result = payload.get("result") or {}
+        if not isinstance(payload, dict):
+            raise SourceError("网易云搜索接口返回结构异常（可能已改版）")
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise SourceError(
+                "网易云搜索接口返回了加密内容（旧端点已失效）。"
+                "请更新到最新版本，或在「源设置」里改用其他音源。"
+            )
         if kind == "album":
-            return self._albums_to_tracks(result.get("albums") or [], limit)
+            tracks = self._albums_to_tracks(result.get("albums") or [], limit)
+            if tracks:
+                return tracks
+            # 公开接口的 /api/album/{id} 已不再返回曲目（需要登录态），
+            # 此时退回按歌曲检索，保证用户还能拿到可用结果而不是"一片空白"。
+            fallback = self.http.post(
+                self.SEARCH_URL,
+                data={"s": keyword, "type": 1, "offset": 0, "limit": max(1, min(limit, 50))},
+            ).json()
+            result = fallback.get("result") if isinstance(fallback, dict) else None
+            return self._songs_to_tracks((result or {}).get("songs") or [] if isinstance(result, dict) else [], limit)
         return self._songs_to_tracks(result.get("songs") or [], limit)
 
     def _songs_to_tracks(self, songs: Iterable[dict], limit: int) -> List[RemoteTrack]:
@@ -101,10 +121,11 @@ class NeteaseSource(MusicSource):
 
     def _search_artist_tracks(self, keyword: str, limit: int) -> List[RemoteTrack]:
         payload = self.http.post(
-            f"{self.BASE}/api/search/get/web",
+            self.SEARCH_URL,
             data={"s": keyword, "type": 100, "offset": 0, "limit": 5},
         ).json()
-        artists = ((payload.get("result") or {}).get("artists") or [])
+        result = payload.get("result") if isinstance(payload, dict) else None
+        artists = (result or {}).get("artists") or [] if isinstance(result, dict) else []
         if not artists:
             return []
         top = self.http.get(f"{self.BASE}/api/artist/top/song",
@@ -113,10 +134,11 @@ class NeteaseSource(MusicSource):
 
     def _search_playlist_tracks(self, keyword: str, limit: int) -> List[RemoteTrack]:
         payload = self.http.post(
-            f"{self.BASE}/api/search/get/web",
+            self.SEARCH_URL,
             data={"s": keyword, "type": 1000, "offset": 0, "limit": 5},
         ).json()
-        playlists = ((payload.get("result") or {}).get("playlists") or [])
+        result = payload.get("result") if isinstance(payload, dict) else None
+        playlists = (result or {}).get("playlists") or [] if isinstance(result, dict) else []
         if not playlists:
             return []
         playlist_id = playlists[0].get("id")

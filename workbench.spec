@@ -155,6 +155,7 @@ a = Analysis(
         "modu_workbench.ui_kit.settings.gallery",
         "modu_workbench.ui_kit.settings.llm",
         "numpy",
+        "pypdf",
         "PIL.Image",
         "PIL.ImageOps",
         "PIL.ImageFilter",

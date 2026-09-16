@@ -22,11 +22,14 @@ class CcmixterSource(MusicSource):
         keyword = (keyword or "").strip()
         if not keyword:
             return []
+        # 注意：`tags=` 会让 ccMixter 返回 SQL 报错的 HTML 页（json 解析失败）；
+        # `search=` 才是全文检索参数（v1.0.0 修正）。
+        # 注意：`lic=open` 会让该接口返回空结果（实测），因此只用 search=；
+        # CC 授权信息仍从返回的 license_name 读取并展示。
         params = {
             "f": "json",
             "limit": max(1, min(limit, 50)),
-            "lic": "open",
-            "tags": keyword,
+            "search": keyword,
         }
         payload = self.http.get_json(self.QUERY_URL, params=params)
         records = payload if isinstance(payload, list) else (payload.get("records") or [])

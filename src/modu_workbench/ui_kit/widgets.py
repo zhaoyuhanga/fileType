@@ -57,7 +57,8 @@ class BoardCard(QFrame):
         self.setObjectName("boardCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumSize(240, 150)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # 竖向 Expanding：全屏时卡片跟着变高，避免首页"顶部一条、下面全空"
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
@@ -101,7 +102,7 @@ def make_ghost_card(text: str) -> QFrame:
     frame = QFrame()
     frame.setObjectName("boardCardGhost")
     frame.setMinimumSize(240, 150)
-    frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     layout = QVBoxLayout(frame)
     layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
     layout.setSpacing(SPACE["sm"])

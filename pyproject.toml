@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modu-workbench"
-version = "1.0.0"
+version = "1.0.1"
 description = "墨软·工作台：本地离线的一站式阅读与转换工作台（PySide6 单应用）"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,6 +25,7 @@ dependencies = [
     "xlrd>=2.0.1",         # Excel(xls 旧版)
     "rarfile>=4.0",        # RAR 解压（需要系统 unrar/7z）
     "Pygments>=2.17",      # 预览语法高亮（JSON / Markdown 代码块）
+    "pypdf>=5.0",          # PDF 文本抽取（墨软转换：PDF → TXT / Markdown）
 ]
 
 [project.optional-dependencies]
