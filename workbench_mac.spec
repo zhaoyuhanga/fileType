@@ -31,6 +31,10 @@ a = Analysis(
     datas=[
         ("src/modu_workbench/webfront", "modu_workbench/webfront"),
         ("src/modu_workbench/assets", "modu_workbench/assets"),
+        # 随包 ffmpeg（macOS 为无扩展名二进制；不存在时该行会在打包时报错，
+        # 需先放置 tools/ffmpeg/ffmpeg 与 ffprobe）
+        ("tools/ffmpeg/ffmpeg", "tools/ffmpeg"),
+        ("tools/ffmpeg/ffprobe", "tools/ffmpeg"),
     ],
     hiddenimports=[
         "modu_workbench.boards.book_online",
@@ -59,6 +63,25 @@ a = Analysis(
         "pygments.lexers.sql",
         "pygments.lexers.text",
         "pygments.formatters.html",
+        # 墨软影视：板块页面与核心引擎
+        "modu_workbench.boards.video_board",
+        "modu_workbench.boards.video_search",
+        "modu_workbench.boards.video_library_page",
+        "modu_workbench.boards.video_history",
+        "modu_workbench.boards.video_detail",
+        "modu_workbench.boards.video_sources",
+        "modu_workbench.boards.video_player",
+        "modu_workbench.boards.video_widgets",
+        "modu_workbench.core.video.models",
+        "modu_workbench.core.video.storage",
+        "modu_workbench.core.video.library",
+        "modu_workbench.core.video.hls",
+        "modu_workbench.core.video.downloader",
+        "modu_workbench.core.video.sources",
+        "modu_workbench.core.video.sources.providers.cms_vod",
+        "modu_workbench.core.video.sources.providers.public",
+        "PySide6.QtMultimedia",
+        "PySide6.QtMultimediaWidgets",
     ],
     hookspath=[],
     hooksconfig={},

@@ -30,3 +30,6 @@ out-build/
 # 图标预览（由 packaging/icon_preview.py 生成）
 .icon_preview.png
 .icon_installer_preview.png
+
+# bundled ffmpeg binaries (fetched by packaging/build_app.ps1)
+tools/ffmpeg/

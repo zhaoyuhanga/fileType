@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List
 
 from modu_workbench.core.convert.media_io import AUDIO_TARGETS, find_ffmpeg
+from modu_workbench.core.convert.media_io import find_ffprobe as _find_ffprobe
 
 from .models import AUDIO_EXTENSIONS, MUSIC_TARGETS, RemoteTrack, Track, parse_track_name
 from .storage import MusicStorage
@@ -35,27 +36,20 @@ def scan_audio_files(paths: Iterable[str | Path]) -> List[str]:
 
 
 def find_ffprobe() -> str | None:
-    ffmpeg = find_ffmpeg()
-    if ffmpeg:
-        candidate = Path(ffmpeg).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
-        if candidate.is_file():
-            return str(candidate)
-        sibling = Path(ffmpeg).with_name("ffprobe")
-        if sibling.is_file():
-            return str(sibling)
-    return shutil.which("ffprobe")
+    """兼容旧调用：统一走转换引擎的定位逻辑（含随包 tools/ffmpeg）。"""
+    return _find_ffprobe()
 
 
 def probe_duration_ms(path: str | Path) -> int:
     """用 ffprobe 读取时长（毫秒）；不可用时返回 0（不做硬依赖）。"""
-    ffprobe = find_ffprobe()
+    ffprobe = _find_ffprobe()
     if not ffprobe:
         return 0
     try:
         output = subprocess.run(
             [ffprobe, "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         value = (output.stdout or "").strip().splitlines()

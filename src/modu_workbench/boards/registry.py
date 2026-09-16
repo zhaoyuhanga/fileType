@@ -1,7 +1,7 @@
 """板块注册表：墨软·工作台当前可用板块。"""
 from __future__ import annotations
 
-from . import book_board, convert_board, music_board
+from . import book_board, convert_board, music_board, video_board
 from .base import BoardSpec
 
 BOOK_BOARD = BoardSpec(
@@ -34,8 +34,21 @@ MUSIC_BOARD = BoardSpec(
     page=music_board.MusicBoardPage,
 )
 
+VIDEO_BOARD = BoardSpec(
+    key="video",
+    title="墨软影视",
+    tagline="在线搜索 · 本地播放 · 分类收藏",
+    description=(
+        "联网搜索电影/电视剧/动漫并下载到本地；内置播放器（多清晰度、倍速、续播）、"
+        "分类与收藏、播放历史，以及视频格式转换。多数据源可切换、支持换源重试。"
+    ),
+    icon="🎬",
+    phase="可用",
+    page=video_board.VideoBoardPage,
+)
+
 # 首页卡片与顶栏导航顺序
-ACTIVE_BOARDS: tuple[BoardSpec, ...] = (BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD)
+ACTIVE_BOARDS: tuple[BoardSpec, ...] = (BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD)
 
 
 def get_board(key: str) -> BoardSpec | None:

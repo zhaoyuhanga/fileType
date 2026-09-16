@@ -7,8 +7,16 @@ from __future__ import annotations
 
 from modu_workbench.core.music import MusicLibrary, MusicRegistry, MusicPlayer, MusicStorage, registry
 from modu_workbench.core.reader import Library, Storage
+from modu_workbench.core.video import VideoLibrary, VideoRegistry, VideoStorage
+from modu_workbench.core.video.sources import registry as video_source_registry
 
-from .config import ensure_legacy_migration, music_db_path, music_dir
+from .config import (
+    ensure_legacy_migration,
+    music_db_path,
+    music_dir,
+    video_db_path,
+    video_dir,
+)
 
 _storage: Storage | None = None
 _library: Library | None = None
@@ -16,6 +24,9 @@ _music_storage: MusicStorage | None = None
 _music_library: MusicLibrary | None = None
 _music_player: MusicPlayer | None = None
 _music_registry: MusicRegistry | None = None
+_video_storage: VideoStorage | None = None
+_video_library: VideoLibrary | None = None
+_video_registry: VideoRegistry | None = None
 
 
 def storage() -> Storage:
@@ -60,3 +71,31 @@ def music_player() -> MusicPlayer:
     if _music_player is None:
         _music_player = MusicPlayer()
     return _music_player
+
+
+# ---------- 墨软影视 ----------
+
+def video_storage() -> VideoStorage:
+    global _video_storage
+    if _video_storage is None:
+        _video_storage = VideoStorage(video_db_path())
+    return _video_storage
+
+
+def video_registry() -> VideoRegistry:
+    """应用级视频源注册表（读取用户启用/优先级/接口地址配置）。"""
+    global _video_registry
+    if _video_registry is None:
+        _video_registry = video_source_registry()
+        try:
+            _video_registry.load_settings(video_storage())
+        except Exception:  # noqa: BLE001  配置损坏不应阻断板块加载
+            pass
+    return _video_registry
+
+
+def video_library() -> VideoLibrary:
+    global _video_library
+    if _video_library is None:
+        _video_library = VideoLibrary(video_storage(), video_dir(), video_registry())
+    return _video_library

@@ -210,6 +210,171 @@ def _run_dependency_check(output_path: str) -> int:
             match_ok = False
         return bool(ok and expected.issubset(set(providers)) and match_ok)
 
+    def check_video_core() -> bool:
+        """墨软影视核心：影视库可建表、m3u8 可解析、数据源注册表齐全、换源可定位同一集。"""
+        import tempfile
+        from pathlib import Path as _Path
+
+        from modu_workbench.core.video import (
+            Episode,
+            RemoteVideo,
+            Video,
+            VideoRegistry,
+            VideoStorage,
+            parse_m3u8,
+            parse_video_name,
+            safe_filename,
+        )
+        from modu_workbench.core.video.downloader import build_filename, looks_like_video
+        from modu_workbench.core.video.sources import (
+            SourceError,
+            SourceInfo,
+            VideoSource,
+            best_match,
+        )
+
+        # 1) 存储可建表并完成一轮增删
+        with tempfile.TemporaryDirectory() as folder:
+            store = VideoStorage(str(_Path(folder) / "video.db"))
+            try:
+                video_id = store.upsert_video(
+                    Video(title="自检片", kind="movie", source="cms", remote_id="1")
+                )
+                playlist_id = store.create_playlist("自检分类", kind="category")
+                store.add_to_playlist(playlist_id, [video_id])
+                store.save_play_record(video_id, "正片", "1080P", "https://x/1.m3u8", "cms")
+                store.add_history(video_id, "play", episode_label="正片")
+                ok = (
+                    store.get_video(video_id) is not None
+                    and store.get_playlist(playlist_id).video_count == 1
+                    and store.get_play_record(video_id, "正片") is not None
+                    and store.list_history()[0].title == "自检片"
+                )
+            finally:
+                store.close()
+
+        # 2) m3u8 主清单可解析出多清晰度
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n1080/index.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\n720/index.m3u8\n"
+        )
+        hls_ok = False
+        try:
+            playlist = parse_m3u8(master, "https://cdn.example.com/master.m3u8")
+            best = playlist.best_variant()
+            hls_ok = (
+                playlist.is_master
+                and len(playlist.variants) == 2
+                and best is not None
+                and best.height == 1080
+                and playlist.variants[1].url.endswith("/720/index.m3u8")
+            )
+        except Exception:  # noqa: BLE001
+            hls_ok = False
+
+        # 3) 注册表：全部内置源已注册 + 换源能定位到同一集
+        registry = VideoRegistry()
+        expected = {"cms_360", "archive", "wikimedia", "url", "custom"}
+        registered_ok = expected.issubset(set(registry.order))
+
+        class _Dead(VideoSource):
+            info = SourceInfo(key="dead", label="失效源", note="self-check")
+
+            def search(self, keyword, kind="all", limit=30, page=1):  # noqa: ANN001, ANN003
+                return [RemoteVideo(source="dead", remote_id="1", title="片",
+                                    episodes=[Episode(name="第01集", url="u", index=0),
+                                              Episode(name="第02集", url="u2", index=1)])]
+
+            def play_url(self, video, episode, quality=None):  # noqa: ANN001, ANN003
+                raise SourceError("线路失效")
+
+        class _Good(VideoSource):
+            info = SourceInfo(key="good", label="可用源", note="self-check")
+
+            def search(self, keyword, kind="all", limit=30, page=1):  # noqa: ANN001, ANN003
+                return [RemoteVideo(source="good", remote_id="9", title="片",
+                                    episodes=[Episode(name="第01集", url="https://good/1", index=0),
+                                              Episode(name="第02集", url="https://good/2", index=1)])]
+
+        fallback_ok = False
+        try:
+            probe = VideoRegistry([_Dead(), _Good()])
+            base = RemoteVideo(source="dead", remote_id="1", title="片",
+                               episodes=[Episode(name="第01集", url="u", index=0),
+                                         Episode(name="第02集", url="u2", index=1)])
+            resolved = probe.resolve(base, base.episodes[1])
+            fallback_ok = (
+                resolved.source == "good"
+                and resolved.switched_from == "dead"
+                and resolved.episode is not None
+                and resolved.episode.index == 1
+            )
+        except Exception:  # noqa: BLE001
+            fallback_ok = False
+
+        # 4) 文件命名 / 片名解析 / 下载产物嗅探 / 换源匹配打分
+        util_ok = False
+        try:
+            title, label, index = parse_video_name("庆余年 S01E03")
+            with tempfile.TemporaryDirectory() as folder:
+                real = _Path(folder) / "a.ts"
+                real.write_bytes(b"\x47" + b"\x00" * 200_000)
+                fake = _Path(folder) / "b.ts"
+                fake.write_bytes(b"<html>VIP</html>" + b" " * 200_000)
+                sniff_ok = (
+                    looks_like_video(real, "video/mp2t")
+                    and not looks_like_video(fake, "text/html")
+                )
+            util_ok = (
+                title == "庆余年" and label == "S01E03" and index == 3
+                and safe_filename('a/b:c*d?"e') == "a_b_c_d_e"
+                and build_filename(RemoteVideo(source="s", remote_id="1", title="片", year="2024"),
+                                   Episode(name="第01集", url="u"), ".mp4") == "片 (2024) 第01集.mp4"
+                and sniff_ok
+                and best_match(
+                    RemoteVideo(source="a", remote_id="1", title="片", year="2020"),
+                    [RemoteVideo(source="b", remote_id="2", title="片", year="2020")],
+                ) is not None
+            )
+        except Exception:  # noqa: BLE001
+            util_ok = False
+
+        return bool(ok and hls_ok and registered_ok and fallback_ok and util_ok)
+
+    def check_ffmpeg_tools() -> bool:
+        """随包 ffmpeg/ffprobe 可定位且能执行（音视频转换与 HLS 合流依赖它）。
+
+        未随包时不视为失败：用户可自行安装或用 MODU_FFMPEG 指定 —— 下载会退回 .ts。
+        """
+        import subprocess
+
+        from modu_workbench.core.convert.media_io import find_ffmpeg, find_ffprobe
+
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            return True   # 可选依赖：缺省不算打包失败
+        try:
+            out = subprocess.run([ffmpeg, "-hide_banner", "-version"], capture_output=True,
+                                 text=True, encoding="utf-8", errors="replace", timeout=20,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if out.returncode != 0:
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+        # ffprobe 可选（仅用于探测时长），定位不到也不判失败
+        ffprobe = find_ffprobe()
+        if ffprobe:
+            try:
+                probe = subprocess.run([ffprobe, "-hide_banner", "-version"], capture_output=True,
+                                       text=True, encoding="utf-8", errors="replace", timeout=20,
+                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if probe.returncode != 0:
+                    return False
+            except Exception:  # noqa: BLE001
+                return False
+        return True
+
     def check_branding_icon() -> bool:
         """品牌图标：随包 app.ico 可定位，且能加载出多尺寸 QIcon（窗口/任务栏图标）。"""
         try:
@@ -237,6 +402,8 @@ def _run_dependency_check(output_path: str) -> int:
     record("multimedia", check_multimedia)
     record("multimedia_playback", check_multimedia_playback)
     record("music_core", check_music_core)
+    record("video_core", check_video_core)
+    record("ffmpeg_tools", check_ffmpeg_tools)
     record("branding_icon", check_branding_icon)
 
     try:

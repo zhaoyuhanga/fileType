@@ -2,4 +2,4 @@
 
 __version__ = "0.3.0"
 APP_NAME = "墨软·工作台"
-APP_SLOGAN = "本地离线 · 阅读 · 转换 · 音乐"
+APP_SLOGAN = "本地离线 · 阅读 · 转换 · 音乐 · 影视"

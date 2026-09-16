@@ -1,15 +1,17 @@
 # 墨软·工作台 (Modu Workbench)
 
-> 本地离线的一站式阅读、转换与音乐工作台 —— 板块化设计，能力可扩展。
+> 本地离线的一站式阅读、转换、音乐与影视工作台 —— 板块化设计，能力可扩展。
 
 **当前版本：v0.3.0（定版）** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：
 `dist\ModuWorkbench\`（onedir）与 `dist\墨软工作台-Setup-0.3.0.exe`（NSIS 安装包）。
 
-由两个历史项目合并演进而来，现为三大板块：
+由两个历史项目合并演进而来，现为四大板块：
 
 - **墨软书库**：承接 win-e-book —— TXT/EPUB 本地书库、章节自动解析、进度记忆、阅读主题、在线书库下载（个人学习用途，默认开启）。
 - **墨软转换**：承接 fileType —— 六类本地离线转换（文档 / 表格 / 图片 / 媒体 / 归档）与 txt/md/json/mp4 查看编辑。
-- **墨软乐库**：新增 —— 联网搜索与下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史、音频格式转换。
+- **墨软乐库**：联网搜索与下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史、音频格式转换。
+- **墨软影视**：联网搜索电影/电视剧/动漫并下载到本地、内置播放器（多清晰度/倍速/续播）、
+  分类与收藏、播放历史、视频格式转换；多数据源可切换并可自行扩展。
 
 旧 Electron/React 工程归档于 `archive/electron-formatflow/`：其渲染进程（React 界面）仍作为**内嵌前端**使用 ——
 构建产物整理进 `src/modu_workbench/webfront/`，由 QtWebEngine 加载，经 QWebChannel 桥接到 Python 引擎；
@@ -24,6 +26,7 @@ Electron 主进程代码仅作参考，不再构建维护。
 | 墨软书库 | 书架（导入/搜索/卡片/历史）、阅读器（TOC/主题/字号/进度记忆/快捷键）、在线书库（00shu 整本直链下载 + 合规开关） | ✅ |
 | 墨软转换 | 文本互转/PDF(Qt)/图片/Word/表格/归档/媒体，查看编辑与 JSON 美化、批量任务（进度/取消/输出防覆盖/解压防穿越） | ✅ |
 | 墨软乐库 | 在线搜索（歌曲/歌手/专辑/类型）与批量下载、内置播放条（顺序/列表循环/单曲循环/随机）、我的音乐（导入/收藏/分类/筛选）、歌单收藏（含待下载项）、播放历史、批量音频格式转换 | ✅ |
+| 墨软影视 | 在线搜索电影/电视剧/动漫（多源聚合/去重/换源重试）与剧集下载、内置播放器（多清晰度/倍速/全屏/续播）、我的视频（分类/收藏/筛选/导入）、播放历史、视频格式转换 | ✅ |
 | （可扩展） | 新增板块：`boards/registry.py` 注册一条即可，首页与顶栏自动出现 | — |
 
 ### 墨软乐库使用说明
@@ -53,6 +56,43 @@ Electron 主进程代码仅作参考，不再构建维护。
 - **格式转换**：mp3 / m4a / wav / flac / aac / ogg / opus / wma 互转（依赖 ffmpeg，可用 `MODU_FFMPEG` 指定）。
 - **合规**：抓取与下载仅限个人学习、试听与自有内容备份，界面默认勾选合规声明；请遵守各平台条款与版权要求。
   平台返回「版权受限/VIP」页面时会明确报错，不会把无效文件当成歌曲入库。
+
+### 墨软影视使用说明
+
+- **数据源**（可插拔多源，见 `core/video/sources/`，全部免费、本地直连、无需登录）：
+
+  | 数据源 | 类型 | 说明 |
+  |---|---|---|
+  | 360资源 / 黑木耳 / 非凡影视 / 卧龙资源 / 天涯资源 | 采集源 | 苹果CMS( maccms V10 )协议，覆盖电影/电视剧/动漫/综艺；接口地址可在「源设置」里修改 |
+  | Internet Archive | 自由授权 | 公共领域电影/老动画/纪录片，可自由下载与离线观看 |
+  | Wikimedia Commons | 自由授权 | 自由授权的影片与纪录片段 |
+  | 视频直链 | 直链 | 直接粘贴 m3u8 / mp4 地址播放或下载 |
+  | 自定义采集源 | 自定义 | 填入任意苹果CMS协议接口（`api.php/provide/vod`） |
+
+- **多源容错**：每个源 HTTP 层带退避重试；某源连续失败会被临时降级（熔断），聚合搜索自动跳过；
+  解析/下载失败时自动到其他源按「片名 + 年份 + 主演」匹配**同一部片、同一集**继续尝试，
+  因此单个采集接口变更不会让功能整体不可用；实际使用的源会在状态栏标明。
+- **源管理（第四板块内「🧩 源设置」）**：勾选启用哪些源、上/下移调整优先级、修改采集接口地址
+  （站点换域名无需等版本更新）、一键「测试选中源」立即验证连通性。停用的源不参与搜索与自动换源。
+- **搜索与选集**：搜索结果按「片名 + 年份」去重合并；双击条目打开「选集 / 详情」，可看到分集列表、
+  简介与清晰度；支持「在线播放」「下载选中集」「下载全部集」。
+- **清晰度多选项**：优先读取 m3u8 主清单里的真实分辨率（1080P / 720P / 4K …），
+  解析不到时回退到源给出的线路画质；播放中可随时切换清晰度，会尽量保留当前进度。
+- **播放器**：原生解码（QtMultimedia）优先，m3u8 或原生不支持的地址自动切到内嵌网页内核（hls.js）；
+  支持播放/暂停、进度拖动、上一集/下一集、倍速（0.5x–2x）、音量/静音、全屏、快捷键
+  （空格播放暂停、←/→ 快退快进 10 秒、F11 全屏）与**断点续播**。
+- **本地播放与下载**：只要联网即可边看边下；下载支持 HLS 分片合流（有 ffmpeg 时输出 MP4，
+  无 ffmpeg 时退化为 `.ts`）与直链下载，可取消、可查看逐条失败原因。下载产物会做容器嗅探，
+  避免把「版权受限/失效」的错误页当成影片入库。
+- **分类与收藏**：可新建分类、把条目归类、一键收藏（★）；「我的视频」按类型/分类/关键词筛选，
+  区分「本地」与「在线」条目；也可导入本地影片（可选复制进影视库目录）。
+- **播放历史**：记录每一次播放与下载（含集数、画质、实际使用的源）；双击记录即可**重新解析**继续观看
+  —— 在线直链会过期，所以每次播放都会重新取地址。
+- **格式转换**：mp4 / mkv / mov / avi / webm / flv / ts / gif 互转，以及从视频**提取音频**
+  （mp3 / m4a / wav）；优先流复制（快且无损），容器不兼容时自动回退重编码（依赖 ffmpeg，
+  可用 `MODU_FFMPEG` 指定）。
+- **合规**：采集类数据源来自第三方站点，仅用于个人学习与技术研究；界面默认勾选合规声明，
+  请遵守相应站点条款与版权要求。
 
 ## 技术栈
 
@@ -106,10 +146,25 @@ python packaging\icon_preview.py        # 生成 .icon_preview.png（各尺寸�
 | `src/modu_workbench/assets/installer_welcome.bmp` | 安装向导欢迎页左图 164×314 |
 
 设计说明：白色圆角底 + 蓝色双向箭头（浅蓝指向右上、深蓝指向左下），
-呼应「阅读 / 转换 / 音乐」的双向流动语义；`assets/` 随包分发，
+呼应「阅读 / 转换 / 音乐 / 影视」的双向流动语义；`assets/` 随包分发，
 运行时由 `services/assets.py` 定位并设置窗口/任务栏图标。
 
 ## 打包 Windows
+
+### 一键打包（推荐）
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File packaging\build_app.ps1
+# 默认 --clean，并会做「源码自检 → 打包 → 验证影视模块是否随包 → 产物自检」
+# 需要一并生成安装包：加 -Installer
+```
+
+脚本参数：`-NoClean`（保留 PyInstaller 缓存，默认会 `--clean`）、`-SkipDeps`、`-Installer`、`-Python <路径>`。
+
+> **注意**：新增了 Python 包（例如 `core/video`）时**必须** `--clean`，
+> 否则 PyInstaller 复用旧的分析缓存会导致新模块漏打包 —— 表现就是「首页少一个板块」。
+
+### 手动打包
 
 ```powershell
 pip install pyinstaller
@@ -120,7 +175,7 @@ pyinstaller workbench.spec --noconfirm --clean
 pwsh -ExecutionPolicy Bypass -File packaging\build_installer.ps1
 ```
 
-### 打包自检（含音频解码）
+### 打包自检（含音频解码与影视核心）
 
 ```powershell
 $env:MODU_CHECK_DEPS = "$env:TEMP\modu-check.json"
@@ -128,9 +183,21 @@ $env:MODU_CHECK_DEPS = "$env:TEMP\modu-check.json"
 Get-Content $env:MODU_CHECK_DEPS
 ```
 
-共 11 项：markdown 渲染 / 高亮 / Pygments / WebEngine 导入与渲染 / webfront 产物 / QtMultimedia /
-**真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/ 音乐库建表读写（含 8 个音源与匹配器）。全部为 `true` 才算打包正常。
+共 13 项：markdown 渲染 / 高亮 / Pygments / WebEngine 导入与渲染 / webfront 产物 / QtMultimedia /
+**真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/ 音乐库建表读写（含 8 个音源与匹配器）/
+**影视核心**（影视库建表读写、m3u8 多清晰度解析、数据源注册表齐全、换源定位到同一集）/
+**ffmpeg 工具链**（随包 ffmpeg/ffprobe 可执行）/ 品牌图标。全部为 `true` 才算打包正常。
 播放自检需要真实桌面与音频设备；设置 `QT_QPA_PLATFORM=offscreen` 时会跳过解码检查。
+
+### 随包 ffmpeg
+
+`tools/ffmpeg/{ffmpeg,ffprobe}.exe` 会打进 `_MEIPASS/tools/ffmpeg`，用户**无需自行安装**即可：
+音视频格式转换、把 HLS 下载合流为 MP4、探测媒体时长。定位优先级：
+`MODU_FFMPEG` 环境变量 → 随包目录 → `PATH`。
+
+> 说明：HLS 的 **AES-128 加密流不依赖 ffmpeg** —— 内置纯标准库解密实现
+> （`core/video/aes.py`，用 FIPS-197 / NIST SP 800-38A 官方向量做正确性验证），
+> 没装 ffmpeg 也能下载，只是输出 `.ts` 而非 `.mp4`。仅 SAMPLE-AES 等加密方式必须用 ffmpeg。
 
 可选环境变量：`MODU_DATA_DIR`（数据目录，默认 `%APPDATA%\ModuWorkbench`）、`MODU_FFMPEG`、`MODU_SOFFICE`。
 首次启动会自动迁移 win-e-book 旧库（`%APPDATA%\WinEBook\library.db`）。
@@ -138,7 +205,7 @@ Get-Content $env:MODU_CHECK_DEPS
 ### 命名说明（显示名 vs 内部标识）
 
 - **显示名称**（界面、安装包、快捷方式、文档）统一为「墨软」系列：
-  墨软·工作台 / 墨软书库 / 墨软转换 / 墨软乐库；安装包输出为 `dist\墨软工作台-Setup-<版本>.exe`。
+  墨软·工作台 / 墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视；安装包输出为 `dist\墨软工作台-Setup-<版本>.exe`。
 - **内部标识刻意保持不变**，以便已有数据与脚本继续可用：
   Python 包名 `modu_workbench`、可执行文件 `ModuWorkbench.exe`、
   环境变量 `MODU_*`、数据目录 `%APPDATA%\ModuWorkbench`（书库 `library.db`、曲库 `music.db` 原地沿用）。
@@ -164,7 +231,15 @@ src/modu_workbench/
 │   ├── music_library_page.py  # 墨软乐库：我的音乐 + 格式转换
 │   ├── music_playlist.py      # 墨软乐库：歌单收藏
 │   ├── music_history.py       # 墨软乐库：播放历史
-│   └── music_widgets.py       # 墨软乐库：表格/对话框/后台线程
+│   ├── music_widgets.py       # 墨软乐库：表格/对话框/后台线程
+│   ├── video_board.py         # 墨软影视（板块外壳 + 播放/下载编排）
+│   ├── video_search.py        # 墨软影视：在线搜索与下载
+│   ├── video_detail.py        # 墨软影视：详情/选集/清晰度对话框
+│   ├── video_library_page.py  # 墨软影视：我的视频 + 分类收藏 + 格式转换
+│   ├── video_history.py       # 墨软影视：播放历史
+│   ├── video_sources.py       # 墨软影视：源设置（启用/优先级/接口地址/连通性测试）
+│   ├── video_player.py        # 墨软影视：播放器（原生优先 + hls.js 兜底）
+│   └── video_widgets.py       # 墨软影视：表格/对话框/后台线程
 ├── core/reader/               # 书库引擎（迁移自 win-e-book）
 │   ├── parser.py / storage.py / library.py / online.py
 ├── core/music/                # 音乐引擎
@@ -179,6 +254,18 @@ src/modu_workbench/
 │   ├── downloader.py          # 流式下载（进度/取消/封面/歌词/换源重试/音频校验）
 │   ├── library.py             # 本地曲库：导入/时长探测/转换入口
 │   └── player.py              # 播放器：队列/循环/随机/进度/音量/在线试听
+├── core/video/                # 影视引擎
+│   ├── models.py              # 片目/剧集/画质/收藏/历史模型
+│   ├── storage.py             # SQLite：影视库/分类收藏/历史/播放记录/设置
+│   ├── hls.py                 # m3u8 解析（主清单多清晰度 + 媒体清单分片）
+│   ├── sources/               # ★ 视频源层（多源 + 重试 + 熔断 + 跨源兜底）
+│   │   ├── base.py            # VideoSource 基类 / SourceInfo / 健康度
+│   │   ├── http.py            # 带退避重试的 HTTP 客户端 + 网络错误翻译
+│   │   ├── matcher.py         # 片名/年份/主演匹配（跨源找同一部、同一集）
+│   │   ├── registry.py        # 注册表：聚合搜索 / 熔断 / 换源解析 / 配置持久化
+│   │   └── providers/         # cms_vod（苹果CMS 采集）/ public（Archive·Wikimedia·直链·自定义）
+│   ├── downloader.py          # 下载（HLS 合流 / 直链；进度/取消/换源重试/容器嗅探）
+│   └── library.py             # 影视库：导入/在线解析/下载入库/转换入口
 ├── core/convert/              # 转换引擎
 │   ├── registry.py / engine.py / formats.py / text_io.py
 │   ├── pdf_out.py / image_io.py / archive_io.py
@@ -187,7 +274,7 @@ src/modu_workbench/
 │   ├── web_bridge.py          # QWebChannel 桥（前端 RPC → Python 引擎）
 │   ├── bridge_shim.js         # 注入前端的 window.formatFlow 兼容层
 │   ├── web_prepare.py         # 整理 Vite 产物为 webfront
-│   ├── media_server.py        # 本地媒体流（Range）
+│   ├── media_server.py        # 本地媒体流（Range）+ 远程直链/HLS 清单代理（补 Referer/UA）
 │   ├── media_player.py        # 原生播放器回退
 │   └── file_scan.py           # 导入文件扫描（唯一实现）
 ├── webfront/                  # 内嵌前端产物（由 build_webfront 生成）
@@ -195,7 +282,7 @@ src/modu_workbench/
 tests/                         # pytest（无头冒烟 + 单元）
 workbench.spec                 # PyInstaller 配置（Windows）
 workbench_mac.spec             # PyInstaller 配置（macOS，BUNDLE）
-packaging/                     # NSIS 安装脚本 + 前端构建脚本
+packaging/                     # 一键打包脚本 + NSIS 安装脚本 + 前端构建脚本
 archive/electron-formatflow/   # 旧 Electron 版归档（前端源码 + 主进程参考）
 docs/ARCHITECTURE.md           # 架构与合并方案
 ```
@@ -211,6 +298,7 @@ docs/ARCHITECTURE.md           # 架构与合并方案
 | M4 | 跨板块联动 / 设置 / PyInstaller 打包 / 推送 | ✅ |
 | M5 | 内嵌 main 分支前端（QtWebEngine + QWebChannel）/ mp4 内联预览 / NSIS 安装包 | ✅ |
 | M6 | 墨软乐库板块（在线搜索下载 / 播放器 / 歌单收藏分类 / 播放历史 / 音频格式转换） | ✅ |
+| M7 | 墨软影视板块（多源搜索下载 / 多清晰度播放器 / 分类收藏 / 播放历史 / 视频格式转换） | ✅ |
 
 ## 协议
 

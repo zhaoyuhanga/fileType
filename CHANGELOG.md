@@ -5,7 +5,98 @@
 
 ## v0.3.0 — 墨软·工作台 定版
 
-首个三板块齐备、可离线分发的定版：**墨软书库 / 墨软转换 / 墨软乐库**。
+首个四板块齐备、可离线分发的定版：**墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视**。
+
+### 新增：墨软影视（第四大板块）
+
+- **在线搜索与下载**：跨源聚合搜索电影 / 电视剧 / 动漫（可再筛综艺 / 纪录片），
+  结果按「片名 + 年份」去重合并；双击条目打开「选集 / 详情」，可「在线播放」「下载选中集」
+  「下载全部集」；也可直接粘贴 m3u8 / mp4 直链播放或下载。
+- **多数据源可切换**（`core/video/sources/` 独立成包，全部免费、本地直连、无需登录）：
+
+  | 数据源 | 能力 | 说明 |
+  |---|---|---|
+  | 360资源 / 黑木耳 / 非凡影视 / 卧龙资源 / 天涯资源 | 采集源 | 苹果CMS( maccms V10 )协议，覆盖电影/剧集/动漫/综艺 |
+  | Internet Archive | 自由授权 | 公共领域电影/老动画/纪录片，可自由下载与离线观看 |
+  | Wikimedia Commons | 自由授权 | 自由授权的影片与纪录片段 |
+  | 视频直链 | 直链 | 自备 m3u8 / mp4 地址 |
+  | 自定义采集源 | 自定义 | 填入任意苹果CMS协议接口 |
+
+  三重容错：HTTP 退避重试 → 连续失败熔断降级（聚合搜索自动跳过）→ 解析/下载失败时按
+  「片名 + 年份 + 主演」跨源匹配**同一部片、同一集**继续尝试。
+- **源设置**（板块内「🧩 源设置」）：启用/停用、调整优先级、修改采集接口地址（站点换域名无需等版本更新）、
+  一键测试连通性；停用的源不参与搜索与自动换源。
+- **多清晰度播放器**：优先读取 m3u8 主清单里的真实分辨率（4K / 1080P / 720P …），
+  解析不到时回退线路画质标签；播放中可切换清晰度（尽量保留进度）、上一集/下一集、
+  倍速 0.5x–2x、音量/静音、全屏与快捷键（空格 / ←→ / F11）、断点续播。
+  解码优先用原生 QtMultimedia，m3u8 或原生不支持的地址自动切到内嵌网页内核（hls.js）。
+- **下载**：HLS 分片合流（有 ffmpeg 时输出 MP4，无 ffmpeg 时退化为 `.ts`）与直链下载，
+  支持进度、取消与逐条失败原因；下载产物做容器嗅探，避免把错误页当成影片入库。
+- **分类与收藏 / 我的视频**：新建分类、归类、一键收藏；按类型/分类/关键词筛选，
+  区分「本地」与「在线」条目；支持导入本地影片与在文件夹中显示。
+- **播放历史**：记录每次播放与下载（集数 / 画质 / 实际使用的源），双击即可重新解析继续观看。
+- **视频格式转换**：mp4 / mkv / mov / avi / webm / flv / ts / gif 互转与从视频提取音频
+  （mp3 / m4a / wav）；优先流复制，容器不兼容时自动回退重编码。
+- **本地流服务增强**（`services/media_server.py`）：新增远程直链代理与 HLS 清单代理，
+  由服务端补 Referer/UA —— 视频站普遍校验请求头，这样浏览器端与原生解码器都能直接播放。
+  代理地址返回**绝对 URL**（`QMediaPlayer` 与 `<video>` 都不接受相对路径）。
+
+### 修复（联调阶段实测发现）
+
+- **首页少一个板块（第四板块不显示）**：PyInstaller 复用旧分析缓存会漏打包新增包。
+  打包脚本默认 `--clean`，并新增「打包后校验影视模块是否真的进了 exe」的步骤。
+- `providers/__init__.py` 与 `cms_vod.default_headers` 的相对导入多了一层（`..sources.base` → `..base`），
+  会导致影视模块整体无法导入。
+- `VideoPlayerDialog` 构造顺序错误：原生内核在音量滑块创建前就读取了 `self._volume`。
+- `VideoRegistry(providers=...)` 默认启用集写死内置源 key，注入自定义源时会被静默过滤掉。
+- `stream_url` / `hls_url` 返回相对路径，播放内核无法加载（改为绝对 URL）。
+- `parse_m3u8` 的分片时长：`TARGETDURATION` 会覆盖 `EXTINF`，改为优先取 `EXTINF` 最大值。
+- `VideoBoardPage` 依赖注入存在自相矛盾状态（库用内置源、播放走另一个源），
+  现在以 `library` 为唯一事实来源，播放解析必定与界面展示的源一致。
+- `VideoDetailDialog` 关闭时未收尾后台线程，会把仍在运行的 `QThread` 交还给垃圾回收，
+  触发「QThread: Destroyed while thread is still running」并**终止进程**（测试中表现为崩溃）。
+  现在先等待、必要时强杀，绝不留下运行中的线程；清晰度探测超时也收紧为 4 秒单次尝试。
+- **AES-128 加密的 HLS 不再需要 ffmpeg**：此前没装 ffmpeg 时下载加密流会直接失败
+  （「该视频流已加密（AES-128），需要 ffmpeg」）。现在内置纯标准库的 AES-128-CBC 解密
+  （`core/video/aes.py`，正确性由 FIPS-197 与 NIST SP 800-38A 官方向量验证），
+  无 ffmpeg 也能下载加密流；SAMPLE-AES 等仍会明确提示需要 ffmpeg。
+- **ffmpeg 随包分发**：`tools/ffmpeg/{ffmpeg,ffprobe}.exe` 打进 `_MEIPASS/tools/ffmpeg`，
+  用户无需自行安装即可转换音视频、把 HLS 下载为 MP4；定位优先级
+  `MODU_FFMPEG` → 随包目录 → PATH（`ffprobe` 亦统一走同一套逻辑，不再各自实现）。
+- ffmpeg 9.x 兼容：`-user_agent` / `-headers` 在 9.x 会报 "Option not found"，
+  改为让 ffmpeg 读取「经本机代理改写后的本地 m3u8」，请求头由流服务在服务端补，
+  不再依赖 ffmpeg 的 HTTP 选项（跨版本稳定）。
+  同时为本地 m3u8 显式放行协议（`-protocol_whitelist`），否则新版本 ffmpeg
+  会拒绝「本地清单引用 http 分片」（`Protocol 'http' not on whitelist`）。
+- **在线播放加密流失败（hls.js 报 `networkError / keyLoadError`）**：
+  清单代理漏了 `#EXT-X-KEY` 的密钥 URI 改写，浏览器跨域取密钥被拒。
+  现在密钥同样走本机代理（下载路径早已改写，播放路径此前遗漏）。
+- **下载加密流失败（ffmpeg 报 `not in allowed_segment_extensions`）**：
+  ffmpeg 的 HLS 解复用器按 URL 扩展名判断分片类型，而代理地址形如
+  `/proxy/?u=...` 不以 `.ts` 结尾，导致每个分片都被拒绝。
+  现在代理地址会带上原始文件名（`/proxy/seg0.ts?u=...`），服务端仍按路径前缀分发。
+- **播放 `fragLoadError` / 下载一直 0 字节（根因）**：本机代理转发的响应
+  **既没有 `Content-Length` 也没有 `Transfer-Encoding`**（真实源站常用 chunked），
+  客户端永远等不到「响应结束」，于是 hls.js 报分片加载失败、ffmpeg 卡在 0 字节。
+  现在代理统一读全量并显式给出 `Content-Length`（分片另补 `Content-Range`）。
+- **子清单相对路径 404**：主清单指向的子清单经 `/proxy/` 取回时未改写内部地址，
+  相对分片路径会以「本机代理」为基准解析而 404（ffmpeg 报 `Failed to open segment 0`）。
+  现在 `/proxy/` 与 `/hls/` 一样会识别清单并改写。
+- **网页内核根本播不了这些片源**：实测 QtWebEngine 内置 Chromium
+  `canPlayType('video/mp4; codecs="avc1..."')` 返回空、`<video>` 报 `code=4`，
+  即**不含 H.264/AAC 等专有编解码器**，而影视源几乎全是 H.264。
+  播放已改为**原生 QtMultimedia 优先**（FFmpeg 后端可解 H.264/AAC），
+  HLS 不再自动切网页内核（切过去只会得到 `bufferAppendError`）。
+- **播放起播慢被误判为卡死**：HLS 需先缓冲若干分片，远端站点慢时可能要 20~30 秒；
+  现在状态栏会显示「正在缓冲…已等待约 N 秒」，且不再提前判失败。
+- **上游抖动导致分片 502**：第三方站点连接重置/瞬时 SSL EOF 很常见，
+  代理现在带退避重试（3 次），避免单个分片失败就让 ffmpeg/hls.js 放弃。
+- **下载进度一直显示 0 MB**：`-c copy` 写 MP4 时 ffmpeg 会先缓冲再落盘，
+  按输出文件大小报进度必然长时间为 0。现在改用 ffmpeg 的 `-progress` 输出，
+  按「已获取时长 / 总时长」给出百分比。
+- **中文文件名导致 ffprobe 崩溃**：Windows 下 `text=True` 默认按 GBK 解码，
+  而 ffprobe 输出是 UTF-8，会让读取线程抛 `UnicodeDecodeError`（时长探测静默失败）。
+  已为所有子进程调用显式指定 `encoding="utf-8", errors="replace"`。
 
 ### 新增：墨软乐库（第三大板块）
 
@@ -53,10 +144,10 @@
 
 ### 更名
 
-- 显示名称统一为「墨软」系列：墨软·工作台 / 墨软书库 / 墨软转换 / 墨软乐库；
+- 显示名称统一为「墨软」系列：墨软·工作台 / 墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视；
   内嵌前端不再使用「万能格式转换器」。
 - 内部标识保持不变以兼容既有数据：Python 包 `modu_workbench`、`ModuWorkbench.exe`、
-  `MODU_*` 环境变量、数据目录 `%APPDATA%\ModuWorkbench`（`library.db` / `music.db`）。
+  `MODU_*` 环境变量、数据目录 `%APPDATA%\ModuWorkbench`（`library.db` / `music.db` / `video.db`）。
 
 ### 发布产物与校验
 
@@ -69,7 +160,7 @@
 # 校验下载到的安装包
 Get-FileHash '.\墨软工作台-Setup-0.3.0.exe' -Algorithm SHA256
 
-# 打包自检（12 项，含真实音频解码播放与品牌图标）
+# 打包自检（13 项，含真实音频解码播放、影视核心、随包 ffmpeg 与品牌图标）
 $env:MODU_CHECK_DEPS = "$env:TEMP\modu-check.json"
 .\dist\ModuWorkbench\ModuWorkbench.exe
 Get-Content $env:MODU_CHECK_DEPS
@@ -77,7 +168,11 @@ Get-Content $env:MODU_CHECK_DEPS
 
 ### 已知限制
 
-- 音频格式转换需系统安装 ffmpeg（或用 `MODU_FFMPEG` 指定）；未随包分发。
+- 视频格式转换与「HLS 下载为 MP4」推荐使用随包 ffmpeg（已随包分发）；
+  若自行替换/缺失，会退回输出 `.ts`（仍可播放），并可用 `MODU_FFMPEG` 指定。
+- 墨软影视：SAMPLE-AES 等非 AES-128 的加密流必须依赖 ffmpeg；
+  网站 HLS 播放依赖联网加载 hls.js（首次播放）。
 - Word/Excel → PDF 高保真需 LibreOffice（`MODU_SOFFICE`），否则使用内置兜底排版。
 - 网易云 VIP / 下架曲目、iTunes 仅 30 秒片段、Jamendo 需免费 client_id。
-- 在线音源仅供个人学习、试听与自有内容备份，请遵守各平台条款与版权要求。
+- 在线音源 / 影视采集接口均为第三方公开服务，可能随时变更或失效（影视源可在「源设置」里改地址或换源）。
+- 在线音源与采集类影视源仅供个人学习、试听与自有内容备份，请遵守各平台条款与版权要求。

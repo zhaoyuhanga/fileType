@@ -51,6 +51,26 @@ def music_download_dir() -> Path:
     return path
 
 
+def video_db_path() -> str:
+    """墨软影视影视库数据库路径。"""
+    return str(app_data_dir() / "video.db")
+
+
+def video_dir() -> Path:
+    """墨软影视默认存放目录（下载/转换输出/复制入库）。"""
+    path = app_data_dir() / "video"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def video_download_dir() -> Path:
+    """墨软影视默认下载目录（用户可见的视频文件夹）。"""
+    override = os.environ.get("MODU_VIDEO_DIR")
+    path = Path(override) if override else Path.home() / "Videos" / "墨软影视"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def legacy_db_path() -> Path | None:
     """win-e-book 旧库位置（%APPDATA%\\WinEBook\\library.db）。"""
     if not os.environ.get("APPDATA"):
