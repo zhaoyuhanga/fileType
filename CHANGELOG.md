@@ -66,6 +66,19 @@
 - 新增测试 `tests/board_convert/test_doc_preview.py`：表头加粗与底色、隔行底色、等宽字体、
   代码块底色、引用色条、`<hr>` 已替换、嵌套列表换行、文本不丢失、行距 165% 与表格内边距 7px。
 
+### 发布产物（v1.0.1，本机构建）
+
+| 产物 | 大小 | SHA256 |
+|---|---|---|
+| `dist/墨软工作台-Setup-1.0.1.exe`（NSIS 安装包） | 151.0 MB | `3AA1446A51BDF270F2B0CAFFFB1F69B2FBA98129A7057397778DDA5E8F924687` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `C17B5F4ABC9EDE857B9C20ABCDDFF7455637900D38D0D21C75F9433158D2CA95` |
+
+- onedir 目录合计约 383 MB（随包 ffmpeg/ffprobe 约 196 MB）；
+- 构建三道自检：源码自检 **14/14**、exe 关键字模块 **15/15**、
+  打包产物自检（本机构建时被 Smart App Control 拦截，未能执行；上一版产物实跑为 14/14，
+  其中唯一失败项是本次已修正的过时断言）。
+- 未签名 exe/安装包在开启「智能应用控制」的机器上会被系统拦截：需关闭该功能或签名后验证安装包。
+
 ### 版本
 
 - 版本号 1.0.0 → **1.0.1**（`__init__.py` / `pyproject.toml` 单一来源）；
