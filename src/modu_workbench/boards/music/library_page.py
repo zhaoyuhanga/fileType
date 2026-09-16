@@ -87,9 +87,12 @@ class MusicLibraryPage(QWidget):
             self._task.idle(message)
 
     def _set_progress(self, value: int) -> None:
-        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
-        if self._task is not None and self._task.is_busy:
-            self._task.report(self._task.text, int(value), 100)
+        """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
+        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
+            self._task._progress if self._task is not None else None)     # noqa: SLF001
+        if bar is not None:
+            bar.setRange(0, 100)
+            bar.setValue(int(value))
 
     def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
                  toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):
@@ -448,9 +451,12 @@ class MusicConvertPage(QWidget):
             self._task.idle(message)
 
     def _set_progress(self, value: int) -> None:
-        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
-        if self._task is not None and self._task.is_busy:
-            self._task.report(self._task.text, int(value), 100)
+        """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
+        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
+            self._task._progress if self._task is not None else None)     # noqa: SLF001
+        if bar is not None:
+            bar.setRange(0, 100)
+            bar.setValue(int(value))
 
     def __init__(self, library: MusicLibrary, storage: MusicStorage, toaster: Toaster,
                  parent: QWidget | None = None, *, task_bar=None):

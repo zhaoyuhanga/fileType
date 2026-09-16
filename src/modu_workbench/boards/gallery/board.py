@@ -52,6 +52,8 @@ from modu_workbench.core.gallery import (
 )
 from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
+from modu_workbench.ui_kit.components import EmptyState, TaskBar
+from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
 from .widgets import (
@@ -77,6 +79,39 @@ THUMB_STEPS = ((6, THUMB_SMALL), (4, THUMB_MEDIUM), (3, 260), (2, THUMB_LARGE))
 
 class GalleryBoardPage(QWidget):
     """墨软图库板块。"""
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在任务条上。"""
+        return self._task_bar._label          # noqa: SLF001
+
+    @property
+    def _progress(self) -> QProgressBar:
+        """兼容旧引用：进度来自任务条。"""
+        return self._task_bar._progress       # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        if done or total:
+            self._task_bar.report(message, done, total)
+        else:
+            self._task_bar.note(message)
+
+    def _busy(self, message: str) -> None:
+        """进行中（未知时长）：导入/收集/AI 这类任务。"""
+        self._task_bar.busy(message)
+
+    def _idle(self, message: str = "") -> None:
+        self._task_bar.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
+        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
+            self._task._progress if self._task is not None else None)     # noqa: SLF001
+        if bar is not None:
+            bar.setRange(0, 100)
+            bar.setValue(int(value))
 
     def __init__(self, parent: QWidget | None = None, *, library: ImageLibrary | None = None):
         super().__init__(parent)
@@ -279,7 +314,20 @@ class GalleryBoardPage(QWidget):
         self._grid.itemActivated.connect(self._open_viewer)
         self._grid.selectionChangedItems.connect(self._on_selection_changed)
         self._grid.customContextMenuRequested.connect(self._on_grid_menu)
-        self._splitter.addWidget(self._grid)
+
+        # 网格容器：空图库时给引导（图标 + 说明 + 主操作），而不是一块空白大灰框
+        self._grid_holder = QWidget()
+        holder_layout = QVBoxLayout(self._grid_holder)
+        holder_layout.setContentsMargins(0, 0, 0, 0)
+        holder_layout.setSpacing(8)
+        self._empty = EmptyState(
+            "🖼", "图库还是空的",
+            "用「导入图片…」把本地图片加进来，或「扫描文件夹…」批量导入已有目录",
+        )
+        holder_layout.addWidget(self._empty)
+        holder_layout.addWidget(self._grid)
+        self._grid.setVisible(False)
+        self._splitter.addWidget(self._grid_holder)
 
         self._details = QTextBrowser()
         self._details.setOpenExternalLinks(True)
@@ -457,15 +505,11 @@ class GalleryBoardPage(QWidget):
         row2.addWidget(self._cancel_button)
         outer.addLayout(row2)
 
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        outer.addWidget(self._progress)
-
-        self._status = QLabel("就绪。导入图片后会生成缩略图并读取 EXIF。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        outer.addWidget(self._status)
+        # 统一任务条：导入/收集/AI 任务的状态与进度都汇总到这里（空闲自动收起）
+        self._task_bar = TaskBar("就绪。导入图片后会生成缩略图并读取 EXIF。")
+        self._task_bar.cancelled.connect(self._cancel_tasks)
+        self._cancel_button.setVisible(False)      # 取消统一由任务条提供
+        outer.addWidget(self._task_bar)
         return bar
 
     def _install_shortcuts(self) -> None:
@@ -540,6 +584,9 @@ class GalleryBoardPage(QWidget):
         page_changed = self._page != previous_page
         self._items = self.page_items(self._page)
         self._grid.set_items(self._items, keep_selection=keep_page and not page_changed)
+        has_items = bool(self._items)
+        self._empty.setVisible(not has_items)
+        self._grid.setVisible(has_items)
         if page_changed:
             self._grid.scrollToTop()
 
@@ -850,13 +897,13 @@ class GalleryBoardPage(QWidget):
         columns, size = self._size_combo.currentData() or (4, THUMB_MEDIUM)
         if mode == "waterfall":
             self._grid.set_thumb_size(size, columns=columns)
-            self._status.setText("瀑布流视图：按图片比例自适应（缩略图保持原比例）")
+            self._report("瀑布流视图：按图片比例自适应（缩略图保持原比例）")
         elif mode == "timeline":
             self._sort_combo.setCurrentIndex(list(SORT_MODES).index("taken"))
-            self._status.setText("时间轴视图：按拍摄时间倒序，可用上方「时间」筛选到具体月份")
+            self._report("时间轴视图：按拍摄时间倒序，可用上方「时间」筛选到具体月份")
         else:
             self._grid.set_thumb_size(size, columns=columns)
-            self._status.setText("网格视图")
+            self._report("网格视图")
 
     def _on_size_changed(self) -> None:
         payload = self._size_combo.currentData()
@@ -955,7 +1002,7 @@ class GalleryBoardPage(QWidget):
         album_id = self._kind_combo.currentData() or None
         if self._kind_combo.currentIndex() == 0:
             album_id = None
-        self._status.setText("开始导入…")
+        self._busy("开始导入…")
         self._cancel_button.setEnabled(True)
         self._browse_worker = ImportWorker(
             self._library, paths, source=source,
@@ -968,8 +1015,8 @@ class GalleryBoardPage(QWidget):
         self._browse_worker.start()
 
     def _on_import_done(self, result) -> None:  # noqa: ANN001
-        self._progress.setValue(100)
-        self._status.setText(f"导入完成：{result.summary()}")
+        self._set_progress(100)
+        self._report(f"导入完成：{result.summary()}")
         self._toaster.success(f"导入完成：{result.summary()}")
         self.reload()
 
@@ -981,11 +1028,11 @@ class GalleryBoardPage(QWidget):
         self._url_worker.collected.connect(self._on_url_collected)
         self._url_worker.failed.connect(self._on_task_failed)
         self._url_worker.start()
-        self._status.setText("正在下载图片…")
+        self._busy("正在下载图片…")
 
     def _on_url_collected(self, item) -> None:  # noqa: ANN001
         self._toaster.success(f"已收集：{item.display()}")
-        self._status.setText(f"已收集：{item.display()}")
+        self._report(f"已收集：{item.display()}")
         self.reload()
 
     def _collect_clipboard(self) -> None:
@@ -1105,18 +1152,18 @@ class GalleryBoardPage(QWidget):
 
     def _on_edit_saved(self, path: str) -> None:
         """编辑保存后回报到底栏 —— 否则进度条一直停在 0%，看起来像没执行。"""
-        self._progress.setValue(100)
-        self._status.setText(f"已保存编辑结果：{Path(path).name}（原图未改动）")
+        self._set_progress(100)
+        self._report(f"已保存编辑结果：{Path(path).name}（原图未改动）")
         self._after_edit()
 
     def _on_enhance_done(self, outputs: list, errors: list) -> None:
         """AI 优化（本地增强）结束后把进度与结果写回底栏。"""
         total = len(outputs) + len(errors)
-        self._progress.setValue(100 if not errors else int(len(outputs) * 100 / max(1, total)))
+        self._set_progress(100 if not errors else int(len(outputs) * 100 / max(1, total)))
         message = f"AI 优化完成：生成 {len(outputs)} 张新图"
         if errors:
             message += f"，失败 {len(errors)} 张（{errors[0]}）"
-        self._status.setText(message + "；原图未改动")
+        self._report(message + "；原图未改动")
         self._after_edit()
 
     def _analyze_selected(self) -> None:
@@ -1144,15 +1191,15 @@ class GalleryBoardPage(QWidget):
         self._analyze_worker.failed.connect(self._on_task_failed)
         self._analyze_worker.finished.connect(self._on_worker_finished)
         self._analyze_worker.start()
-        self._status.setText(
+        self._report(
             f"AI 分析 {len(items)} 张（{'图片大模型看图' if allow_upload and prefer_vision else '文字大模型·仅元数据'}）…")
 
     def _on_analyze_done(self, ok: int, errors: list) -> None:
-        self._progress.setValue(100)
+        self._set_progress(100)
         message = f"AI 分析完成：成功 {ok}，失败 {len(errors)}"
         if errors:
             message += "；" + "；".join(errors[:2])
-        self._status.setText(message)
+        self._report(message)
         if ok:
             self._toaster.success(f"已为 {ok} 张图片生成描述/标签")
         else:
@@ -1162,7 +1209,7 @@ class GalleryBoardPage(QWidget):
     def _detect_duplicates(self) -> None:
         if self._duplicate_worker is not None and self._duplicate_worker.isRunning():
             return
-        self._status.setText("正在检测重复/相似图片…")
+        self._report("正在检测重复/相似图片…")
         self._duplicate_worker = DuplicateWorker(self._library, parent=self)
         self._duplicate_worker.finishedGroups.connect(self._on_duplicates)
         self._duplicate_worker.failed.connect(self._on_task_failed)
@@ -1172,11 +1219,11 @@ class GalleryBoardPage(QWidget):
         self._duplicates = groups
         if not groups:
             self._toaster.info("未发现重复或相似图片")
-            self._status.setText("重复检测完成：无重复")
+            self._report("重复检测完成：无重复")
             return
         total = sum(len(group) for group in groups)
         self._toaster.info(f"发现 {len(groups)} 组相似图片（共 {total} 张）")
-        self._status.setText(f"发现 {len(groups)} 组相似图片，可在右键菜单里按组删除多余的")
+        self._report(f"发现 {len(groups)} 组相似图片，可在右键菜单里按组删除多余的")
         self._show_duplicate_groups(groups)
 
     def _show_duplicate_groups(self, groups: list) -> None:
@@ -1246,21 +1293,21 @@ class GalleryBoardPage(QWidget):
             self._slide_timer.setInterval(interval)
             self._slide_timer.timeout.connect(lambda: self._step_viewer(1))
             self._slide_timer.start()
-            self._status.setText(f"幻灯片播放中（每 {interval // 1000} 秒切换）")
+            self._report(f"幻灯片播放中（每 {interval // 1000} 秒切换）")
         else:
             timer = getattr(self, "_slide_timer", None)
             if timer is not None:
                 timer.stop()
-            self._status.setText("已停止幻灯片")
+            self._report("已停止幻灯片")
 
     # ------------------------------------------------------------------ 线程与状态
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
-        self._progress.setValue(int(done * 100 / total) if total else 0)
-        self._status.setText(message)
+        self._set_progress(int(done * 100 / total) if total else 0)
+        self._report(message)
 
     def _on_task_failed(self, message: str) -> None:
-        self._status.setText(f"任务失败：{message}")
+        self._report(f"任务失败：{message}")
         self._toaster.error(message)
 
     def _on_worker_finished(self) -> None:
@@ -1271,7 +1318,7 @@ class GalleryBoardPage(QWidget):
                        self._analyze_worker):
             if worker is not None and worker.isRunning():
                 worker.cancel()
-        self._status.setText("正在取消任务…")
+        self._report("正在取消任务…")
 
     def _on_grid_menu(self, pos) -> None:  # noqa: ANN001
         # 右键落点即操作对象：默认右键不改选中项，会出现"菜单作用于上一张图"
@@ -1326,7 +1373,7 @@ class GalleryBoardPage(QWidget):
             self._toaster.info("未能拆出关键词，已按原词搜索")
             return
         self._search.setText(keywords[0])
-        self._status.setText("AI 关键词：" + "、".join(keywords))
+        self._report("AI 关键词：" + "、".join(keywords))
         self.reload()
 
     def _update_buttons(self) -> None:
