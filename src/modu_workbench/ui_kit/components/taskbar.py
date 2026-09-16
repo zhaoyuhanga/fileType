@@ -61,6 +61,14 @@ class TaskBar(QWidget):
         self._progress.setVisible(True)
         self._cancel.setVisible(True)
 
+    def note(self, message: str) -> None:
+        """只更新文字（信息类提示）：不显示进度条与取消按钮。"""
+        self._label.setText(message)
+
+    def busy(self, message: str) -> None:
+        """显示"进行中"（不确定进度）：搜索/导入/解析这类未知时长用。"""
+        self.report(message)
+
     def idle(self, message: str = "") -> None:
         """任务结束：收起进度条与取消按钮。"""
         if message:

@@ -30,6 +30,7 @@ from modu_workbench.core.music import (
     list_sources,
 )
 from . import context as app_context
+from modu_workbench.ui_kit.components import EmptyState
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (
@@ -69,11 +70,53 @@ class MusicSearchPage(QWidget):
 
     tracksImported = Signal(list)   # 下载并入库的 Track 列表
 
+    def _cancel_current(self) -> None:
+        """供板块任务条调用：取消本页正在进行的任务。"""
+        if getattr(self, "_download", None) is not None:
+            try:
+                self._download.cancel()
+            except Exception:  # noqa: BLE001
+                pass
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            if done or total:
+                self._task.report(message, done, total)
+            else:
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
+        if self._task is not None and self._task.is_busy:
+            self._task.report(self._task.text, int(value), 100)
+
     def __init__(self, library: MusicLibrary, storage: MusicStorage, toaster: Toaster,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
+        self._task = task_bar
+        self._fallback_status = QLabel("就绪。")
         self._toaster = toaster
         self._results: list = []
         self._worker: SearchWorker | None = None
@@ -129,7 +172,13 @@ class MusicSearchPage(QWidget):
         )
         self._table.doubleClicked.connect(lambda _index: self._preview_selected())
         attach_context_menu(self._table, self._row_menu)
+        self._empty = EmptyState(
+            "🎵", "还没有搜索结果",
+            "在上方输入歌名 / 歌手 / 专辑后点「搜索」；勾选结果可批量下载或加入歌单",
+        )
+        layout.addWidget(self._empty, 1)
         layout.addWidget(self._table, 1)
+        self._table.setVisible(False)          # 无结果时显示空状态，有结果时切回表格
 
         # ---- 操作栏 ----
         actions = QHBoxLayout()
@@ -150,7 +199,7 @@ class MusicSearchPage(QWidget):
         self._cancel_button = QPushButton("取消下载")
         self._cancel_button.setObjectName("dangerButton")
         self._cancel_button.clicked.connect(self._cancel_download)
-        self._cancel_button.setEnabled(False)
+        self._cancel_button.setVisible(False)     # 取消统一由底部任务条提供
 
         for widget in (self._check_all, self._check_none, self._preview_button,
                        self._download_button, self._playlist_button, self._cancel_button):
@@ -159,7 +208,10 @@ class MusicSearchPage(QWidget):
         hint = QLabel("勾选多首＝批量；只选中一行＝单条；右键可试听/下载单曲")
         hint.setObjectName("readerStatus")
         actions.addWidget(hint)
-        layout.addLayout(actions)
+        self._actions_widget = QWidget()
+        self._actions_widget.setLayout(actions)
+        self._actions_widget.setVisible(False)     # 无结果时不显示一排禁用按钮
+        layout.addWidget(self._actions_widget)
 
         # ---- 下载目录 ----
         dir_row = QHBoxLayout()
@@ -186,13 +238,13 @@ class MusicSearchPage(QWidget):
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        layout.addWidget(self._progress)
+        self._set_progress(0)
+        self._progress.setVisible(False)          # 进度统一显示在板块任务条
 
-        self._status = QLabel("就绪。输入关键词后搜索。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
+        self._status_label = QLabel("就绪。输入关键词后搜索。")
+        self._status_label.setObjectName("readerStatus")
+        self._status_label.setWordWrap(True)
+        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
 
         self._update_buttons()
 
@@ -230,7 +282,7 @@ class MusicSearchPage(QWidget):
             return
         kind = self._kind.currentData()
         source_key = self._source.currentData()
-        self._status.setText(f"搜索中：{keyword}（{SEARCH_KIND_LABELS.get(kind, kind)}）…")
+        self._busy(f"搜索中：{keyword}（{SEARCH_KIND_LABELS.get(kind, kind)}）…")
         self._search_button.setEnabled(False)
         self._worker = SearchWorker(keyword, kind, source_key, 40, self)
         self._worker.finishedResults.connect(self._on_results)
@@ -247,11 +299,14 @@ class MusicSearchPage(QWidget):
         message = f"共 {len(self._results)} 条结果"
         if errors:
             message += "；" + "；".join(errors)
-        self._status.setText(message)
+        self._empty.setVisible(not self._results)
+        self._table.setVisible(bool(self._results))
+        self._actions_widget.setVisible(bool(self._results))     # 空结果不显示一排禁用按钮
+        self._report(message)
         self._update_buttons()
 
     def _on_search_failed(self, message: str) -> None:
-        self._status.setText(f"搜索失败：{message}")
+        self._report(f"搜索失败：{message}")
         self._toaster.error(f"搜索失败：{message}")
 
     def _on_search_finished(self) -> None:
@@ -277,7 +332,7 @@ class MusicSearchPage(QWidget):
         if player.is_preview:
             player.stop_preview()
             self._preview_button.setText("试听选中")
-            self._status.setText("已停止试听")
+            self._report("已停止试听")
             return
         remotes = action_remotes(self._table)
         if not remotes:
@@ -286,7 +341,7 @@ class MusicSearchPage(QWidget):
         self._preview(remotes[0])
 
     def _preview(self, remote) -> None:  # noqa: ANN001
-        self._status.setText(f"解析试听地址：{remote.display()}…")
+        self._report(f"解析试听地址：{remote.display()}…")
         self._preview_worker = _PreviewResolver(remote, self)
         self._preview_worker.finishedResults.connect(self._play_preview)
         self._preview_worker.failed.connect(self._on_preview_failed)
@@ -294,14 +349,14 @@ class MusicSearchPage(QWidget):
 
     def _on_preview_failed(self, message: str) -> None:
         self._preview_button.setText("试听选中")
-        self._status.setText(f"试听失败：{message}")
+        self._report(f"试听失败：{message}")
         self._toaster.error(f"试听失败：{message}")
 
     def _on_preview_error(self, message: str) -> None:
         """来自播放条的试听错误（解码失败等）同步到本页状态栏。"""
         if self._preview_button.text() == "停止试听":
             self._preview_button.setText("试听选中")
-        self._status.setText(message)
+        self._report(message)
 
     def _play_preview(self, url: str, remote) -> None:  # noqa: ANN001
         """试听统一走底部播放条（与本地播放共用进度/错误/音量）。"""
@@ -314,7 +369,7 @@ class MusicSearchPage(QWidget):
             self._toaster.error("试听地址无效，可直接下载后再播放")
             return
         self._preview_button.setText("停止试听")
-        self._status.setText(f"试听中（进度见底部播放条）：{remote.display()}")
+        self._report(f"试听中（进度见底部播放条）：{remote.display()}")
 
     # ---------- 下载 ----------
 
@@ -343,8 +398,8 @@ class MusicSearchPage(QWidget):
         self._download.finishedAll.connect(self._on_download_finished)
         self._download.failed.connect(self._on_download_failed)
         self._download.finished.connect(self._on_download_thread_finished)
-        self._progress.setValue(0)
-        self._status.setText(f"开始下载 {len(remotes)} 首…")
+        self._set_progress(0)
+        self._busy(f"开始下载 {len(remotes)} 首…")
         self._cancel_button.setEnabled(True)
         self._update_buttons()
         self._download.start()
@@ -352,12 +407,12 @@ class MusicSearchPage(QWidget):
     def _cancel_download(self) -> None:
         if self._download is not None:
             self._download.cancel()
-            self._status.setText("正在取消下载…")
+            self._busy("正在取消下载…")
 
     def _on_download_progress(self, done: int, total: int, message: str) -> None:
         percent = int(done * 100 / total) if total else 0
-        self._progress.setValue(min(100, percent))
-        self._status.setText(message)
+        self._set_progress(min(100, percent))
+        self._report(message)
 
     def _on_download_finished(self, results: list) -> None:
         self._report_download_result(results)
@@ -367,7 +422,7 @@ class MusicSearchPage(QWidget):
         failed = [r for r in results if not r.ok]
         switched = [r for r in ok if r.switched_from]
         imported: list[Track] = self._library.import_download_results(ok)
-        self._progress.setValue(100)
+        self._set_progress(100)
         summary = f"下载完成：成功 {len(ok)}，失败 {len(failed)}；已入库 {len(imported)} 首"
         if switched:
             pairs = "，".join(f"{r.track.title}→{r.source}" for r in switched[:3])
@@ -378,7 +433,7 @@ class MusicSearchPage(QWidget):
                 if result.message not in reasons:
                     reasons.append(result.message)
             summary += "；失败原因：" + "；".join(reasons)
-        self._status.setText(summary)
+        self._report(summary)
         if ok:
             self._toaster.success(f"已下载 {len(ok)} 首，入库 {len(imported)} 首")
             self.tracksImported.emit(imported)
@@ -386,7 +441,7 @@ class MusicSearchPage(QWidget):
             self._toaster.error("全部下载失败：可在设置里调整音源顺序/启用项，或改用「音频直链」")
 
     def _on_download_failed(self, message: str) -> None:
-        self._status.setText(f"下载失败：{message}")
+        self._report(f"下载失败：{message}")
         self._toaster.error(f"下载失败：{message}")
 
     def _on_download_thread_finished(self) -> None:
@@ -415,7 +470,7 @@ class MusicSearchPage(QWidget):
         playlist = self._storage.get_playlist(playlist_id)
         name = playlist.name if playlist else "歌单"
         self._toaster.success(f"已加入「{name}」：新增 {added} 首（待下载）")
-        self._status.setText(f"已加入歌单「{name}」：{added} 首待下载，可在歌单页一键下载")
+        self._report(f"已加入歌单「{name}」：{added} 首待下载，可在歌单页一键下载")
 
     # ---------- 杂项 ----------
 

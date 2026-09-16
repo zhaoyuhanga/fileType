@@ -470,7 +470,7 @@ QLabel#pageTitle {{
     font-size: {FONT['title']}px;
     font-weight: 800;
 }}
-QLabel#pageSubtitle {{
+QLabel#pageSubtitle, QLabel#pageSub {{
     color: {t.text_dim};
     font-size: {FONT['small']}px;
 }}

@@ -194,7 +194,13 @@ class VideoSearchPage(QWidget):
             if total or done:
                 self._task.report(message, done, total)
             else:
-                self._task.report(message)
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
 
     def _idle(self, message: str = "") -> None:
         if self._task is not None:
@@ -242,7 +248,7 @@ class VideoSearchPage(QWidget):
         kind = self._kind.currentData() or "all"
         source_key = self._source.currentData() or "all"
         self._page = 1
-        self._report(f"搜索中：{keyword}（{MEDIA_KIND_LABELS.get(kind, '全部类型')}）…")
+        self._busy(f"搜索中：{keyword}（{MEDIA_KIND_LABELS.get(kind, '全部类型')}）…")
         self._search_button.setEnabled(False)
         self._worker = SearchWorker(keyword, kind, source_key, 40, self._page, self,
                                     library=self._library)

@@ -19,6 +19,8 @@ from modu_workbench.core.music import (
     format_duration,
 )
 from . import context as app_context
+from modu_workbench.ui_kit.components import TaskBar
+from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
@@ -205,8 +207,8 @@ class MusicBoardPage(QWidget):
 
         nav = QWidget()
         nav_row = QHBoxLayout(nav)
-        nav_row.setContentsMargins(16, 8, 16, 4)
-        nav_row.setSpacing(8)
+        nav_row.setContentsMargins(PAGE_MARGIN, SPACE["md"], PAGE_MARGIN, SPACE["sm"])
+        nav_row.setSpacing(ROW_GAP)
         self._nav_buttons: dict[str, QPushButton] = {}
         for key, label in (
             (SEARCH_KEY, "🔍 搜索下载"),
@@ -227,12 +229,21 @@ class MusicBoardPage(QWidget):
         nav_row.addStretch(1)
         layout.addWidget(nav)
 
+        # 统一任务条：搜索/下载/导入/转换的状态与进度都汇总到这里（空闲自动收起）
+        self._task_bar = TaskBar("就绪。搜索后可试听、下载或加入歌单。")
+        self._task_bar.cancelled.connect(self._cancel_current_task)
+
         self._stack = QStackedWidget()
-        self._search = MusicSearchPage(self._library, self._storage, self._toaster)
-        self._library_page = MusicLibraryPage(self._library, self._storage, self._player, self._toaster)
-        self._playlist_page = MusicPlaylistPage(self._library, self._storage, self._player, self._toaster)
-        self._convert_page = MusicConvertPage(self._library, self._storage, self._toaster)
-        self._history_page = MusicHistoryPage(self._library, self._storage, self._player, self._toaster)
+        self._search = MusicSearchPage(self._library, self._storage, self._toaster,
+                                      task_bar=self._task_bar)
+        self._library_page = MusicLibraryPage(self._library, self._storage, self._player, self._toaster,
+                                              task_bar=self._task_bar)
+        self._playlist_page = MusicPlaylistPage(self._library, self._storage, self._player, self._toaster,
+                                                task_bar=self._task_bar)
+        self._convert_page = MusicConvertPage(self._library, self._storage, self._toaster,
+                                              task_bar=self._task_bar)
+        self._history_page = MusicHistoryPage(self._library, self._storage, self._player, self._toaster,
+                                              task_bar=self._task_bar)
 
         self._indexes = {
             SEARCH_KEY: self._stack.addWidget(self._search),
@@ -242,6 +253,8 @@ class MusicBoardPage(QWidget):
             HISTORY_KEY: self._stack.addWidget(self._history_page),
         }
         layout.addWidget(self._stack, 1)
+
+        layout.addWidget(self._task_bar)
 
         self._bar = MusicPlayerBar(self._player)
         self._bar.favoriteToggled.connect(self._toggle_current_favorite)
@@ -284,6 +297,16 @@ class MusicBoardPage(QWidget):
             if index == self._stack.currentIndex():
                 self.show_page(page_key)
                 break
+
+    def _cancel_current_task(self) -> None:
+        """任务条上的「取消」：取消当前子页正在跑的下载/转换任务。"""
+        for page in (self._search, self._library_page, self._playlist_page):
+            handler = getattr(page, "_cancel_current", None)
+            if callable(handler):
+                try:
+                    handler()
+                except Exception:  # noqa: BLE001
+                    continue
 
     def _open_board_settings(self) -> None:
         """打开统一设置对话框的「乐库」页（设置按板块区分）。"""

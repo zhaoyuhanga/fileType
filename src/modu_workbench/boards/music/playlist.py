@@ -49,11 +49,53 @@ class MusicPlaylistPage(QWidget):
     playRequested = Signal(list, int, str)   # (tracks, start_index, mode)
     libraryChanged = Signal()
 
+    def _cancel_current(self) -> None:
+        """供板块任务条调用：取消本页正在进行的任务。"""
+        if getattr(self, "_download", None) is not None:
+            try:
+                self._download.cancel()
+            except Exception:  # noqa: BLE001
+                pass
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            if done or total:
+                self._task.report(message, done, total)
+            else:
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
+        if self._task is not None and self._task.is_busy:
+            self._task.report(self._task.text, int(value), 100)
+
     def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
-                 toaster: Toaster, parent: QWidget | None = None):
+                 toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
+        self._task = task_bar
+        self._fallback_status = QLabel("就绪。")
         self._player = player
         self._toaster = toaster
         self._playlist_id: int | None = None
@@ -133,13 +175,13 @@ class MusicPlaylistPage(QWidget):
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
-        self._progress.setValue(0)
+        self._set_progress(0)
         right_layout.addWidget(self._progress)
 
-        self._status = QLabel("就绪。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        right_layout.addWidget(self._status)
+        self._status_label = QLabel("就绪。")
+        self._status_label.setObjectName("readerStatus")
+        self._status_label.setWordWrap(True)
+        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -203,7 +245,7 @@ class MusicPlaylistPage(QWidget):
         self._header.setText(f"歌单：{name}")
         self._pending_label.setText(f"待下载（{len(remotes)}）")
         total_ms = sum(t.duration_ms for t in self._tracks)
-        self._status.setText(
+        self._report(
             f"{len(self._tracks)} 首本地曲目 · 总时长 {format_duration(total_ms)} · 待下载 {len(remotes)} 首"
         )
 
@@ -317,13 +359,13 @@ class MusicPlaylistPage(QWidget):
         self._download.finishedAll.connect(self._on_downloaded)
         self._download.failed.connect(lambda msg: self._toaster.error(f"下载失败：{msg}"))
         self._download.finished.connect(self._on_download_finished)
-        self._progress.setValue(0)
-        self._status.setText(f"开始下载 {len(remotes)} 首待下载曲目…")
+        self._set_progress(0)
+        self._busy(f"开始下载 {len(remotes)} 首待下载曲目…")
         self._download.start()
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
-        self._progress.setValue(min(100, int(done * 100 / total)) if total else 0)
-        self._status.setText(message)
+        self._set_progress(min(100, int(done * 100 / total)) if total else 0)
+        self._report(message)
 
     def _on_downloaded(self, results: list) -> None:
         ok = [r for r in results if r.ok]
@@ -332,7 +374,7 @@ class MusicPlaylistPage(QWidget):
             self._storage.add_to_playlist(self._playlist_id, [t.id for t in imported])
             keys = [r.track.extra.get("remote_key", f"{r.track.source}:{r.track.remote_id}") for r in ok]
             self._storage.remove_playlist_remotes(self._playlist_id, keys)
-        self._progress.setValue(100)
+        self._set_progress(100)
         self._render()
         self.libraryChanged.emit()
         self._toaster.success(f"已下载并入歌单：{len(imported)} 首")

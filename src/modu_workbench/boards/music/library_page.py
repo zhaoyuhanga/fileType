@@ -50,11 +50,53 @@ class MusicLibraryPage(QWidget):
     playRequested = Signal(list, int)   # (tracks, start_index)
     libraryChanged = Signal()
 
+    def _cancel_current(self) -> None:
+        """供板块任务条调用：取消本页正在进行的任务。"""
+        if getattr(self, "_worker", None) is not None:
+            try:
+                self._worker.cancel()
+            except Exception:  # noqa: BLE001
+                pass
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            if done or total:
+                self._task.report(message, done, total)
+            else:
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
+        if self._task is not None and self._task.is_busy:
+            self._task.report(self._task.text, int(value), 100)
+
     def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
-                 toaster: Toaster, parent: QWidget | None = None):
+                 toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
+        self._task = task_bar
+        self._fallback_status = QLabel("就绪。")
         self._player = player
         self._toaster = toaster
         self._tracks: list[Track] = []
@@ -130,10 +172,10 @@ class MusicLibraryPage(QWidget):
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        self._status = QLabel("就绪。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
+        self._status_label = QLabel("就绪。")
+        self._status_label.setObjectName("readerStatus")
+        self._status_label.setWordWrap(True)
+        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
 
     # ---------- 数据 ----------
 
@@ -164,7 +206,7 @@ class MusicLibraryPage(QWidget):
         message = f"共 {len(self._tracks)} 首"
         if missing:
             message += f"；其中 {len(missing)} 首文件已丢失（播放时会跳过）"
-        self._status.setText(message)
+        self._report(message)
 
     def _rebuild_filter_combos(self, artist: str, category: str) -> None:
         for combo, items, current, all_label in (
@@ -231,7 +273,7 @@ class MusicLibraryPage(QWidget):
         self.reload()
         self.libraryChanged.emit()
         self._toaster.success(f"已导入 {len(tracks)} 首")
-        self._status.setText(f"已导入 {len(tracks)} 首（共扫描 {len(files)} 个文件）")
+        self._report(f"已导入 {len(tracks)} 首（共扫描 {len(files)} 个文件）")
 
     def _toggle_favorite(self) -> None:
         ids = action_ids(self._table)
@@ -369,12 +411,46 @@ class MusicLibraryPage(QWidget):
 class MusicConvertPage(QWidget):
     """音频格式转换：选择曲目 → 目标格式 → 批量转换。"""
 
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            if done or total:
+                self._task.report(message, done, total)
+            else:
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
+        if self._task is not None and self._task.is_busy:
+            self._task.report(self._task.text, int(value), 100)
+
     def __init__(self, library: MusicLibrary, storage: MusicStorage, toaster: Toaster,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
         self._toaster = toaster
+        self._task = task_bar
+        self._fallback_status = QLabel("就绪。")
         self._tracks: list[Track] = []
         self._worker: ConvertWorker | None = None
 
@@ -432,13 +508,13 @@ class MusicConvertPage(QWidget):
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        layout.addWidget(self._progress)
+        self._set_progress(0)
+        self._progress.setVisible(False)          # 进度统一显示在板块任务条
 
-        self._status = QLabel("就绪。勾选曲目后开始转换。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
+        self._status_label = QLabel("就绪。勾选曲目后开始转换。")
+        self._status_label.setObjectName("readerStatus")
+        self._status_label.setWordWrap(True)
+        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
 
         self.reload()
 
@@ -447,7 +523,7 @@ class MusicConvertPage(QWidget):
         self._table.setRowCount(len(self._tracks))
         for row, track in enumerate(self._tracks):
             fill_track_row(self._table, row, track, ["title", "artist", "duration", "format", "size", "category"])
-        self._status.setText(f"共 {len(self._tracks)} 首可选")
+        self._report(f"共 {len(self._tracks)} 首可选")
 
     def _pick_dir(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择输出目录", self._out.text())
@@ -469,36 +545,36 @@ class MusicConvertPage(QWidget):
         self._worker.finishedAll.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._on_thread_finished)
-        self._progress.setValue(0)
+        self._set_progress(0)
         self._start.setEnabled(False)
         self._cancel.setEnabled(True)
-        self._status.setText(f"开始转换 {len(ids)} 首 → {str(target).upper()}")
+        self._busy(f"开始转换 {len(ids)} 首 → {str(target).upper()}")
         self._worker.start()
 
     def _cancel_convert(self) -> None:
         if self._worker is not None:
             self._worker.cancel()
-            self._status.setText("正在取消…")
+            self._busy("正在取消…")
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
-        self._progress.setValue(min(100, int(done * 100 / total)) if total else 0)
-        self._status.setText(message)
+        self._set_progress(min(100, int(done * 100 / total)) if total else 0)
+        self._report(message)
 
     def _on_finished(self, outputs: list, errors: list) -> None:
-        self._progress.setValue(100)
+        self._set_progress(100)
         if outputs:
             self.reload()   # 刷新列表（内部会重置状态文本）
         message = f"转换完成：成功 {len(outputs)}，失败 {len(errors)}"
         if errors:
             message += "；" + "；".join(errors[:3])
-        self._status.setText(message)
+        self._report(message)
         if outputs:
             self._toaster.success(f"已转换 {len(outputs)} 首")
         else:
             self._toaster.error("转换失败，请检查 ffmpeg 是否可用")
 
     def _on_failed(self, message: str) -> None:
-        self._status.setText(f"转换失败：{message}")
+        self._report(f"转换失败：{message}")
         self._toaster.error(f"转换失败：{message}")
 
     def _on_thread_finished(self) -> None:

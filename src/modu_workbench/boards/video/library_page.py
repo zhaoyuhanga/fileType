@@ -357,13 +357,13 @@ class VideoLibraryPage(QWidget):
         self._convert_worker.finished.connect(self._on_convert_thread_finished)
         self._cancel_button.setEnabled(True)
         self._convert_button.setEnabled(False)
-        self._report(f"开始转换 {len(ids)} 个条目为 {str(target_format).upper()}…")
+        self._busy(f"开始转换 {len(ids)} 个条目为 {str(target_format).upper()}…")
         self._convert_worker.start()
 
     def _cancel_convert(self) -> None:
         if self._convert_worker is not None:
             self._convert_worker.cancel()
-            self._report("正在取消转换…")
+            self._busy("正在取消转换…")
 
     def _on_convert_progress(self, done: int, total: int, message: str) -> None:
         self._report(message, done, total)
@@ -412,7 +412,13 @@ class VideoLibraryPage(QWidget):
             if done or total:
                 self._task.report(message, done, total)
             else:
-                self._task.report(message)
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
 
     def _idle(self, message: str = "") -> None:
         if message:
@@ -421,8 +427,8 @@ class VideoLibraryPage(QWidget):
             self._task.idle(message)
 
     def _set_progress(self, value: int) -> None:
-        """兼容旧写法：进度条由统一任务条持有。"""
-        if self._task is not None:
+        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
+        if self._task is not None and self._task.is_busy:
             self._task.report(self._task.text, int(value), 100)
 
     # ------------------------------------------------------------------ 其它

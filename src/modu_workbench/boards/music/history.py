@@ -25,11 +25,45 @@ class MusicHistoryPage(QWidget):
 
     playRequested = Signal(list, int)   # (tracks, start_index)
 
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            if done or total:
+                self._task.report(message, done, total)
+            else:
+                self._task.note(message)      # 纯信息：不显示进度条/取消
+
+    def _busy(self, message: str) -> None:
+        """进行中提示（搜索/导入/解析这类未知时长）。"""
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.busy(message)
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：只在任务进行中更新进度（空闲时不要把进度条显示出来）。"""
+        if self._task is not None and self._task.is_busy:
+            self._task.report(self._task.text, int(value), 100)
+
     def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
-                 toaster: Toaster, parent: QWidget | None = None):
+                 toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
+        self._task = task_bar
+        self._fallback_status = QLabel("就绪。")
         self._player = player
         self._toaster = toaster
         self._entries: list = []
@@ -64,9 +98,9 @@ class MusicHistoryPage(QWidget):
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        self._status = QLabel("就绪。")
-        self._status.setObjectName("readerStatus")
-        layout.addWidget(self._status)
+        self._status_label = QLabel("就绪。")
+        self._status_label.setObjectName("readerStatus")
+        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
 
         self.reload()
 
@@ -83,7 +117,7 @@ class MusicHistoryPage(QWidget):
             stamp = datetime.fromtimestamp(entry.played_at).strftime("%Y-%m-%d %H:%M")
             self._table.setItem(row, 3, QTableWidgetItem(stamp))
             self._table.setItem(row, 4, QTableWidgetItem(entry.path or "-"))
-        self._status.setText(f"共 {len(self._entries)} 条记录")
+        self._report(f"共 {len(self._entries)} 条记录")
 
     def selected_track_ids(self) -> list[int]:
         ids: list[int] = []
