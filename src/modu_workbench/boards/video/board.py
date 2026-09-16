@@ -36,7 +36,9 @@ from modu_workbench.core.video import (
 )
 from . import context as app_context
 from modu_workbench.core.platform.paths import video_dir
+from modu_workbench.ui_kit.components import TaskBar, chip
 from modu_workbench.ui_kit.toast import Toaster
+from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
 from .detail import VideoDetailDialog
@@ -107,10 +109,11 @@ class VideoBoardPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # 子页导航（页面切换）+ 源状态 + 源设置/板块设置
         nav = QWidget()
         nav_row = QHBoxLayout(nav)
-        nav_row.setContentsMargins(16, 8, 16, 4)
-        nav_row.setSpacing(8)
+        nav_row.setContentsMargins(PAGE_MARGIN, SPACE["md"], PAGE_MARGIN, SPACE["sm"])
+        nav_row.setSpacing(ROW_GAP)
         self._nav_buttons: dict[str, QPushButton] = {}
         for key, label in (
             (SEARCH_KEY, "🔍 搜索下载"),
@@ -131,43 +134,30 @@ class VideoBoardPage(QWidget):
         settings_button.clicked.connect(self._open_board_settings)
         nav_row.addWidget(settings_button)
         nav_row.addStretch(1)
-        self._source_hint = QLabel("")
-        self._source_hint.setObjectName("readerStatus")
+        self._source_hint = chip("")
         nav_row.addWidget(self._source_hint)
         layout.addWidget(nav)
 
+        # 统一任务条：全板块只此一条，空闲时自动收起进度与取消
+        self._task_bar = TaskBar("就绪。搜索后双击条目选集，可在线播放或下载到本地。")
+        self._task_bar.cancelled.connect(self._cancel_download)
+        self._cancel_download_button = self._task_bar._cancel   # noqa: SLF001  兼容既有调用
+
         self._stack = QStackedWidget()
-        self._search = VideoSearchPage(self._library, self._storage, self._toaster)
-        self._library_page = VideoLibraryPage(self._library, self._storage, self._toaster)
-        self._history_page = VideoHistoryPage(self._library, self._storage, self._toaster)
+        self._search = VideoSearchPage(self._library, self._storage, self._toaster,
+                                      task_bar=self._task_bar)
+        self._library_page = VideoLibraryPage(self._library, self._storage, self._toaster,
+                                              task_bar=self._task_bar)
+        self._history_page = VideoHistoryPage(self._library, self._storage, self._toaster,
+                                              task_bar=self._task_bar)
         self._indexes = {
             SEARCH_KEY: self._stack.addWidget(self._search),
             LIBRARY_KEY: self._stack.addWidget(self._library_page),
             HISTORY_KEY: self._stack.addWidget(self._history_page),
         }
         layout.addWidget(self._stack, 1)
-
-        # 底部状态条（下载进度）
-        bar = QWidget()
-        bar.setObjectName("bottomBar")
-        bar_row = QHBoxLayout(bar)
-        bar_row.setContentsMargins(16, 8, 16, 8)
-        bar_row.setSpacing(10)
-        self._status = QLabel("就绪。搜索后双击条目选集，可在线播放或下载到本地。")
-        self._status.setObjectName("readerStatus")
-        bar_row.addWidget(self._status, 1)
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setFixedWidth(240)
-        bar_row.addWidget(self._progress)
-        self._cancel_download_button = QPushButton("取消下载")
-        self._cancel_download_button.setObjectName("dangerButton")
-        self._cancel_download_button.setEnabled(False)
-        self._cancel_download_button.clicked.connect(self._cancel_download)
-        bar_row.addWidget(self._cancel_download_button)
-        layout.addWidget(bar)
-
+        layout.addWidget(self._task_bar)
+        
         # 数据联动
         self._search.playRequested.connect(self._play_online)
         self._search.downloadRequested.connect(self._handle_download_request)
@@ -181,6 +171,18 @@ class VideoBoardPage(QWidget):
 
         self.show_page(SEARCH_KEY)
         self._update_source_hint()
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字来自统一任务条。"""
+        return self._task_bar._label          # noqa: SLF001
+
+    @property
+    def _progress(self) -> QProgressBar:
+        """兼容旧引用：进度来自统一任务条。"""
+        return self._task_bar._progress       # noqa: SLF001
 
     # ------------------------------------------------------------------ 导航
 
@@ -240,7 +242,7 @@ class VideoBoardPage(QWidget):
         if remote is None:
             return
         if episode is None and not remote.episodes:
-            self._status.setText(f"正在获取剧集：{remote.title}…")
+            self._task_bar.report(f"正在获取剧集：{remote.title}…")
             worker = DetailWorker(remote, self)
             worker.finishedDetail.connect(
                 lambda detailed, r=remote: self._play_online(detailed or r, None, None)
@@ -260,7 +262,7 @@ class VideoBoardPage(QWidget):
         if self._resolve_worker is not None and self._resolve_worker.isRunning():
             self._toaster.info("正在解析上一个播放地址，请稍候")
             return
-        self._status.setText(f"正在解析播放地址：{remote.title} {episode.name if episode else ''}")
+        self._task_bar.report(f"正在解析播放地址：{remote.title} {episode.name if episode else ''}")
         worker = ResolveWorker(
             remote, episode, quality,
             allow_cross_source=video_auto_switch_pref(), parent=self,
@@ -321,7 +323,7 @@ class VideoBoardPage(QWidget):
             self._player.raise_()
 
         self._library.record_play(video, quality=label, source=resolved.source)
-        self._status.setText(
+        self._task_bar.idle(
             f"正在播放：{display_title} · 画质 {label or '默认'} · 源 {resolved.source}"
         )
         self._history_page.reload()
@@ -447,7 +449,7 @@ class VideoBoardPage(QWidget):
             video_settings().setValue(f"video/pos/{self._session_video.id}", int(position_ms))
         if getattr(self, "_progress_timer", None) is not None:
             self._progress_timer.stop()
-        self._status.setText("已关闭播放器。")
+        self._task_bar.idle("已关闭播放器。")
 
     def _on_player_finished(self) -> None:
         self._player = None
@@ -509,7 +511,7 @@ class VideoBoardPage(QWidget):
             self._player.show()
             self._player.raise_()
         self._library.record_play(video, quality=video.quality or "本地", source="local")
-        self._status.setText(f"正在播放本地文件：{title}")
+        self._task_bar.idle(f"正在播放本地文件：{title}")
         self._history_page.reload()
         self._start_progress_timer()
 
@@ -521,7 +523,7 @@ class VideoBoardPage(QWidget):
             return
         if episodes is None:
             if not remote.episodes:
-                self._status.setText(f"正在获取剧集：{remote.title}…")
+                self._task_bar.report(f"正在获取剧集：{remote.title}…")
                 worker = DetailWorker(remote, self)
                 worker.finishedDetail.connect(
                     lambda detailed, r=remote, q=quality: self._handle_download_request(detailed or r, None, q)
@@ -563,8 +565,8 @@ class VideoBoardPage(QWidget):
         dest = video_download_dir_pref()
         Path(dest).mkdir(parents=True, exist_ok=True)
         tasks = [(remote, episode, quality) for episode in episodes]
-        self._progress.setValue(0)
-        self._cancel_download_button.setEnabled(True)
+        
+        
         self._download_worker = DownloadWorker(
             tasks, dest, allow_cross_source=video_auto_switch_pref(), parent=self,
             library=self._library,
@@ -574,17 +576,16 @@ class VideoBoardPage(QWidget):
         self._download_worker.finishedAll.connect(self._on_download_finished)
         self._download_worker.failed.connect(self._on_download_failed)
         self._download_worker.finished.connect(self._on_download_thread_finished)
-        self._status.setText(f"开始下载 {len(tasks)} 集到 {dest}")
+        self._task_bar.report(f"开始下载 {len(tasks)} 集到 {dest}")
         self._download_worker.start()
 
     def _cancel_download(self) -> None:
         if self._download_worker is not None:
             self._download_worker.cancel()
-            self._status.setText("正在取消下载…")
+            self._task_bar.set_text("正在取消下载…")
 
     def _on_download_progress(self, done: int, total: int, message: str) -> None:
-        self._progress.setValue(int(done * 100 / total) if total else 0)
-        self._status.setText(message)
+        self._task_bar.report(message, done, total)
 
     def _on_task_done(self, result) -> None:  # noqa: ANN001
         if not result.ok:
@@ -592,7 +593,6 @@ class VideoBoardPage(QWidget):
             self._toaster.error(f"{label}：{result.message}")
 
     def _on_download_finished(self, results: list) -> None:
-        self._progress.setValue(100)
         ok = [item for item in results if item.ok]
         failed = [item for item in results if not item.ok]
         switched = [item for item in ok if item.switched_from]
@@ -605,7 +605,7 @@ class VideoBoardPage(QWidget):
                 if item.message not in reasons:
                     reasons.append(item.message)
             summary += "；失败原因：" + "；".join(reasons)
-        self._status.setText(summary)
+        self._task_bar.idle(summary)
         if ok:
             self._toaster.success(f"已下载 {len(ok)} 集，可在「我的视频」查看")
         else:
@@ -613,12 +613,12 @@ class VideoBoardPage(QWidget):
         self._refresh_pages()
 
     def _on_download_failed(self, message: str) -> None:
-        self._status.setText(f"下载失败：{message}")
+        self._task_bar.idle(f"下载失败：{message}")
         self._toaster.error(f"下载失败：{message}")
 
     def _on_download_thread_finished(self) -> None:
         self._download_worker = None
-        self._cancel_download_button.setEnabled(False)
+        
 
     # ------------------------------------------------------------------ 线程清理
 
@@ -627,7 +627,7 @@ class VideoBoardPage(QWidget):
             self._detail_workers.remove(worker)
 
     def _on_resolve_failed(self, message: str) -> None:
-        self._status.setText(f"解析失败：{message}")
+        self._task_bar.idle(f"解析失败：{message}")
         self._toaster.error(f"解析播放地址失败：{message}")
 
     def _on_resolve_finished(self) -> None:

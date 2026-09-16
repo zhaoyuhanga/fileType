@@ -23,9 +23,20 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QVBoxLayout,
     QWidget,
+    QStackedWidget,
 )
 
 from modu_workbench.core.video import VIDEO_TARGETS, VideoLibrary, VideoStorage
+from modu_workbench.ui_kit.components import (
+    ColumnPage,
+    EmptyState,
+    SectionCard,
+    chip,
+    ghost_button,
+    hint_label,
+    primary_button,
+    row,
+)
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (
@@ -54,124 +65,96 @@ class VideoLibraryPage(QWidget):
     importRequested = Signal()
 
     def __init__(self, library: VideoLibrary, storage: VideoStorage, toaster: Toaster,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
         self._toaster = toaster
+        self._task = task_bar
         self._videos = []
         self._convert_worker: ConvertWorker | None = None
+        self._fallback_status = QLabel("就绪。")   # 兼容旧引用/单页自测
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 18, 24, 12)
-        layout.setSpacing(10)
-
-        header = QHBoxLayout()
-        title = QLabel("我的视频")
-        title.setObjectName("pageTitle")
-        header.addWidget(title)
-        header.addStretch(1)
-        self._open_dir_button = QPushButton("打开影视库目录")
-        self._open_dir_button.clicked.connect(self._open_library_dir)
-        header.addWidget(self._open_dir_button)
-        layout.addLayout(header)
-
-        subtitle = QLabel(
-            "这里同时管理「已下载到本地」和「只入库未下载（可在线播放）」的条目；"
-            "可新建分类归类、收藏，或把本地文件转换成其他视频格式 / 提取音频。"
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._page = ColumnPage(
+            "我的视频",
+            "同时管理「已下载到本地」与「只入库未下载（可在线播放）」的条目；"
+            "可分类/收藏，也可把本地文件转成其他视频格式或提取音频。",
+            actions=[ghost_button("打开影视库目录")],
         )
-        subtitle.setObjectName("pageSub")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
+        self._open_dir_button = self._page.header.findChildren(QPushButton)[0]
+        self._open_dir_button.clicked.connect(self._open_library_dir)
+        outer.addWidget(self._page)
 
-        # ---- 过滤条 ----
-        filter_row = QHBoxLayout()
+        # 过滤 + 列表
         self._keyword = QLineEdit()
         self._keyword.setObjectName("searchBox")
         self._keyword.setPlaceholderText("搜索片名 / 演员 / 标签")
         self._keyword.textChanged.connect(lambda _text: self.reload())
-        filter_row.addWidget(self._keyword, 1)
-
         self._kind = make_kind_combo(include_all=True)
         self._kind.currentIndexChanged.connect(lambda _index: self.reload())
-        filter_row.addWidget(self._kind)
-
         self._collection = QComboBox()
         self._collection.currentIndexChanged.connect(lambda _index: self.reload())
-        filter_row.addWidget(self._collection)
-
         self._order = QComboBox()
         for key, label in (("added", "最近加入"), ("title", "按片名"), ("played", "最近播放")):
             self._order.addItem(label, key)
         self._order.currentIndexChanged.connect(lambda _index: self.reload())
-        filter_row.addWidget(self._order)
-        layout.addLayout(filter_row)
 
-        # ---- 列表 ----
+        self._count_chip = chip("0 项")
+        self._list_card = SectionCard("影片列表", actions=[self._count_chip])
+        self._list_card.add(row(self._keyword, self._kind, self._collection, self._order,
+                                stretch=self._keyword))
+
         self._table = configure_table(QTableWidget(), COLUMNS)
         self._table.doubleClicked.connect(lambda _index: self._play_action())
         attach_context_menu(self._table, self._row_menu)
-        layout.addWidget(self._table, 1)
+        self._empty = EmptyState(
+            "🎬", "影视库还是空的",
+            "用「导入本地影片」加入已有文件，或去「搜索下载」在线找片",
+        )
+        self._list_card.add(self._empty)
+        self._list_card.add(self._table)
+        self._table.setVisible(False)          # 无数据时显示空状态，有数据时切回表格
 
-        # ---- 操作栏 ----
-        actions = QHBoxLayout()
-        self._check_all = QPushButton("全选")
+        # 条目操作
+        self._check_all = ghost_button("全选")
         self._check_all.clicked.connect(lambda: select_all(self._table, True))
-        self._check_none = QPushButton("取消全选")
+        self._check_none = ghost_button("取消全选")
         self._check_none.clicked.connect(lambda: select_all(self._table, False))
-        self._play_button = QPushButton("▶ 播放")
-        self._play_button.setObjectName("primaryButton")
+        self._play_button = primary_button("▶ 播放")
         self._play_button.clicked.connect(self._play_action)
-        self._import_button = QPushButton("导入本地影片…")
+        self._import_button = ghost_button("导入本地影片…")
         self._import_button.clicked.connect(self._import_local)
-        self._collect_button = QPushButton("加入分类…")
+        self._collect_button = ghost_button("加入分类…")
         self._collect_button.clicked.connect(self._add_to_collection)
-        self._favorite_button = QPushButton("★ 收藏 / 取消")
+        self._favorite_button = ghost_button("★ 收藏 / 取消")
         self._favorite_button.clicked.connect(self._toggle_favorite)
-        self._category_button = QPushButton("设置分类名…")
+        self._category_button = ghost_button("设置分类名…")
         self._category_button.clicked.connect(self._set_category)
         self._delete_button = QPushButton("删除条目")
         self._delete_button.setObjectName("dangerButton")
         self._delete_button.clicked.connect(self._delete_videos)
-        for widget in (self._check_all, self._check_none, self._play_button, self._import_button,
-                       self._collect_button, self._favorite_button, self._category_button,
-                       self._delete_button):
-            actions.addWidget(widget)
-        actions.addStretch(1)
-        layout.addLayout(actions)
+        self._list_card.add(row(self._check_all, self._check_none, self._play_button,
+                                self._import_button, self._collect_button, self._favorite_button,
+                                self._category_button, self._delete_button, stretch_last=True))
 
-        # ---- 转换 ----
-        convert_row = QHBoxLayout()
-        convert_row.addWidget(QLabel("转换为"))
+        # 转换
         self._target = QComboBox()
         for target in VIDEO_TARGETS:
             label = f"提取 {target.upper()} 音频" if target in ("mp3", "m4a", "wav") else target.upper()
             self._target.addItem(label, target)
-        convert_row.addWidget(self._target)
-        self._convert_button = QPushButton("开始转换")
+        self._convert_button = primary_button("开始转换")
         self._convert_button.clicked.connect(self._start_convert)
-        convert_row.addWidget(self._convert_button)
-        self._cancel_button = QPushButton("取消转换")
-        self._cancel_button.setObjectName("dangerButton")
+        self._cancel_button = ghost_button("取消转换")
         self._cancel_button.clicked.connect(self._cancel_convert)
         self._cancel_button.setEnabled(False)
-        convert_row.addWidget(self._cancel_button)
-        convert_row.addStretch(1)
-        hint = QLabel("转换需要 ffmpeg（未安装时请设置 MODU_FFMPEG）")
-        hint.setObjectName("readerStatus")
-        convert_row.addWidget(hint)
-        layout.addLayout(convert_row)
+        self._list_card.add(row(QLabel("转换为"), self._target, self._convert_button,
+                                self._cancel_button,
+                                hint_label("转换需要 ffmpeg（未安装时请设置 MODU_FFMPEG）"),
+                                stretch_last=True))
 
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        layout.addWidget(self._progress)
-
-        self._status = QLabel("就绪。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
-
+        self._page.add(self._list_card)
         self.reload()
 
     # ------------------------------------------------------------------ 数据
@@ -201,7 +184,9 @@ class VideoLibraryPage(QWidget):
         for row, video in enumerate(videos):
             fill_video_row(self._table, row, video)
         select_all(self._table, False)
-        self._status.setText(f"共 {len(videos)} 个条目（本板块同时管理本地与在线条目）")
+        self._count_chip.setText(f"{len(videos)} 项")
+        self._empty.setVisible(not videos)
+        self._table.setVisible(bool(videos))
         self._update_buttons()
 
     def _reload_collections(self, keep=None) -> None:  # noqa: ANN001
@@ -367,27 +352,24 @@ class VideoLibraryPage(QWidget):
         self._convert_worker.finishedAll.connect(self._on_convert_finished)
         self._convert_worker.failed.connect(self._on_convert_failed)
         self._convert_worker.finished.connect(self._on_convert_thread_finished)
-        self._progress.setValue(0)
         self._cancel_button.setEnabled(True)
         self._convert_button.setEnabled(False)
-        self._status.setText(f"开始转换 {len(ids)} 个条目为 {str(target_format).upper()}…")
+        self._report(f"开始转换 {len(ids)} 个条目为 {str(target_format).upper()}…")
         self._convert_worker.start()
 
     def _cancel_convert(self) -> None:
         if self._convert_worker is not None:
             self._convert_worker.cancel()
-            self._status.setText("正在取消转换…")
+            self._report("正在取消转换…")
 
     def _on_convert_progress(self, done: int, total: int, message: str) -> None:
-        self._progress.setValue(int(done * 100 / total) if total else 0)
-        self._status.setText(message)
+        self._report(message, done, total)
 
     def _on_convert_finished(self, outputs: list, errors: list) -> None:
-        self._progress.setValue(100)
         message = f"转换完成：成功 {len(outputs)}，失败 {len(errors)}"
         if errors:
             message += "；" + "；".join(errors[:3])
-        self._status.setText(message)
+        self._idle(message)
         if outputs:
             self._toaster.success(f"已转换 {len(outputs)} 个文件")
         else:
@@ -395,13 +377,39 @@ class VideoLibraryPage(QWidget):
         self.reload()
 
     def _on_convert_failed(self, message: str) -> None:
-        self._status.setText(f"转换失败：{message}")
+        self._report(f"转换失败：{message}")
         self._toaster.error(f"转换失败：{message}")
 
     def _on_convert_thread_finished(self) -> None:
         self._convert_worker = None
         self._cancel_button.setEnabled(False)
         self._convert_button.setEnabled(True)
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            if done or total:
+                self._task.report(message, done, total)
+            else:
+                self._task.report(message)
+
+    def _idle(self, message: str = "") -> None:
+        if message:
+            self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_progress(self, value: int) -> None:
+        """兼容旧写法：进度条由统一任务条持有。"""
+        if self._task is not None:
+            self._task.report(self._task.text, int(value), 100)
 
     # ------------------------------------------------------------------ 其它
 

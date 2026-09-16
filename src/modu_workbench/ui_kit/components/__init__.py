@@ -19,12 +19,14 @@ from .layout import (
     row,
     spacer,
 )
+from .taskbar import TaskBar
 
 __all__ = [
     "ColumnPage",
     "EmptyState",
     "PageHeader",
     "SectionCard",
+    "TaskBar",
     "Toolbar",
     "chip",
     "divider",

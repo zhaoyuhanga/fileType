@@ -17,9 +17,19 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QStackedWidget,
 )
 
 from modu_workbench.core.video import VideoLibrary, VideoStorage
+from modu_workbench.ui_kit.components import (
+    ColumnPage,
+    EmptyState,
+    SectionCard,
+    chip,
+    ghost_button,
+    primary_button,
+    row,
+)
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import VIDEO_ID_ROLE, attach_context_menu, configure_table, select_all
@@ -46,79 +56,72 @@ class VideoHistoryPage(QWidget):
     libraryChanged = Signal()
 
     def __init__(self, library: VideoLibrary, storage: VideoStorage, toaster: Toaster,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, *, task_bar=None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
         self._toaster = toaster
+        self._task = task_bar
         self._entries: list = []
+        self._fallback_status = QLabel("就绪。")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 18, 24, 12)
-        layout.setSpacing(10)
-
-        title = QLabel("播放历史")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        subtitle = QLabel(
-            "记录每一次播放与下载（含集数、画质与实际使用的源）。"
-            "双击一条记录即可重新解析地址继续播放 —— 在线直链会过期，所以每次都会重新取。"
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._page = ColumnPage(
+            "播放历史",
+            "记录每一次播放与下载（含集数、画质与实际使用的源）。双击一条记录即可重新解析地址继续播放"
+            "—— 在线直链会过期，所以每次都会重新取。",
+            actions=[ghost_button("刷新")],
         )
-        subtitle.setObjectName("pageSub")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
+        refresh = self._page.header.findChildren(QPushButton)[0]
+        refresh.clicked.connect(self.reload)
+        outer.addWidget(self._page)
 
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel("筛选"))
+        self._count_chip = chip("0 条")
+        self._history_card = SectionCard("历史记录", actions=[self._count_chip])
         self._action = QComboBox()
         self._action.addItem("全部记录", "")
         self._action.addItem("仅播放", "play")
         self._action.addItem("仅下载", "download")
         self._action.currentIndexChanged.connect(lambda _index: self.reload())
-        filter_row.addWidget(self._action)
-        filter_row.addStretch(1)
-        self._count = QLabel("")
-        self._count.setObjectName("readerStatus")
-        filter_row.addWidget(self._count)
-        layout.addLayout(filter_row)
+        self._history_card.add(row(QLabel("筛选"), self._action, stretch_last=True))
 
         self._table = configure_table(QTableWidget(), COLUMNS)
         self._table.doubleClicked.connect(lambda _index: self._play_action())
         attach_context_menu(self._table, self._row_menu)
-        layout.addWidget(self._table, 1)
+        self._empty = EmptyState(
+            "🕘", "还没有播放记录",
+            "播放过的内容会自动记录在这里（在线直链会过期，双击会重新解析）",
+        )
+        self._history_card.add(self._empty)
+        self._history_card.add(self._table)
+        self._table.setVisible(False)          # 无数据时显示空状态，有数据时切回表格
 
-        actions = QHBoxLayout()
-        self._play_button = QPushButton("▶ 继续播放")
-        self._play_button.setObjectName("primaryButton")
+        self._play_button = primary_button("▶ 继续播放")
         self._play_button.clicked.connect(self._play_action)
-        actions.addWidget(self._play_button)
-
-        self._download_button = QPushButton("⬇ 下载这一集")
+        self._download_button = ghost_button("⬇ 下载这一集")
         self._download_button.clicked.connect(self._download_action)
-        actions.addWidget(self._download_button)
-
-        self._favorite_button = QPushButton("★ 收藏 / 取消")
+        self._favorite_button = ghost_button("★ 收藏 / 取消")
         self._favorite_button.clicked.connect(self._toggle_favorite)
-        actions.addWidget(self._favorite_button)
-
-        refresh = QPushButton("刷新")
-        refresh.clicked.connect(self.reload)
-        actions.addWidget(refresh)
-
         clear = QPushButton("清空历史")
         clear.setObjectName("dangerButton")
         clear.clicked.connect(self._clear)
-        actions.addWidget(clear)
-        actions.addStretch(1)
-        layout.addLayout(actions)
+        self._history_card.add(row(self._play_button, self._download_button,
+                                   self._favorite_button, clear, stretch_last=True))
+        self._page.add(self._history_card)
+        self._count = self._count_chip      # 兼容旧引用（筛选行右侧计数）
 
-        self._status = QLabel("就绪。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
+    # ------------------------------------------------------------------ 状态
 
-        self.reload()
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在板块任务条上。"""
+        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+
+    def _report(self, message: str) -> None:
+        self._fallback_status.setText(message)
+        if self._task is not None:
+            self._task.idle(message)
 
     # ------------------------------------------------------------------ 数据
 
@@ -144,7 +147,7 @@ class VideoHistoryPage(QWidget):
         select_all(self._table, False)
         self._count.setText(f"共 {len(self._entries)} 条")
         if not self._entries:
-            self._status.setText("还没有记录。去「搜索下载」找一部片子看看？")
+            self._report("还没有记录。去「搜索下载」找一部片子看看？")
         self._update_buttons()
 
     def _selected_entry(self):  # noqa: ANN201
@@ -176,7 +179,7 @@ class VideoHistoryPage(QWidget):
             return
         # 本地文件还在 → 直接播本地；否则按记录重新解析在线地址
         self.playRequested.emit([video], 0)
-        self._status.setText(f"继续播放：{video.display()}")
+        self._report(f"继续播放：{video.display()}")
 
     def _download_action(self, row: int | None = None) -> None:
         entry = self._entry_at(row)

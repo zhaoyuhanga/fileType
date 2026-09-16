@@ -5,6 +5,9 @@
 - 单个源可指定（便于「这个源有我要的片」时直取）；
 - 下载目录可选、可打开；
 - 全程有网即可看、即可下。
+
+界面（v1.0.0）：`ColumnPage` 页面骨架 + 两块 `SectionCard`（搜索 / 结果），
+结果为空时显示 `EmptyState` 而不是留一张空表格；状态与进度统一交给板块底部 `TaskBar`。
 """
 from __future__ import annotations
 
@@ -20,16 +23,28 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QProgressBar,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from modu_workbench.core.video import MEDIA_KIND_LABELS, RemoteVideo, VideoLibrary, VideoStorage
 from . import context as app_context
+from modu_workbench.ui_kit.components import (
+    ColumnPage,
+    EmptyState,
+    SectionCard,
+    TaskBar,
+    chip,
+    ghost_button,
+    hint_label,
+    primary_button,
+    row,
+    spacer,
+)
 from modu_workbench.ui_kit.toast import Toaster
+from modu_workbench.ui_kit.tokens import SPACE
 
 from .detail import VideoDetailDialog
 from .widgets import (
@@ -58,37 +73,33 @@ class VideoSearchPage(QWidget):
     libraryChanged = Signal()
 
     def __init__(self, library: VideoLibrary, storage: VideoStorage, toaster: Toaster,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, *, task_bar: TaskBar | None = None):
         super().__init__(parent)
         self._library = library
         self._storage = storage
         self._toaster = toaster
+        # 独立使用（未注入板块任务条）时自带一条，保证状态可见且 .text() 可读
+        self._task = task_bar or TaskBar()
+        if task_bar is None:
+            self._task.hide()
         self._results: list[RemoteVideo] = []
         self._worker: SearchWorker | None = None
         self._dialogs: list[VideoDetailDialog] = []
         self._page = 1
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 18, 24, 12)
-        layout.setSpacing(10)
-
-        title = QLabel("在线搜索（电影 / 电视剧 / 动漫）")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        subtitle = QLabel(
-            "多个免费数据源并行搜索，结果可去重合并；双击条目选集，可在线播放或下载到本地。"
-            "某个源失效时会自动换源重试（可在「源设置」里调整启用项与优先级）。"
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._page_widget = ColumnPage(
+            "在线搜索",
+            "多个免费数据源并行搜索，结果去重合并；双击条目选集，可在线播放或下载到本地。"
+            "某个源失效时会自动换源重试（在「源设置」里调整启用项与优先级）。",
         )
-        subtitle.setObjectName("pageSub")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
+        outer.addWidget(self._page_widget)
 
-        # ---- 搜索栏 ----
-        search_row = QHBoxLayout()
+        # ---- 搜索区 ----
         self._keyword = QLineEdit()
         self._keyword.setObjectName("searchBox")
-        self._keyword.setPlaceholderText("输入片名，例如：流浪地球、庆余年、进击的巨人；也可直接粘贴 m3u8/mp4 直链")
+        self._keyword.setPlaceholderText("输入片名，例如：流浪地球、庆余年；也可直接粘贴 m3u8/mp4 直链")
         self._keyword.returnPressed.connect(self._start_search)
 
         self._kind = make_kind_combo(include_all=True)
@@ -98,87 +109,106 @@ class VideoSearchPage(QWidget):
         self.reload_sources()
         self._source.setToolTip("选择搜索范围：全部源（自动/去重）或指定某个源")
 
-        self._search_button = QPushButton("搜索")
-        self._search_button.setObjectName("primaryButton")
+        self._search_button = primary_button("搜索")
         self._search_button.clicked.connect(self._start_search)
 
-        search_row.addWidget(self._keyword, 1)
-        search_row.addWidget(self._kind)
-        search_row.addWidget(self._source)
-        search_row.addWidget(self._search_button)
-        layout.addLayout(search_row)
+        search_card = SectionCard("搜索")
+        search_card.add(row(self._keyword, self._kind, self._source, self._search_button,
+                            stretch=self._keyword))
+        self._page_widget.add(search_card)
 
-        # ---- 结果表 ----
+        # ---- 结果区 ----
+        self._result_chip = chip("0 条结果")
+        self._result_card = SectionCard(
+            "搜索结果", actions=[self._result_chip],
+            hint="勾选后可批量播放/下载；右键单条操作",
+        )
+
         self._table = configure_table(QTableWidget(), COLUMNS)
         self._table.doubleClicked.connect(lambda _index: self._open_detail())
         attach_context_menu(self._table, self._row_menu)
-        layout.addWidget(self._table, 1)
 
-        # ---- 操作栏 ----
-        actions = QHBoxLayout()
-        self._check_all = QPushButton("全选")
+        self._empty = EmptyState(
+            "🔍", "还没有搜索结果",
+            "在上方输入片名后点「搜索」，或直接粘贴 m3u8 / mp4 直链",
+        )
+        self._result_card.add(self._empty)
+        self._result_card.add(self._table)
+        self._table.setVisible(False)          # 无数据时显示空状态，有数据时切回表格
+
+        # 批量操作
+        self._check_all = ghost_button("全选")
         self._check_all.clicked.connect(lambda: select_all(self._table, True))
-        self._check_none = QPushButton("取消全选")
+        self._check_none = ghost_button("取消全选")
         self._check_none.clicked.connect(lambda: select_all(self._table, False))
-        self._detail_button = QPushButton("选集 / 详情")
-        self._detail_button.setObjectName("primaryButton")
+        self._detail_button = primary_button("选集 / 详情")
         self._detail_button.setToolTip("查看分集与清晰度，并在线播放或下载")
         self._detail_button.clicked.connect(self._open_detail)
-        self._play_button = QPushButton("▶ 播放")
+        self._play_button = ghost_button("▶ 播放")
         self._play_button.setToolTip("直接播放首选剧集（自动换源重试）")
         self._play_button.clicked.connect(self._play_selected)
-        self._download_button = QPushButton("⬇ 下载整部")
+        self._download_button = ghost_button("⬇ 下载整部")
         self._download_button.setToolTip("下载勾选条目的全部剧集")
         self._download_button.clicked.connect(self._download_selected)
-        self._collect_button = QPushButton("加入分类")
+        self._collect_button = ghost_button("加入分类")
         self._collect_button.clicked.connect(self._add_to_collection)
+        self._actions_row = row(
+            self._check_all, self._check_none, self._detail_button,
+            self._play_button, self._download_button, self._collect_button,
+            spacer(), hint_label("双击选集 · 右键单条"),
+        )
+        self._result_card.add(self._actions_row)
 
-        for widget in (self._check_all, self._check_none, self._detail_button,
-                       self._play_button, self._download_button, self._collect_button):
-            actions.addWidget(widget)
-        actions.addStretch(1)
-        hint = QLabel("双击＝选集；右键＝单条操作")
-        hint.setObjectName("readerStatus")
-        actions.addWidget(hint)
-        layout.addLayout(actions)
-
-        # ---- 下载目录与选项 ----
-        dir_row = QHBoxLayout()
-        dir_row.addWidget(QLabel("下载到"))
+        # 下载目录与选项（次要信息收进卡片底部，避免底部堆叠多条控件行）
         self._dir = QLineEdit(video_download_dir_pref())
-        dir_row.addWidget(self._dir, 1)
-        pick = QPushButton("选择…")
+        pick = ghost_button("选择…")
         pick.clicked.connect(self._pick_dir)
-        dir_row.addWidget(pick)
-        open_dir = QPushButton("打开目录")
+        open_dir = ghost_button("打开目录")
         open_dir.clicked.connect(self._open_dir)
-        dir_row.addWidget(open_dir)
-        layout.addLayout(dir_row)
+        self._result_card.add(row(QLabel("下载到"), self._dir, pick, open_dir, stretch=self._dir))
 
-        options = QHBoxLayout()
         self._auto_switch = QCheckBox("下载/播放失败时自动换源重试（推荐）")
         self._auto_switch.setChecked(video_auto_switch_pref())
         self._auto_switch.toggled.connect(self._save_auto_switch)
-        options.addWidget(self._auto_switch)
-
         self._compliance = QCheckBox("仅用于个人学习与技术研究，遵守各站点条款与版权要求")
         self._compliance.setChecked(True)
         self._compliance.toggled.connect(self._update_buttons)
-        options.addWidget(self._compliance)
-        options.addStretch(1)
-        layout.addLayout(options)
+        self._result_card.add(row(self._auto_switch, self._compliance, stretch_last=True))
 
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        layout.addWidget(self._progress)
-
-        self._status = QLabel("就绪。输入片名后搜索；也可粘贴 m3u8 / mp4 直链直接播放或下载。")
-        self._status.setObjectName("readerStatus")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
-
+        self._actions_row.setVisible(False)      # 没有结果时不显示批量操作（避免空按钮排一行）
+        self._page_widget.add(self._result_card)
+        self._tail_stretch = False
+        self._set_tail_stretch(True)             # 空结果：卡片按内容高度，别撑成大空框
         self._update_buttons()
+
+    # ------------------------------------------------------------------ 状态
+
+    @property
+    def _status(self) -> QLabel:
+        """兼容旧引用：状态文字统一显示在任务条上。"""
+        return self._task._label          # noqa: SLF001
+
+    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
+        """把状态/进度交给板块底部的统一任务条（没有注入时静默忽略）。"""
+        if self._task is not None:
+            if total or done:
+                self._task.report(message, done, total)
+            else:
+                self._task.report(message)
+
+    def _idle(self, message: str = "") -> None:
+        if self._task is not None:
+            self._task.idle(message)
+
+    def _set_tail_stretch(self, enabled: bool) -> None:
+        """页面末尾弹簧：空结果时插入，避免结果卡片被拉伸成"大空框"。"""
+        layout = self._page_widget.body
+        if enabled and not self._tail_stretch:
+            layout.addStretch(1)
+            self._tail_stretch = True
+        elif not enabled and self._tail_stretch and layout.count():
+            layout.takeAt(layout.count() - 1)
+            self._tail_stretch = False
 
     # ------------------------------------------------------------------ 源
 
@@ -212,7 +242,7 @@ class VideoSearchPage(QWidget):
         kind = self._kind.currentData() or "all"
         source_key = self._source.currentData() or "all"
         self._page = 1
-        self._status.setText(f"搜索中：{keyword}（{MEDIA_KIND_LABELS.get(kind, '全部类型')}）…")
+        self._report(f"搜索中：{keyword}（{MEDIA_KIND_LABELS.get(kind, '全部类型')}）…")
         self._search_button.setEnabled(False)
         self._worker = SearchWorker(keyword, kind, source_key, 40, self._page, self,
                                     library=self._library)
@@ -224,17 +254,23 @@ class VideoSearchPage(QWidget):
     def _on_results(self, videos: list, errors: list) -> None:
         self._results = list(videos)
         self._table.setRowCount(len(self._results))
-        for row, remote in enumerate(self._results):
-            fill_remote_row(self._table, row, remote)
+        for index, remote in enumerate(self._results):
+            fill_remote_row(self._table, index, remote)
         select_all(self._table, False)
         message = f"共 {len(self._results)} 条结果"
         if errors:
             message += "；部分源失败：" + "；".join(errors[:3])
-        self._status.setText(message)
+        self._result_chip.setText(f"{len(self._results)} 条结果")
+        # 有结果给表格，无结果给空状态（不留空白表）
+        self._empty.setVisible(not self._results)
+        self._table.setVisible(bool(self._results))
+        self._actions_row.setVisible(bool(self._results))
+        self._set_tail_stretch(not self._results)
+        self._idle(message)
         self._update_buttons()
 
     def _on_search_failed(self, message: str) -> None:
-        self._status.setText(f"搜索失败：{message}")
+        self._idle(f"搜索失败：{message}")
         self._toaster.error(f"搜索失败：{message}")
 
     def _on_search_finished(self) -> None:
@@ -315,7 +351,7 @@ class VideoSearchPage(QWidget):
             video_settings().setValue("video/download_dir", dest)
         # 具体下载哪些集由板块统一补齐剧集信息后决定（detail or None）
         self.downloadRequested.emit(remote, None, None)
-        self._status.setText(f"已提交下载任务：{remote.title}")
+        self._idle(f"已提交下载任务：{remote.title}（进度见底部任务条）")
 
     # ------------------------------------------------------------------ 分类
 
@@ -345,7 +381,7 @@ class VideoSearchPage(QWidget):
         playlist = self._storage.get_playlist(playlist_id)
         name = playlist.name if playlist else "分类"
         self._toaster.success(f"已加入「{name}」：{added} 个条目")
-        self._status.setText(f"已加入分类「{name}」：{added} 个条目")
+        self._idle(f"已加入分类「{name}」：{added} 个条目")
         self.libraryChanged.emit()
 
     # ------------------------------------------------------------------ 杂项

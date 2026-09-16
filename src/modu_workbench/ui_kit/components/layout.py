@@ -47,16 +47,23 @@ __all__ = [
 # ---------------------------------------------------------------- 基础零件
 
 
-def row(*widgets: QWidget, spacing: int = ROW_GAP, stretch_last: bool = False) -> QWidget:
-    """水平排布一组控件（统一的 8px 间距）。"""
+def row(*widgets: QWidget, spacing: int = ROW_GAP, stretch: QWidget | None = None,
+        stretch_last: bool = False) -> QWidget:
+    """水平排布一组控件（统一 8px 间距）。
+
+    `stretch` 指定"吃掉多余宽度"的控件（例如搜索框），`stretch_last` 在末尾追加弹簧。
+    """
     holder = QWidget()
     holder.setObjectName("toolbarRow")
     layout = QHBoxLayout(holder)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(spacing)
     for widget in widgets:
-        if widget is not None:
-            layout.addWidget(widget)
+        if widget is None:
+            continue
+        layout.addWidget(widget)
+        if widget is stretch:
+            layout.setStretchFactor(widget, 1)
     if stretch_last:
         layout.addStretch(1)
     return holder
@@ -197,9 +204,10 @@ class EmptyState(QFrame):
                  parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("emptyState")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # 竖向用 Preferred：空状态只占它需要的高度，不把整块内容区撑成一个大空框
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACE["xl"], SPACE["xxl"], SPACE["xl"], SPACE["xxl"])
+        layout.setContentsMargins(SPACE["xl"], SPACE["xl"], SPACE["xl"], SPACE["xl"])
         layout.setSpacing(SPACE["sm"])
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -217,7 +225,8 @@ class EmptyState(QFrame):
             hint_widget = QLabel(hint)
             hint_widget.setObjectName("emptyHint")
             hint_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint_widget.setWordWrap(True)
+            # 不换行：QLabel 自动换行时 sizeHint 会低估高度，导致最后一行被裁掉
+            hint_widget.setWordWrap(False)
             layout.addWidget(hint_widget)
 
         if action is not None:
