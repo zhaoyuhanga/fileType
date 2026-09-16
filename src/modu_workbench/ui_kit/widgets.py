@@ -1,12 +1,21 @@
-"""可复用基础控件（统一设计规范组件库）。
+"""可复用基础控件（组件库的历史入口，新代码优先用 `ui_kit/components`）。
 
-M0 提供：导航按钮、板块卡片（BoardCard）、状态徽章（chip）。
-后续里程碑将在此补充 Button 变体 / Toast / ConfirmDialog / Progress 等。
+这里保留：导航按钮（顶栏用）、板块卡片（首页用）、幽灵占位卡。
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .tokens import CARD_PADDING, ROW_GAP, SPACE
 
 
 def make_nav_button(text: str, active: bool = False) -> QPushButton:
@@ -33,40 +42,52 @@ def make_chip(text: str, ready: bool = True) -> QLabel:
 
 
 class BoardCard(QFrame):
-    """首页板块卡片：展示图标/标题/简介，点击后携带板块 key 发出信号。"""
+    """首页板块卡片：图标 + 标题 + 一句话定位 + 简介 + 状态徽章。
+
+    统一样式（圆角/留白/悬停）来自 `ui_kit/theme.py`，尺寸满足"最小 240×150、
+    等高对齐"的排版要求，避免首页出现大片空白或卡片高低不齐。
+    """
 
     clicked = Signal(str)
 
-    def __init__(self, key: str, icon: str, title: str, tagline: str, description: str, parent: QWidget | None = None):
+    def __init__(self, key: str, icon: str, title: str, tagline: str, description: str,
+                 phase: str = "", parent: QWidget | None = None):
         super().__init__(parent)
         self._key = key
         self.setObjectName("boardCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumSize(320, 176)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setMinimumSize(240, 150)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(6)
+        layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
+        layout.setSpacing(SPACE["sm"])
 
-        top = QLabel(icon)
-        top.setObjectName("cardIcon")
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(ROW_GAP)
+        icon_label = QLabel(icon)
+        icon_label.setObjectName("cardIcon")
+        head.addWidget(icon_label)
+        head.addStretch(1)
+        if phase:
+            head.addWidget(make_chip(phase, ready=phase in ("可用", "定版")))
+        layout.addLayout(head)
 
         title_label = QLabel(title)
         title_label.setObjectName("cardTitle")
+        layout.addWidget(title_label)
 
         tagline_label = QLabel(tagline)
         tagline_label.setObjectName("cardTagline")
         tagline_label.setWordWrap(True)
+        layout.addWidget(tagline_label)
 
         desc_label = QLabel(description)
         desc_label.setObjectName("cardDesc")
         desc_label.setWordWrap(True)
-
-        layout.addWidget(top)
-        layout.addWidget(title_label)
-        layout.addWidget(tagline_label)
         layout.addWidget(desc_label)
+
         layout.addStretch(1)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -76,13 +97,14 @@ class BoardCard(QFrame):
 
 
 def make_ghost_card(text: str) -> QFrame:
-    """“更多板块筹备中”占位卡。"""
+    """「更多板块筹备中」占位卡（与板块卡等高，避免首页右侧出现空白洞）。"""
     frame = QFrame()
     frame.setObjectName("boardCardGhost")
-    frame.setMinimumSize(320, 176)
+    frame.setMinimumSize(240, 150)
+    frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     layout = QVBoxLayout(frame)
-    layout.setContentsMargins(20, 18, 20, 18)
-    layout.setSpacing(6)
+    layout.setContentsMargins(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING)
+    layout.setSpacing(SPACE["sm"])
     title = QLabel("＋ 更多板块筹备中")
     title.setObjectName("ghostTitle")
     desc = QLabel(text)

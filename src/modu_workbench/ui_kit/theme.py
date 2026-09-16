@@ -1,55 +1,27 @@
-"""全局设计令牌与 QSS 主题（墨软·工作台统一设计规范）。
+"""全局 QSS 主题：由 `ui_kit/tokens.py` 的设计令牌生成。
 
 设计语言：浅色专业风格 ——
 - 页面底色柔和浅灰蓝，卡片/面板为白；
 - 主色靛蓝、语义色（成功/危险/警示/信息）高对比；
+- **无直角**：所有容器/控件圆角 ≥ 10px（令牌 `radius_sm`）；
+- **统一尺度**：控件高度、表格行高、页面留白全部取自令牌，避免各页各写一套；
 - Fusion 风格保证 QSS 跨控件一致（表格头/下拉/滚动条等全覆盖）。
 阅读主题（米白/纯白/薄荷/灰白/夜间）作用于阅读正文（HTML 内联），不在此主题内。
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class ThemeTokens:
-    # 外壳与表面
-    shell_bg: str = "#eef1f7"
-    surface: str = "#ffffff"
-    surface_2: str = "#f6f8fc"
-    surface_hover: str = "#f3f6fd"
-    border: str = "#e3e8f2"
-    border_strong: str = "#cdd6e8"
-    # 文字
-    text_hi: str = "#141b2e"
-    text: str = "#2e3a52"
-    text_dim: str = "#66728a"
-    text_faint: str = "#97a2b8"
-    # 强调与语义
-    accent: str = "#4f5bd5"
-    accent_hover: str = "#3e48bf"
-    accent_strong: str = "#3a44ad"
-    accent_soft: str = "#eef0fe"
-    success: str = "#159a55"
-    success_bg: str = "#e2f5ea"
-    danger: str = "#dd4b4f"
-    danger_bg: str = "#fdeaea"
-    warn: str = "#b9790a"
-    warn_bg: str = "#fbf1dd"
-    info: str = "#2f6fdb"
-    info_bg: str = "#e8f0fd"
-    # 圆角 / 间距
-    radius_sm: int = 6
-    radius: int = 9
-    radius_lg: int = 14
-    space_xs: int = 4
-    space_sm: int = 8
-    space_md: int = 14
-    space_lg: int = 22
-
-
-# 全局默认令牌（apply_theme 与其它模块共用）
-TOKENS = ThemeTokens()
+from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
+    CARD_PADDING,
+    DARK,
+    FONT,
+    LIGHT,
+    PAGE_MARGIN,
+    SECTION_GAP,
+    SPACE,
+    TOKENS,
+    ThemeTokens,
+    ensure_token,
+)
 
 
 def app_qss(t: ThemeTokens) -> str:
@@ -489,6 +461,97 @@ QListWidget::item:selected {{
     color: {t.accent_strong};
 }}
 QListWidget::item:hover {{ background: {t.surface_hover}; }}
+
+/* ---------- 页面骨架（ui_kit/components/layout.py） ---------- */
+QWidget#pageRoot {{ background: {t.shell_bg}; }}
+QWidget#pageHeader {{ background: transparent; }}
+QLabel#pageTitle {{
+    color: {t.text_hi};
+    font-size: {FONT['title']}px;
+    font-weight: 800;
+}}
+QLabel#pageSubtitle {{
+    color: {t.text_dim};
+    font-size: {FONT['small']}px;
+}}
+QLabel#pageHint {{
+    color: {t.text_dim};
+    font-size: {FONT['small']}px;
+}}
+QFrame#pageDivider {{
+    background: {t.border};
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}}
+
+/* ---------- 区块卡片 ---------- */
+QFrame#sectionCard {{
+    background: {t.surface};
+    border: 1px solid {t.border};
+    border-radius: {t.radius_lg}px;
+}}
+QFrame#sectionCard[flat="true"] {{
+    background: {t.surface_2};
+    border-color: transparent;
+}}
+QLabel#sectionCardTitle {{
+    color: {t.text_hi};
+    font-size: {FONT['body_lg']}px;
+    font-weight: 700;
+}}
+QLabel#sectionCardHint {{
+    color: {t.text_dim};
+    font-size: {FONT['small']}px;
+}}
+
+/* ---------- 空状态（列表页必须有，禁止大片空白） ---------- */
+QFrame#emptyState {{
+    background: {t.surface};
+    border: 1px dashed {t.border_strong};
+    border-radius: {t.radius_lg}px;
+}}
+QLabel#emptyIcon {{ font-size: 34px; }}
+QLabel#emptyTitle {{
+    color: {t.text_hi};
+    font-size: {FONT['body_lg']}px;
+    font-weight: 700;
+}}
+QLabel#emptyHint {{
+    color: {t.text_dim};
+    font-size: {FONT['small']}px;
+}}
+
+/* ---------- 工具条 / 徽章 / 次要按钮 ---------- */
+QWidget#toolbarRow {{ background: transparent; }}
+QLabel#statChip {{
+    background: {t.accent_soft};
+    color: {t.accent_strong};
+    border-radius: {t.radius_pill}px;
+    padding: 3px 10px;
+    font-size: {FONT['small']}px;
+    font-weight: 600;
+}}
+QLabel#chipReady, QLabel#chipPlanned {{ border-radius: {t.radius_pill}px; }}
+QPushButton#ghostButton {{
+    background: transparent;
+    border: 1px solid {t.border_strong};
+    border-radius: {t.radius_sm}px;
+    padding: 6px 12px;
+}}
+QPushButton#ghostButton:hover:!disabled {{
+    background: {t.surface_hover};
+    border-color: {t.accent};
+    color: {t.accent_hover};
+}}
+QPushButton#linkButton {{
+    background: transparent;
+    border: none;
+    color: {t.accent};
+    padding: 2px 4px;
+    font-weight: 600;
+}}
+QPushButton#linkButton:hover:!disabled {{ color: {t.accent_hover}; }}
 """
 
 
