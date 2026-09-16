@@ -25,17 +25,23 @@ def app_data_dir() -> Path:
     return path
 
 
+def app_db_path() -> str:
+    """**唯一**应用数据库（v1.0.0 起板块共用一个库，表名带板块前缀）。"""
+    return str(app_data_dir() / "modu.db")
+
+
 # ---------- 墨软书库 ----------
 
 def library_db_path() -> str:
-    return str(app_data_dir() / "library.db")
+    """兼容旧引用：书库不再是独立库，统一指向 modu.db。"""
+    return app_db_path()
 
 
 # ---------- 墨软乐库 ----------
 
 def music_db_path() -> str:
-    """墨软乐库曲库数据库路径。"""
-    return str(app_data_dir() / "music.db")
+    """兼容旧引用：乐库不再是独立库，统一指向 modu.db。"""
+    return app_db_path()
 
 
 def music_dir() -> Path:
@@ -56,8 +62,8 @@ def music_download_dir() -> Path:
 # ---------- 墨软影视 ----------
 
 def video_db_path() -> str:
-    """墨软影视影视库数据库路径。"""
-    return str(app_data_dir() / "video.db")
+    """兼容旧引用：影视不再是独立库，统一指向 modu.db。"""
+    return app_db_path()
 
 
 def video_dir() -> Path:
@@ -78,8 +84,8 @@ def video_download_dir() -> Path:
 # ---------- 墨软图库 ----------
 
 def gallery_db_path() -> str:
-    """墨软图库数据库路径。"""
-    return str(app_data_dir() / "gallery.db")
+    """兼容旧引用：图库不再是独立库，统一指向 modu.db。"""
+    return app_db_path()
 
 
 def gallery_dir() -> Path:
@@ -107,8 +113,8 @@ def gallery_import_dir() -> Path:
 # ---------- 大模型 ----------
 
 def llm_db_path() -> str:
-    """大模型配置数据库路径（所有板块共用同一份配置）。"""
-    return str(app_data_dir() / "llm.db")
+    """兼容旧引用：大模型配置也落在同一个库（llm_* 表）。"""
+    return app_db_path()
 
 
 # ---------- 旧数据 ----------

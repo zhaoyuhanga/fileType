@@ -8,12 +8,12 @@
 from __future__ import annotations
 
 import os
-import sqlite3
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+
+from modu_workbench.core.platform.db import SqliteStore
 
 
 @dataclass
@@ -41,50 +41,15 @@ class HistoryEntry:
     action: str  # 'open' / 'chapter' / 'progress'
 
 
-class Storage:
+class Storage(SqliteStore):
     """线程安全的 SQLite 封装。"""
 
-    SCHEMA = """
-    CREATE TABLE IF NOT EXISTS books (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        path            TEXT    UNIQUE NOT NULL,
-        title           TEXT    NOT NULL,
-        author          TEXT    NOT NULL DEFAULT '',
-        format          TEXT    NOT NULL DEFAULT '',
-        added_at        INTEGER NOT NULL,
-        last_opened_at  INTEGER,
-        last_chapter_index     INTEGER NOT NULL DEFAULT 0,
-        last_offset_in_chapter INTEGER NOT NULL DEFAULT 0,
-        last_progress          REAL    NOT NULL DEFAULT 0.0
-    );
 
-    CREATE TABLE IF NOT EXISTS history (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        book_id         INTEGER NOT NULL,
-        chapter_index   INTEGER NOT NULL,
-        chapter_title   TEXT    NOT NULL DEFAULT '',
-        opened_at       INTEGER NOT NULL,
-        action          TEXT    NOT NULL DEFAULT 'open',
-        FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_history_book ON history(book_id, opened_at DESC);
-    """
+    settings_namespace = "book"
 
     def __init__(self, db_path: str):
-        self.db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON;")
-        with self._lock:
-            self._conn.executescript(self.SCHEMA)
-            self._conn.commit()
+        super().__init__(db_path)
 
-    def close(self):
-        with self._lock:
-            self._conn.close()
 
     # ---------- books ----------
 
@@ -92,17 +57,17 @@ class Storage:
         """注册一本书;若已存在则更新元数据,返回 book_id。"""
         now = int(time.time())
         with self._lock:
-            cur = self._conn.execute("SELECT id FROM books WHERE path = ?", (path,))
+            cur = self._conn.execute("SELECT id FROM book_books WHERE path = ?", (path,))
             row = cur.fetchone()
             if row:
                 book_id = row["id"]
                 self._conn.execute(
-                    "UPDATE books SET title=?, author=?, format=? WHERE id=?",
+                    "UPDATE book_books SET title=?, author=?, format=? WHERE id=?",
                     (title, author, fmt, book_id),
                 )
             else:
                 cur = self._conn.execute(
-                    "INSERT INTO books (path, title, author, format, added_at) VALUES (?,?,?,?,?)",
+                    "INSERT INTO book_books (path, title, author, format, added_at) VALUES (?,?,?,?,?)",
                     (path, title, author, fmt, now),
                 )
                 book_id = cur.lastrowid
@@ -115,7 +80,7 @@ class Storage:
                 """SELECT id, path, title, author, format, added_at,
                           last_opened_at, last_chapter_index,
                           last_offset_in_chapter, last_progress
-                   FROM books
+                   FROM book_books
                    ORDER BY COALESCE(last_opened_at, added_at) DESC"""
             ).fetchall()
         return [self._row_to_book(r) for r in rows]
@@ -123,20 +88,20 @@ class Storage:
     def get_book(self, book_id: int) -> Optional[BookRecord]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM books WHERE id = ?", (book_id,)
+                "SELECT * FROM book_books WHERE id = ?", (book_id,)
             ).fetchone()
         return self._row_to_book(row) if row else None
 
     def get_book_by_path(self, path: str) -> Optional[BookRecord]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM books WHERE path = ?", (path,)
+                "SELECT * FROM book_books WHERE path = ?", (path,)
             ).fetchone()
         return self._row_to_book(row) if row else None
 
     def delete_book(self, book_id: int) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
+            self._conn.execute("DELETE FROM book_books WHERE id = ?", (book_id,))
             self._conn.commit()
 
     # ---------- reading position ----------
@@ -146,7 +111,7 @@ class Storage:
         now = int(time.time())
         with self._lock:
             self._conn.execute(
-                """UPDATE books
+                """UPDATE book_books
                    SET last_opened_at = ?,
                        last_chapter_index = ?,
                        last_offset_in_chapter = ?,
@@ -163,7 +128,7 @@ class Storage:
         now = int(time.time())
         with self._lock:
             cur = self._conn.execute(
-                """INSERT INTO history (book_id, chapter_index, chapter_title, opened_at, action)
+                """INSERT INTO book_history (book_id, chapter_index, chapter_title, opened_at, action)
                    VALUES (?,?,?,?,?)""",
                 (book_id, chapter_index, chapter_title, now, action),
             )
@@ -176,7 +141,7 @@ class Storage:
                 rows = self._conn.execute(
                     """SELECT h.id, h.book_id, b.title AS book_title,
                               h.chapter_index, h.chapter_title, h.opened_at, h.action
-                       FROM history h JOIN books b ON b.id = h.book_id
+                       FROM book_history h JOIN book_books b ON b.id = h.book_id
                        ORDER BY h.opened_at DESC LIMIT ?""",
                     (limit,),
                 ).fetchall()
@@ -184,7 +149,7 @@ class Storage:
                 rows = self._conn.execute(
                     """SELECT h.id, h.book_id, b.title AS book_title,
                               h.chapter_index, h.chapter_title, h.opened_at, h.action
-                       FROM history h JOIN books b ON b.id = h.book_id
+                       FROM book_history h JOIN book_books b ON b.id = h.book_id
                        WHERE h.book_id = ?
                        ORDER BY h.opened_at DESC LIMIT ?""",
                     (book_id, limit),
@@ -201,9 +166,9 @@ class Storage:
     def clear_history(self, book_id: Optional[int] = None) -> None:
         with self._lock:
             if book_id is None:
-                self._conn.execute("DELETE FROM history")
+                self._conn.execute("DELETE FROM book_history")
             else:
-                self._conn.execute("DELETE FROM history WHERE book_id = ?", (book_id,))
+                self._conn.execute("DELETE FROM book_history WHERE book_id = ?", (book_id,))
             self._conn.commit()
 
     # ---------- helpers ----------

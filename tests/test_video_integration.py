@@ -65,9 +65,9 @@ def test_app_entry_imports_cleanly() -> None:
 
 
 def test_video_storage_paths_configured() -> None:
-    from modu_workbench.core.platform.paths import video_db_path, video_dir, video_download_dir
+    from modu_workbench.core.platform.paths import app_db_path, video_dir, video_download_dir
 
-    assert video_db_path().endswith("video.db")
+    assert app_db_path().endswith("modu.db")          # v1.0.0：单库
     assert Path(video_dir()).is_dir()
     assert video_download_dir() is not None
 

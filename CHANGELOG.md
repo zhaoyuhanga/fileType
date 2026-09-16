@@ -37,6 +37,23 @@
   并明确 `core.convert` 为共享转换引擎（可被调用，但不得反向依赖板块）。
 - 全量 pytest + 应用依赖自检（15 项）通过。
 
+### P3 单库化与结构迁移
+
+- **单一数据库 `modu.db`**：原先 5 个独立库（library/music/video/gallery/llm）合并为一个库，
+  业务表统一加板块前缀（`book_` / `music_` / `video_` / `gallery_` / `llm_`），
+  索引名同样带前缀（SQLite 索引名全局唯一，重名会静默失败）。
+- **统一设置表** `app_settings(key, value, updated_at)`：板块通过 `settings_namespace` 自动加前缀
+  （如 `music/sources/enabled`），各板块不再各建一张 settings 表。
+- **版本化迁移**：新增 `core/platform/db.py`（连接/WAL/外键/事务/设置）与
+  `core/platform/migrations/`（`schema_migrations` 记录版本，开库自动升级，幂等）。
+- **旧数据自动导入**：`core/platform/legacy.py` 首次启动把 5 个旧分库按列名对齐导入，
+  旧库缺列自动补默认值，板块设置并入 `app_settings`，旧文件改名 `*.imported.bak`（不删除）。
+- 各板块存储类改为继承 `SqliteStore`（自身 DDL / 连接 / 设置实现全部删除）；
+  启动入口 `app/bootstrap.py` 统一做「建库 + 迁移 + 导入」。
+- 文档：新增 `docs/DATABASE.md`（表结构、字段、迁移与备份约定）。
+- 测试：新增 `tests/test_db_schema.py`（结构快照 / 前缀规则 / 索引唯一 / 外键指向 / 迁移幂等 /
+  设置命名空间）与 `tests/test_db_migration.py`（用真实旧结构样本演练迁移）；全量 pytest 通过。
+
 ## v0.3.1 — 墨软影视修复版
 
 ### 修复：影视板块「播放和下载都失败」

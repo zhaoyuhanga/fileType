@@ -1,7 +1,7 @@
 """墨软影视的应用级单例（板块内共享；其他板块不直接引用）。"""
 from __future__ import annotations
 
-from modu_workbench.core.platform.paths import video_db_path, video_dir
+from modu_workbench.core.platform.paths import app_db_path, video_dir
 from modu_workbench.core.video import VideoLibrary, VideoRegistry, VideoStorage
 from modu_workbench.core.video.sources import registry as video_source_registry
 
@@ -13,7 +13,7 @@ _video_registry: VideoRegistry | None = None
 def video_storage() -> VideoStorage:
     global _video_storage
     if _video_storage is None:
-        _video_storage = VideoStorage(video_db_path())
+        _video_storage = VideoStorage(app_db_path())
     return _video_storage
 
 

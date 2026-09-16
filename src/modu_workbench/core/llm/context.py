@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from modu_workbench.core.llm import LlmStorage, ModelRouter
-from modu_workbench.core.platform.paths import llm_db_path
+from modu_workbench.core.platform.paths import app_db_path
 
 _llm_storage: LlmStorage | None = None
 _llm_router: ModelRouter | None = None
@@ -15,7 +15,7 @@ _llm_router: ModelRouter | None = None
 def llm_storage() -> LlmStorage:
     global _llm_storage
     if _llm_storage is None:
-        _llm_storage = LlmStorage(llm_db_path())
+        _llm_storage = LlmStorage(app_db_path())
     return _llm_storage
 
 

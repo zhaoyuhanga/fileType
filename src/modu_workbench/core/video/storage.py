@@ -10,114 +10,27 @@
 """
 from __future__ import annotations
 
-import os
 import sqlite3
-import threading
 import time
 from typing import Iterable, List, Optional
+
+from modu_workbench.core.platform.db import SqliteStore
 
 from .models import FAVORITE_NAME, Episode, HistoryEntry, Playlist, PlayRecord, RemoteVideo, Video
 
 __all__ = ["FAVORITE_NAME", "VideoStorage", "remote_to_video"]
 
 
-class VideoStorage:
+class VideoStorage(SqliteStore):
     """线程安全的影视库存储（与 MusicStorage 同一套锁/事务惯例）。"""
 
-    SCHEMA = """
-    CREATE TABLE IF NOT EXISTS videos (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        file_path      TEXT    NOT NULL DEFAULT '',
-        title          TEXT    NOT NULL DEFAULT '',
-        kind           TEXT    NOT NULL DEFAULT 'other',
-        series_key     TEXT    NOT NULL DEFAULT '',
-        season         INTEGER NOT NULL DEFAULT 0,
-        episode_index  INTEGER NOT NULL DEFAULT 0,
-        episode_label  TEXT    NOT NULL DEFAULT '',
-        year           TEXT    NOT NULL DEFAULT '',
-        region         TEXT    NOT NULL DEFAULT '',
-        category       TEXT    NOT NULL DEFAULT '',
-        tags           TEXT    NOT NULL DEFAULT '',
-        actors         TEXT    NOT NULL DEFAULT '',
-        director       TEXT    NOT NULL DEFAULT '',
-        description    TEXT    NOT NULL DEFAULT '',
-        cover_path     TEXT    NOT NULL DEFAULT '',
-        duration_ms    INTEGER NOT NULL DEFAULT 0,
-        size_bytes     INTEGER NOT NULL DEFAULT 0,
-        format         TEXT    NOT NULL DEFAULT '',
-        source         TEXT    NOT NULL DEFAULT '',
-        remote_id      TEXT    NOT NULL DEFAULT '',
-        quality        TEXT    NOT NULL DEFAULT '',
-        favorited      INTEGER NOT NULL DEFAULT 0,
-        play_count     INTEGER NOT NULL DEFAULT 0,
-        added_at       INTEGER NOT NULL DEFAULT 0,
-        last_played_at INTEGER
-    );
 
-    CREATE TABLE IF NOT EXISTS playlists (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        name       TEXT    NOT NULL UNIQUE,
-        kind       TEXT    NOT NULL DEFAULT 'category',
-        created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS playlist_items (
-        playlist_id INTEGER NOT NULL,
-        video_id    INTEGER NOT NULL,
-        position    INTEGER NOT NULL DEFAULT 0,
-        added_at    INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (playlist_id, video_id),
-        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
-        FOREIGN KEY (video_id)    REFERENCES videos(id)    ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS history (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        video_id      INTEGER NOT NULL DEFAULT 0,
-        action        TEXT    NOT NULL DEFAULT 'play',
-        played_at     INTEGER NOT NULL,
-        episode_label TEXT    NOT NULL DEFAULT '',
-        quality       TEXT    NOT NULL DEFAULT '',
-        source        TEXT    NOT NULL DEFAULT '',
-        title_snapshot TEXT   NOT NULL DEFAULT ''
-    );
-
-    CREATE TABLE IF NOT EXISTS play_records (
-        video_id      INTEGER NOT NULL,
-        episode_label TEXT    NOT NULL DEFAULT '',
-        quality       TEXT    NOT NULL DEFAULT '',
-        url           TEXT    NOT NULL DEFAULT '',
-        source        TEXT    NOT NULL DEFAULT '',
-        updated_at    INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (video_id, episode_label)
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT NOT NULL DEFAULT ''
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_video_series ON videos(series_key);
-    CREATE INDEX IF NOT EXISTS idx_video_kind ON videos(kind);
-    CREATE INDEX IF NOT EXISTS idx_video_time ON videos(added_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_history_time ON history(played_at DESC);
-    """
+    settings_namespace = "video"
 
     def __init__(self, db_path: str):
-        self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON;")
-        with self._lock:
-            self._conn.executescript(self.SCHEMA)
-            self._ensure_favorite()
-            self._conn.commit()
+        super().__init__(db_path)
+        self._ensure_favorite()
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
     # ---------- 视频条目 ----------
 
@@ -134,23 +47,23 @@ class VideoStorage:
             row = None
             if video.file_path:
                 row = self._conn.execute(
-                    "SELECT id FROM videos WHERE file_path = ?", (video.file_path,)
+                    "SELECT id FROM video_videos WHERE file_path = ?", (video.file_path,)
                 ).fetchone()
             if row is None and video.remote_id:
                 row = self._conn.execute(
-                    "SELECT id FROM videos WHERE source = ? AND remote_id = ? AND episode_index = ?",
+                    "SELECT id FROM video_videos WHERE source = ? AND remote_id = ? AND episode_index = ?",
                     (video.source, video.remote_id, int(video.episode_index)),
                 ).fetchone()
             if row is None and not video.file_path and not video.remote_id:
                 row = self._conn.execute(
-                    "SELECT id FROM videos WHERE title = ? AND episode_index = ? AND remote_id = ''",
+                    "SELECT id FROM video_videos WHERE title = ? AND episode_index = ? AND remote_id = ''",
                     (video.title, int(video.episode_index)),
                 ).fetchone()
 
             if row:
                 video_id = int(row["id"])
                 self._conn.execute(
-                    """UPDATE videos SET file_path=?, title=?, kind=?, series_key=?, season=?,
+                    """UPDATE video_videos SET file_path=?, title=?, kind=?, series_key=?, season=?,
                               episode_index=?, episode_label=?, year=?, region=?, category=?,
                               tags=?, actors=?, director=?, description=?, cover_path=?,
                               duration_ms=?, size_bytes=?, format=?, source=?, remote_id=?, quality=?
@@ -165,7 +78,7 @@ class VideoStorage:
                 )
             else:
                 cur = self._conn.execute(
-                    """INSERT INTO videos (file_path, title, kind, series_key, season, episode_index,
+                    """INSERT INTO video_videos (file_path, title, kind, series_key, season, episode_index,
                               episode_label, year, region, category, tags, actors, director, description,
                               cover_path, duration_ms, size_bytes, format, source, remote_id, quality,
                               favorited, play_count, added_at)
@@ -185,18 +98,18 @@ class VideoStorage:
 
     def get_video(self, video_id: int) -> Optional[Video]:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+            row = self._conn.execute("SELECT * FROM video_videos WHERE id = ?", (video_id,)).fetchone()
         return self._row_to_video(row) if row else None
 
     def get_video_by_path(self, path: str) -> Optional[Video]:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM videos WHERE file_path = ?", (path,)).fetchone()
+            row = self._conn.execute("SELECT * FROM video_videos WHERE file_path = ?", (path,)).fetchone()
         return self._row_to_video(row) if row else None
 
     def find_remote_video(self, source: str, remote_id: str, episode_index: int = 0) -> Optional[Video]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM videos WHERE source = ? AND remote_id = ? AND episode_index = ?",
+                "SELECT * FROM video_videos WHERE source = ? AND remote_id = ? AND episode_index = ?",
                 (source, remote_id, int(episode_index)),
             ).fetchone()
         return self._row_to_video(row) if row else None
@@ -211,7 +124,7 @@ class VideoStorage:
         order: str = "added",
         limit: int = 5000,
     ) -> List[Video]:
-        sql = "SELECT * FROM videos WHERE 1=1"
+        sql = "SELECT * FROM video_videos WHERE 1=1"
         args: list = []
         if keyword:
             sql += " AND (title LIKE ? OR actors LIKE ? OR director LIKE ? OR tags LIKE ?)"
@@ -245,7 +158,7 @@ class VideoStorage:
             return []
         with self._lock:
             rows = self._conn.execute(
-                """SELECT * FROM videos WHERE series_key = ?
+                """SELECT * FROM video_videos WHERE series_key = ?
                    ORDER BY season ASC, episode_index ASC, id ASC""",
                 (series_key,),
             ).fetchall()
@@ -254,7 +167,7 @@ class VideoStorage:
     def list_kinds(self) -> List[tuple[str, int]]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT kind, COUNT(*) AS n FROM videos
+                """SELECT kind, COUNT(*) AS n FROM video_videos
                    WHERE kind <> '' GROUP BY kind ORDER BY n DESC"""
             ).fetchall()
         return [(r["kind"], int(r["n"])) for r in rows]
@@ -262,7 +175,7 @@ class VideoStorage:
     def list_categories(self) -> List[tuple[str, int]]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT category, COUNT(*) AS n FROM videos
+                """SELECT category, COUNT(*) AS n FROM video_videos
                    WHERE category <> '' GROUP BY category ORDER BY n DESC, category COLLATE NOCASE"""
             ).fetchall()
         return [(r["category"], int(r["n"])) for r in rows]
@@ -273,7 +186,7 @@ class VideoStorage:
             return 0
         with self._lock:
             self._conn.executemany(
-                "UPDATE videos SET category = ? WHERE id = ?", [(category, i) for i in ids]
+                "UPDATE video_videos SET category = ? WHERE id = ?", [(category, i) for i in ids]
             )
             self._conn.commit()
         return len(ids)
@@ -284,13 +197,13 @@ class VideoStorage:
             return 0
         with self._lock:
             self._conn.executemany(
-                "UPDATE videos SET favorited = ? WHERE id = ?", [(int(favorited), i) for i in ids]
+                "UPDATE video_videos SET favorited = ? WHERE id = ?", [(int(favorited), i) for i in ids]
             )
             if favorited:
                 fav_id = self._ensure_favorite()
                 now = int(time.time())
                 self._conn.executemany(
-                    """INSERT OR IGNORE INTO playlist_items (playlist_id, video_id, position, added_at)
+                    """INSERT OR IGNORE INTO video_playlist_items (playlist_id, video_id, position, added_at)
                        VALUES (?,?,?,?)""",
                     [(fav_id, i, 0, now) for i in ids],
                 )
@@ -307,7 +220,7 @@ class VideoStorage:
             fav_id = self._ensure_favorite()
             with self._lock:
                 self._conn.execute(
-                    "DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+                    "DELETE FROM video_playlist_items WHERE playlist_id = ? AND video_id = ?",
                     (fav_id, video_id),
                 )
                 self._conn.commit()
@@ -318,8 +231,8 @@ class VideoStorage:
         if not ids:
             return 0
         with self._lock:
-            self._conn.executemany("DELETE FROM videos WHERE id = ?", [(i,) for i in ids])
-            self._conn.executemany("DELETE FROM play_records WHERE video_id = ?", [(i,) for i in ids])
+            self._conn.executemany("DELETE FROM video_videos WHERE id = ?", [(i,) for i in ids])
+            self._conn.executemany("DELETE FROM video_play_records WHERE video_id = ?", [(i,) for i in ids])
             self._conn.commit()
         return len(ids)
 
@@ -327,7 +240,7 @@ class VideoStorage:
         now = int(time.time())
         with self._lock:
             self._conn.execute(
-                "UPDATE videos SET play_count = play_count + 1, last_played_at = ? WHERE id = ?",
+                "UPDATE video_videos SET play_count = play_count + 1, last_played_at = ? WHERE id = ?",
                 (now, video_id),
             )
             self._conn.commit()
@@ -347,12 +260,12 @@ class VideoStorage:
     def _ensure_favorite(self) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT id FROM playlists WHERE kind = 'favorite' ORDER BY id LIMIT 1"
+                "SELECT id FROM video_playlists WHERE kind = 'favorite' ORDER BY id LIMIT 1"
             ).fetchone()
             if row:
                 return int(row["id"])
             cur = self._conn.execute(
-                "INSERT INTO playlists (name, kind, created_at) VALUES (?,?,?)",
+                "INSERT INTO video_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (FAVORITE_NAME, "favorite", int(time.time())),
             )
             self._conn.commit()
@@ -367,11 +280,11 @@ class VideoStorage:
         if not name:
             raise ValueError("名称不能为空")
         with self._lock:
-            row = self._conn.execute("SELECT id FROM playlists WHERE name = ?", (name,)).fetchone()
+            row = self._conn.execute("SELECT id FROM video_playlists WHERE name = ?", (name,)).fetchone()
             if row:
                 return int(row["id"])
             cur = self._conn.execute(
-                "INSERT INTO playlists (name, kind, created_at) VALUES (?,?,?)",
+                "INSERT INTO video_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (name, kind, int(time.time())),
             )
             self._conn.commit()
@@ -381,8 +294,8 @@ class VideoStorage:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT p.id, p.name, p.kind, p.created_at,
-                          (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS n
-                   FROM playlists p ORDER BY p.kind = 'favorite' DESC, p.created_at ASC"""
+                          (SELECT COUNT(*) FROM video_playlist_items i WHERE i.playlist_id = p.id) AS n
+                   FROM video_playlists p ORDER BY p.kind = 'favorite' DESC, p.created_at ASC"""
             ).fetchall()
         items = [
             Playlist(id=int(r["id"]), name=r["name"], kind=r["kind"],
@@ -397,8 +310,8 @@ class VideoStorage:
         with self._lock:
             row = self._conn.execute(
                 """SELECT p.id, p.name, p.kind, p.created_at,
-                          (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS n
-                   FROM playlists p WHERE p.id = ?""",
+                          (SELECT COUNT(*) FROM video_playlist_items i WHERE i.playlist_id = p.id) AS n
+                   FROM video_playlists p WHERE p.id = ?""",
                 (playlist_id,),
             ).fetchone()
         if not row:
@@ -415,7 +328,7 @@ class VideoStorage:
             return False
         with self._lock:
             try:
-                self._conn.execute("UPDATE playlists SET name = ? WHERE id = ?", (new_name, playlist_id))
+                self._conn.execute("UPDATE video_playlists SET name = ? WHERE id = ?", (new_name, playlist_id))
                 self._conn.commit()
             except sqlite3.IntegrityError:
                 return False
@@ -426,7 +339,7 @@ class VideoStorage:
         if playlist is None or playlist.is_favorite:
             return False
         with self._lock:
-            self._conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+            self._conn.execute("DELETE FROM video_playlists WHERE id = ?", (playlist_id,))
             self._conn.commit()
         return True
 
@@ -437,14 +350,14 @@ class VideoStorage:
         now = int(time.time())
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(MAX(position), 0) AS pos FROM playlist_items WHERE playlist_id = ?",
+                "SELECT COALESCE(MAX(position), 0) AS pos FROM video_playlist_items WHERE playlist_id = ?",
                 (playlist_id,),
             ).fetchone()
             position = int(row["pos"]) if row else 0
             added = 0
             for video_id in ids:
                 cur = self._conn.execute(
-                    """INSERT OR IGNORE INTO playlist_items (playlist_id, video_id, position, added_at)
+                    """INSERT OR IGNORE INTO video_playlist_items (playlist_id, video_id, position, added_at)
                        VALUES (?,?,?,?)""",
                     (playlist_id, video_id, position, now),
                 )
@@ -461,12 +374,12 @@ class VideoStorage:
         playlist = self.get_playlist(playlist_id)
         with self._lock:
             self._conn.executemany(
-                "DELETE FROM playlist_items WHERE playlist_id = ? AND video_id = ?",
+                "DELETE FROM video_playlist_items WHERE playlist_id = ? AND video_id = ?",
                 [(playlist_id, i) for i in ids],
             )
             if playlist is not None and playlist.is_favorite:
                 self._conn.executemany(
-                    "UPDATE videos SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
+                    "UPDATE video_videos SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
                 )
             self._conn.commit()
         return len(ids)
@@ -474,8 +387,8 @@ class VideoStorage:
     def list_playlist_videos(self, playlist_id: int) -> List[Video]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT v.* FROM playlist_items i
-                   JOIN videos v ON v.id = i.video_id
+                """SELECT v.* FROM video_playlist_items i
+                   JOIN video_videos v ON v.id = i.video_id
                    WHERE i.playlist_id = ?
                    ORDER BY i.position ASC, i.added_at ASC""",
                 (playlist_id,),
@@ -501,7 +414,7 @@ class VideoStorage:
                 source = source or video.source
         with self._lock:
             cur = self._conn.execute(
-                """INSERT INTO history (video_id, action, played_at, episode_label, quality, source, title_snapshot)
+                """INSERT INTO video_history (video_id, action, played_at, episode_label, quality, source, title_snapshot)
                    VALUES (?,?,?,?,?,?,?)""",
                 (int(video_id), action, int(time.time()), episode_label,
                  quality, source, title),
@@ -512,7 +425,7 @@ class VideoStorage:
     def list_history(self, limit: int = 300, action: str = "") -> List[HistoryEntry]:
         sql = """SELECT h.id, h.video_id, h.action, h.played_at, h.episode_label, h.quality,
                         h.source, h.title_snapshot, v.title AS vtitle, v.file_path, v.kind
-                 FROM history h LEFT JOIN videos v ON v.id = h.video_id"""
+                 FROM video_history h LEFT JOIN video_videos v ON v.id = h.video_id"""
         args: list = []
         if action:
             sql += " WHERE h.action = ?"
@@ -535,7 +448,7 @@ class VideoStorage:
 
     def clear_history(self) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM history")
+            self._conn.execute("DELETE FROM video_history")
             self._conn.commit()
 
     # ---------- 在线播放记录 ----------
@@ -546,7 +459,7 @@ class VideoStorage:
             return
         with self._lock:
             self._conn.execute(
-                """INSERT INTO play_records (video_id, episode_label, quality, url, source, updated_at)
+                """INSERT INTO video_play_records (video_id, episode_label, quality, url, source, updated_at)
                    VALUES (?,?,?,?,?,?)
                    ON CONFLICT(video_id, episode_label) DO UPDATE SET
                        quality = excluded.quality, url = excluded.url,
@@ -558,7 +471,7 @@ class VideoStorage:
     def get_play_record(self, video_id: int, episode_label: str = "") -> Optional[PlayRecord]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM play_records WHERE video_id = ? AND episode_label = ?",
+                "SELECT * FROM video_play_records WHERE video_id = ? AND episode_label = ?",
                 (int(video_id), episode_label or ""),
             ).fetchone()
         if not row:
@@ -569,21 +482,6 @@ class VideoStorage:
             updated_at=int(row["updated_at"]),
         )
 
-    # ---------- 配置 ----------
-
-    def get_setting(self, key: str, default: str = "") -> str:
-        with self._lock:
-            row = self._conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else default
-
-    def set_setting(self, key: str, value: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?,?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, str(value)),
-            )
-            self._conn.commit()
 
     # ---------- helpers ----------
 

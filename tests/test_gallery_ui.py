@@ -281,7 +281,7 @@ def test_recent_import_node_and_reset(page: GalleryBoardPage, qapp: QApplication
     assert "最近导入" in recent.text(0)
 
     old = int(time.time()) - 30 * 86400
-    page._library.storage._conn.execute("UPDATE images SET added_at = ?", (old,))
+    page._library.storage._conn.execute("UPDATE gallery_images SET added_at = ?", (old,))
     page._library.storage._conn.commit()
 
     page._on_side_clicked(recent, 0)

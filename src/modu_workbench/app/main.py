@@ -6,6 +6,14 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 统一数据入口：建库/迁移/导入旧版分库（失败不阻断启动）
+    try:
+        from .bootstrap import bootstrap_data
+
+        bootstrap_data()
+    except Exception as error:  # noqa: BLE001
+        print(f"[data] 初始化失败：{error}", file=sys.stderr)
+
     # 依赖自检（打包验证用）：MODU_CHECK_DEPS=输出路径 时只做检查并退出，不启动界面。
     check_out = os.environ.get("MODU_CHECK_DEPS")
     if check_out:

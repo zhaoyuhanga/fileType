@@ -26,8 +26,10 @@ from .http import (
     origin_of,
 )
 from .media import bundled_dir, find_ffmpeg, find_ffprobe, probe_duration_ms
+from .db import SqliteStore, app_db, run_migrations
 from .paths import (
     APP_DIR_NAME,
+    app_db_path,
     LEGACY_APP_DIR_NAME,
     app_data_dir,
     ensure_legacy_migration,
@@ -47,12 +49,15 @@ from .paths import (
 
 __all__ = [
     "APP_DIR_NAME",
+    "SqliteStore",
     "DEFAULT_UA",
     "LEGACY_APP_DIR_NAME",
     "SUPPORTED_IMPORT_EXTENSIONS",
     "HttpClient",
     "SourceError",
     "app_data_dir",
+    "app_db",
+    "app_db_path",
     "bundled_dir",
     "describe_network_error",
     "ensure_legacy_migration",
@@ -72,6 +77,7 @@ __all__ = [
     "music_download_dir",
     "origin_of",
     "probe_duration_ms",
+    "run_migrations",
     "scan_paths",
     "video_db_path",
     "video_dir",

@@ -8,7 +8,7 @@ from modu_workbench.core.music import (
     MusicStorage,
     registry as music_source_registry,
 )
-from modu_workbench.core.platform.paths import music_db_path, music_dir
+from modu_workbench.core.platform.paths import app_db_path, music_dir
 
 _music_storage: MusicStorage | None = None
 _music_library: MusicLibrary | None = None
@@ -19,7 +19,7 @@ _music_registry: MusicRegistry | None = None
 def music_storage() -> MusicStorage:
     global _music_storage
     if _music_storage is None:
-        _music_storage = MusicStorage(music_db_path())
+        _music_storage = MusicStorage(app_db_path())
     return _music_storage
 
 

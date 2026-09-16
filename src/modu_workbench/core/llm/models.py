@@ -17,6 +17,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
+from modu_workbench.core.platform.db import SqliteStore
+
 # --------------------------------------------------------------------------- 类型
 
 KIND_TEXT = "text"
@@ -175,7 +177,7 @@ class LlmRequestError(LlmError):
 # --------------------------------------------------------------------------- 存储
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS model_profiles (
+CREATE TABLE IF NOT EXISTS llm_profiles (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     kind        TEXT NOT NULL DEFAULT 'text',
     name        TEXT NOT NULL DEFAULT '',
@@ -208,27 +210,18 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 """
 
 
-class LlmStorage:
-    """大模型配置的持久化（独立小库，所有板块共用）。"""
+class LlmStorage(SqliteStore):
+    """大模型配置的持久化（落在共享单库的 llm_* 表；设置走 app_settings 的 llm/ 命名空间）。"""
+
+    settings_namespace = "llm"
 
     def __init__(self, db_path: str | Path):
-        self.db_path = str(db_path)
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
-
-    def close(self) -> None:
-        try:
-            self._conn.close()
-        except Exception:  # noqa: BLE001
-            pass
+        super().__init__(db_path)
 
     # ---------- 配置增删改查 ----------
 
     def list_profiles(self, kind: str = "", *, enabled_only: bool = False) -> list[ModelProfile]:
-        sql = "SELECT * FROM model_profiles"
+        sql = "SELECT * FROM llm_profiles"
         clauses: list[str] = []
         params: list = []
         if kind:
@@ -244,14 +237,14 @@ class LlmStorage:
 
     def get_profile(self, profile_id: int) -> Optional[ModelProfile]:
         row = self._conn.execute(
-            "SELECT * FROM model_profiles WHERE id = ?", (int(profile_id),)).fetchone()
+            "SELECT * FROM llm_profiles WHERE id = ?", (int(profile_id),)).fetchone()
         return ModelProfile.from_row(row) if row else None
 
     def save_profile(self, profile: ModelProfile) -> int:
         """新增或更新；新增时自动排到该类型末尾。"""
         if profile.id:
             self._conn.execute(
-                """UPDATE model_profiles SET kind=?, name=?, provider=?, base_url=?, api_key=?,
+                """UPDATE llm_profiles SET kind=?, name=?, provider=?, base_url=?, api_key=?,
                        model=?, vision_model=?, temperature=?, max_tokens=?, timeout=?,
                        enabled=?, note=?, updated_at=?
                    WHERE id=?""",
@@ -263,10 +256,10 @@ class LlmStorage:
             self._conn.commit()
             return int(profile.id)
         priority = self._conn.execute(
-            "SELECT COALESCE(MAX(priority), -1) + 1 FROM model_profiles WHERE kind = ?",
+            "SELECT COALESCE(MAX(priority), -1) + 1 FROM llm_profiles WHERE kind = ?",
             (profile.kind,)).fetchone()[0]
         cursor = self._conn.execute(
-            """INSERT INTO model_profiles
+            """INSERT INTO llm_profiles
                    (kind, name, provider, base_url, api_key, model, vision_model,
                     temperature, max_tokens, timeout, priority, enabled, note, updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -279,11 +272,11 @@ class LlmStorage:
         return int(cursor.lastrowid)
 
     def delete_profile(self, profile_id: int) -> None:
-        self._conn.execute("DELETE FROM model_profiles WHERE id = ?", (int(profile_id),))
+        self._conn.execute("DELETE FROM llm_profiles WHERE id = ?", (int(profile_id),))
         self._conn.commit()
 
     def set_enabled(self, profile_id: int, enabled: bool) -> None:
-        self._conn.execute("UPDATE model_profiles SET enabled = ? WHERE id = ?",
+        self._conn.execute("UPDATE llm_profiles SET enabled = ? WHERE id = ?",
                            (1 if enabled else 0, int(profile_id)))
         self._conn.commit()
 
@@ -302,33 +295,24 @@ class LlmStorage:
             return False
         # 优先级字段可能重复（手工改过库），这里按顺序重排一遍再交换，保证结果稳定
         for position, item in enumerate(siblings):
-            self._conn.execute("UPDATE model_profiles SET priority = ? WHERE id = ?",
+            self._conn.execute("UPDATE llm_profiles SET priority = ? WHERE id = ?",
                                (position, item.id))
         first, second = siblings[index], siblings[target]
-        self._conn.execute("UPDATE model_profiles SET priority = ? WHERE id = ?",
+        self._conn.execute("UPDATE llm_profiles SET priority = ? WHERE id = ?",
                            (target, first.id))
-        self._conn.execute("UPDATE model_profiles SET priority = ? WHERE id = ?",
+        self._conn.execute("UPDATE llm_profiles SET priority = ? WHERE id = ?",
                            (index, second.id))
         self._conn.commit()
         return True
 
     def next_priority(self, kind: str) -> int:
         return int(self._conn.execute(
-            "SELECT COALESCE(MAX(priority), -1) + 1 FROM model_profiles WHERE kind = ?",
+            "SELECT COALESCE(MAX(priority), -1) + 1 FROM llm_profiles WHERE kind = ?",
             (kind,)).fetchone()[0])
 
     # ---------- 通用设置 ----------
-
-    def get_setting(self, key: str, default: str = "") -> str:
-        row = self._conn.execute("SELECT value FROM llm_settings WHERE key = ?", (key,)).fetchone()
-        return str(row["value"]) if row else default
-
-    def set_setting(self, key: str, value: str) -> None:
-        self._conn.execute(
-            "INSERT INTO llm_settings (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, str(value)))
-        self._conn.commit()
+    # get_setting / set_setting 继承自 SqliteStore：落到共享 app_settings，
+    # 键自动加 llm/ 命名空间（原 llm_settings 表在 v1.0.0 统一时并入）。
 
     # ---------- 调用记录（用于界面展示"最近降级到谁"）----------
 

@@ -9,111 +9,27 @@
 """
 from __future__ import annotations
 
-import os
 import sqlite3
-import threading
 import time
 from typing import Iterable, List, Optional
+
+from modu_workbench.core.platform.db import SqliteStore
 
 from .models import HistoryEntry, Playlist, RemoteTrack, Track
 
 FAVORITE_NAME = "我的收藏"
 
 
-class MusicStorage:
+class MusicStorage(SqliteStore):
     """线程安全的音乐库存储。"""
 
-    SCHEMA = """
-    CREATE TABLE IF NOT EXISTS tracks (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        path           TEXT    UNIQUE NOT NULL,
-        title          TEXT    NOT NULL DEFAULT '',
-        artist         TEXT    NOT NULL DEFAULT '',
-        album          TEXT    NOT NULL DEFAULT '',
-        duration_ms    INTEGER NOT NULL DEFAULT 0,
-        size_bytes     INTEGER NOT NULL DEFAULT 0,
-        format         TEXT    NOT NULL DEFAULT '',
-        source         TEXT    NOT NULL DEFAULT '',
-        remote_id      TEXT    NOT NULL DEFAULT '',
-        cover_path     TEXT    NOT NULL DEFAULT '',
-        category       TEXT    NOT NULL DEFAULT '',
-        favorited      INTEGER NOT NULL DEFAULT 0,
-        play_count     INTEGER NOT NULL DEFAULT 0,
-        added_at       INTEGER NOT NULL DEFAULT 0,
-        last_played_at INTEGER
-    );
 
-    CREATE TABLE IF NOT EXISTS playlists (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        name       TEXT    NOT NULL UNIQUE,
-        kind       TEXT    NOT NULL DEFAULT 'playlist',
-        created_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS playlist_items (
-        playlist_id INTEGER NOT NULL,
-        track_id    INTEGER NOT NULL,
-        position    INTEGER NOT NULL DEFAULT 0,
-        added_at    INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (playlist_id, track_id),
-        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
-        FOREIGN KEY (track_id)    REFERENCES tracks(id)    ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS history (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        track_id  INTEGER NOT NULL,
-        action    TEXT    NOT NULL DEFAULT 'play',
-        played_at INTEGER NOT NULL,
-        FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
-    );
-
-    -- 歌单中的「待下载」在线曲目（搜索结果可直接加入歌单，稍后再下载）
-    CREATE TABLE IF NOT EXISTS playlist_remotes (
-        playlist_id INTEGER NOT NULL,
-        remote_key  TEXT    NOT NULL,
-        source      TEXT    NOT NULL DEFAULT '',
-        remote_id   TEXT    NOT NULL DEFAULT '',
-        title       TEXT    NOT NULL DEFAULT '',
-        artist      TEXT    NOT NULL DEFAULT '',
-        album       TEXT    NOT NULL DEFAULT '',
-        duration_ms INTEGER NOT NULL DEFAULT 0,
-        url         TEXT    NOT NULL DEFAULT '',
-        cover_url   TEXT    NOT NULL DEFAULT '',
-        category    TEXT    NOT NULL DEFAULT '',
-        added_at    INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (playlist_id, remote_key),
-        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT NOT NULL DEFAULT ''
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_history_time ON history(played_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_track_artist ON tracks(artist);
-    """
+    settings_namespace = "music"
 
     def __init__(self, db_path: str):
-        self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON;")
-        with self._lock:
-            self._conn.executescript(self.SCHEMA)
-            # 迁移：旧版本可能缺少 cover_path 列
-            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(tracks)")}
-            if "cover_path" not in columns:
-                self._conn.execute("ALTER TABLE tracks ADD COLUMN cover_path TEXT NOT NULL DEFAULT ''")
-            self._conn.commit()
-            self._ensure_favorite()
+        super().__init__(db_path)
+        self._ensure_favorite()
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
     # ---------- 曲目 ----------
 
@@ -121,11 +37,11 @@ class MusicStorage:
         """按 path 落库（存在则更新元数据），返回 track_id。"""
         now = int(time.time())
         with self._lock:
-            row = self._conn.execute("SELECT id FROM tracks WHERE path = ?", (track.path,)).fetchone()
+            row = self._conn.execute("SELECT id FROM music_tracks WHERE path = ?", (track.path,)).fetchone()
             if row:
                 track_id = int(row["id"])
                 self._conn.execute(
-                    """UPDATE tracks SET title=?, artist=?, album=?, duration_ms=?, size_bytes=?,
+                    """UPDATE music_tracks SET title=?, artist=?, album=?, duration_ms=?, size_bytes=?,
                               format=?, source=?, remote_id=?, cover_path=?, category=?
                        WHERE id=?""",
                     (
@@ -136,7 +52,7 @@ class MusicStorage:
                 )
             else:
                 cur = self._conn.execute(
-                    """INSERT INTO tracks (path, title, artist, album, duration_ms, size_bytes,
+                    """INSERT INTO music_tracks (path, title, artist, album, duration_ms, size_bytes,
                               format, source, remote_id, cover_path, category, favorited, play_count, added_at)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
@@ -151,12 +67,12 @@ class MusicStorage:
 
     def get_track(self, track_id: int) -> Optional[Track]:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
+            row = self._conn.execute("SELECT * FROM music_tracks WHERE id = ?", (track_id,)).fetchone()
         return self._row_to_track(row) if row else None
 
     def get_track_by_path(self, path: str) -> Optional[Track]:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM tracks WHERE path = ?", (path,)).fetchone()
+            row = self._conn.execute("SELECT * FROM music_tracks WHERE path = ?", (path,)).fetchone()
         return self._row_to_track(row) if row else None
 
     def list_tracks(
@@ -168,7 +84,7 @@ class MusicStorage:
         order: str = "added",
         limit: int = 5000,
     ) -> List[Track]:
-        sql = "SELECT * FROM tracks WHERE 1=1"
+        sql = "SELECT * FROM music_tracks WHERE 1=1"
         args: list = []
         if keyword:
             sql += " AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)"
@@ -197,7 +113,7 @@ class MusicStorage:
     def list_artists(self) -> List[tuple[str, int]]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT artist, COUNT(*) AS n FROM tracks
+                """SELECT artist, COUNT(*) AS n FROM music_tracks
                    WHERE artist <> '' GROUP BY artist ORDER BY n DESC, artist COLLATE NOCASE"""
             ).fetchall()
         return [(r["artist"], r["n"]) for r in rows]
@@ -205,7 +121,7 @@ class MusicStorage:
     def list_categories(self) -> List[tuple[str, int]]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT category, COUNT(*) AS n FROM tracks
+                """SELECT category, COUNT(*) AS n FROM music_tracks
                    WHERE category <> '' GROUP BY category ORDER BY n DESC, category COLLATE NOCASE"""
             ).fetchall()
         return [(r["category"], r["n"]) for r in rows]
@@ -216,7 +132,7 @@ class MusicStorage:
             return 0
         with self._lock:
             self._conn.executemany(
-                "UPDATE tracks SET category = ? WHERE id = ?", [(category, i) for i in ids]
+                "UPDATE music_tracks SET category = ? WHERE id = ?", [(category, i) for i in ids]
             )
             self._conn.commit()
         return len(ids)
@@ -227,13 +143,13 @@ class MusicStorage:
             return 0
         with self._lock:
             self._conn.executemany(
-                "UPDATE tracks SET favorited = ? WHERE id = ?", [(int(favorited), i) for i in ids]
+                "UPDATE music_tracks SET favorited = ? WHERE id = ?", [(int(favorited), i) for i in ids]
             )
             if favorited:
                 fav_id = self._ensure_favorite()
                 now = int(time.time())
                 self._conn.executemany(
-                    """INSERT OR IGNORE INTO playlist_items (playlist_id, track_id, position, added_at)
+                    """INSERT OR IGNORE INTO music_playlist_items (playlist_id, track_id, position, added_at)
                        VALUES (?,?,?,?)""",
                     [(fav_id, i, 0, now) for i in ids],
                 )
@@ -250,7 +166,7 @@ class MusicStorage:
             fav_id = self._ensure_favorite()
             with self._lock:
                 self._conn.execute(
-                    "DELETE FROM playlist_items WHERE playlist_id = ? AND track_id = ?",
+                    "DELETE FROM music_playlist_items WHERE playlist_id = ? AND track_id = ?",
                     (fav_id, track_id),
                 )
                 self._conn.commit()
@@ -261,7 +177,7 @@ class MusicStorage:
         if not ids:
             return 0
         with self._lock:
-            self._conn.executemany("DELETE FROM tracks WHERE id = ?", [(i,) for i in ids])
+            self._conn.executemany("DELETE FROM music_tracks WHERE id = ?", [(i,) for i in ids])
             self._conn.commit()
         return len(ids)
 
@@ -269,7 +185,7 @@ class MusicStorage:
         now = int(time.time())
         with self._lock:
             self._conn.execute(
-                "UPDATE tracks SET play_count = play_count + 1, last_played_at = ? WHERE id = ?",
+                "UPDATE music_tracks SET play_count = play_count + 1, last_played_at = ? WHERE id = ?",
                 (now, track_id),
             )
             self._conn.commit()
@@ -279,12 +195,12 @@ class MusicStorage:
     def _ensure_favorite(self) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT id FROM playlists WHERE kind = 'favorite' ORDER BY id LIMIT 1"
+                "SELECT id FROM music_playlists WHERE kind = 'favorite' ORDER BY id LIMIT 1"
             ).fetchone()
             if row:
                 return int(row["id"])
             cur = self._conn.execute(
-                "INSERT INTO playlists (name, kind, created_at) VALUES (?,?,?)",
+                "INSERT INTO music_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (FAVORITE_NAME, "favorite", int(time.time())),
             )
             self._conn.commit()
@@ -299,11 +215,11 @@ class MusicStorage:
         if not name:
             raise ValueError("歌单名不能为空")
         with self._lock:
-            row = self._conn.execute("SELECT id FROM playlists WHERE name = ?", (name,)).fetchone()
+            row = self._conn.execute("SELECT id FROM music_playlists WHERE name = ?", (name,)).fetchone()
             if row:
                 return int(row["id"])
             cur = self._conn.execute(
-                "INSERT INTO playlists (name, kind, created_at) VALUES (?,?,?)",
+                "INSERT INTO music_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (name, kind, int(time.time())),
             )
             self._conn.commit()
@@ -313,9 +229,9 @@ class MusicStorage:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT p.id, p.name, p.kind, p.created_at,
-                          (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS n,
-                          (SELECT COUNT(*) FROM playlist_remotes r WHERE r.playlist_id = p.id) AS m
-                   FROM playlists p ORDER BY p.kind = 'favorite' DESC, p.created_at ASC"""
+                          (SELECT COUNT(*) FROM music_playlist_items i WHERE i.playlist_id = p.id) AS n,
+                          (SELECT COUNT(*) FROM music_playlist_remotes r WHERE r.playlist_id = p.id) AS m
+                   FROM music_playlists p ORDER BY p.kind = 'favorite' DESC, p.created_at ASC"""
             ).fetchall()
         items = [
             Playlist(id=int(r["id"]), name=r["name"], kind=r["kind"],
@@ -330,9 +246,9 @@ class MusicStorage:
         with self._lock:
             row = self._conn.execute(
                 """SELECT p.id, p.name, p.kind, p.created_at,
-                          (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS n,
-                          (SELECT COUNT(*) FROM playlist_remotes r WHERE r.playlist_id = p.id) AS m
-                   FROM playlists p WHERE p.id = ?""",
+                          (SELECT COUNT(*) FROM music_playlist_items i WHERE i.playlist_id = p.id) AS n,
+                          (SELECT COUNT(*) FROM music_playlist_remotes r WHERE r.playlist_id = p.id) AS m
+                   FROM music_playlists p WHERE p.id = ?""",
                 (playlist_id,),
             ).fetchone()
         if not row:
@@ -350,7 +266,7 @@ class MusicStorage:
             return False
         with self._lock:
             try:
-                self._conn.execute("UPDATE playlists SET name = ? WHERE id = ?", (new_name, playlist_id))
+                self._conn.execute("UPDATE music_playlists SET name = ? WHERE id = ?", (new_name, playlist_id))
                 self._conn.commit()
             except sqlite3.IntegrityError:
                 return False
@@ -361,7 +277,7 @@ class MusicStorage:
         if playlist is None or playlist.is_favorite:
             return False
         with self._lock:
-            self._conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+            self._conn.execute("DELETE FROM music_playlists WHERE id = ?", (playlist_id,))
             self._conn.commit()
         return True
 
@@ -372,14 +288,14 @@ class MusicStorage:
         now = int(time.time())
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(MAX(position), 0) AS pos FROM playlist_items WHERE playlist_id = ?",
+                "SELECT COALESCE(MAX(position), 0) AS pos FROM music_playlist_items WHERE playlist_id = ?",
                 (playlist_id,),
             ).fetchone()
             position = int(row["pos"]) if row else 0
             added = 0
             for track_id in ids:
                 cur = self._conn.execute(
-                    """INSERT OR IGNORE INTO playlist_items (playlist_id, track_id, position, added_at)
+                    """INSERT OR IGNORE INTO music_playlist_items (playlist_id, track_id, position, added_at)
                        VALUES (?,?,?,?)""",
                     (playlist_id, track_id, position, now),
                 )
@@ -396,13 +312,13 @@ class MusicStorage:
         playlist = self.get_playlist(playlist_id)
         with self._lock:
             self._conn.executemany(
-                "DELETE FROM playlist_items WHERE playlist_id = ? AND track_id = ?",
+                "DELETE FROM music_playlist_items WHERE playlist_id = ? AND track_id = ?",
                 [(playlist_id, i) for i in ids],
             )
             if playlist is not None and playlist.is_favorite:
                 # 从「我的收藏」移除即取消收藏标记
                 self._conn.executemany(
-                    "UPDATE tracks SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
+                    "UPDATE music_tracks SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
                 )
             self._conn.commit()
         return len(ids)
@@ -410,8 +326,8 @@ class MusicStorage:
     def list_playlist_tracks(self, playlist_id: int) -> List[Track]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT t.* FROM playlist_items i
-                   JOIN tracks t ON t.id = i.track_id
+                """SELECT t.* FROM music_playlist_items i
+                   JOIN music_tracks t ON t.id = i.track_id
                    WHERE i.playlist_id = ?
                    ORDER BY i.position ASC, i.added_at ASC""",
                 (playlist_id,),
@@ -430,7 +346,7 @@ class MusicStorage:
             for remote in remotes:
                 key = f"{remote.source}:{remote.remote_id or remote.title}"
                 cur = self._conn.execute(
-                    """INSERT OR IGNORE INTO playlist_remotes
+                    """INSERT OR IGNORE INTO music_playlist_remotes
                        (playlist_id, remote_key, source, remote_id, title, artist, album,
                         duration_ms, url, cover_url, category, added_at)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -445,7 +361,7 @@ class MusicStorage:
     def list_playlist_remotes(self, playlist_id: int) -> List[RemoteTrack]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT * FROM playlist_remotes WHERE playlist_id = ?
+                """SELECT * FROM music_playlist_remotes WHERE playlist_id = ?
                    ORDER BY added_at ASC, remote_key ASC""",
                 (playlist_id,),
             ).fetchall()
@@ -465,7 +381,7 @@ class MusicStorage:
             return 0
         with self._lock:
             self._conn.executemany(
-                "DELETE FROM playlist_remotes WHERE playlist_id = ? AND remote_key = ?",
+                "DELETE FROM music_playlist_remotes WHERE playlist_id = ? AND remote_key = ?",
                 [(playlist_id, key) for key in keys],
             )
             self._conn.commit()
@@ -476,7 +392,7 @@ class MusicStorage:
     def add_history(self, track_id: int, action: str = "play") -> int:
         with self._lock:
             cur = self._conn.execute(
-                "INSERT INTO history (track_id, action, played_at) VALUES (?,?,?)",
+                "INSERT INTO music_history (track_id, action, played_at) VALUES (?,?,?)",
                 (track_id, action, int(time.time())),
             )
             self._conn.commit()
@@ -487,7 +403,7 @@ class MusicStorage:
             rows = self._conn.execute(
                 """SELECT h.id, h.track_id, h.action, h.played_at,
                           t.title, t.artist, t.path
-                   FROM history h LEFT JOIN tracks t ON t.id = h.track_id
+                   FROM music_history h LEFT JOIN music_tracks t ON t.id = h.track_id
                    ORDER BY h.played_at DESC, h.id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
@@ -502,23 +418,9 @@ class MusicStorage:
 
     def clear_history(self) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM history")
+            self._conn.execute("DELETE FROM music_history")
             self._conn.commit()
 
-    # ---------- 配置 ----------
-
-    def get_setting(self, key: str, default: str = "") -> str:
-        with self._lock:
-            row = self._conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else default
-
-    def set_setting(self, key: str, value: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, str(value)),
-            )
-            self._conn.commit()
 
     # ---------- helpers ----------
 
