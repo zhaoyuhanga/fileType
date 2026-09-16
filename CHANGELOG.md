@@ -172,12 +172,17 @@
 
 | 产物 | 大小 | SHA256 |
 |---|---|---|
-| dist/墨软工作台-Setup-1.0.0.exe（NSIS 安装包） | 158 MB | $hash |
-| dist/ModuWorkbench/ModuWorkbench.exe（onedir 启动器） | 10.5 MB | $exeHash |
+| `dist/墨软工作台-Setup-1.0.0.exe`（NSIS 安装包） | 150.2 MB | `E0F11BBADD1C8C58535E5E8DA5AF1752A86CD8BB711F8174DF94462BF2AEB017` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 10.5 MB | `1CAF6F6278AE81914BA2552224BDA2F7E81F27B4DC651529126CC4A7CD1D9E6B` |
 
-- onedir 目录合计约 389 MB（其中随包 ffmpeg/ffprobe 约 196 MB）；
-- 打包流程自带三道自检：源码自检 13/13、exe 关键字模块核验 15/15、打包产物自检 13/13（含 video_core）。
-- 未签名 exe 在开启「智能应用控制（Smart App Control）」的机器上会被系统拦截，需关闭该功能或对 exe 签名。
+- onedir 目录合计 **371 MB**（其中随包 ffmpeg/ffprobe 196 MB，其余 175 MB）；
+- 相比 v0.3.x 的 731 MB 减少 **约 360 MB**：主要是移除 QtWebEngine（约 340 MB）
+  与再精简 Qml/Quick/Pdf/VirtualKeyboard（约 18 MB，已用二进制导入表核实无依赖）；
+- 打包流程三道自检全部通过：源码自检 13/13、exe 关键字模块核验 15/15、
+  **打包产物自检 13/13（含 `multimedia_playback`——真实播放一段音频，验证精简后音视频后端仍可用）**；
+- 清理死代码：`services/media_player.py`（旧内嵌前端 mp4 预览用的对话框，P5 后已无引用）。
+- 未签名 exe 在开启「智能应用控制（Smart App Control）」的机器上会被系统拦截（本机即如此），
+  因此**安装包的安装/卸载未在本机实际执行**；需关闭该功能或对 exe 签名后验证。
 
 ## v0.3.1 — 墨软影视修复版
 

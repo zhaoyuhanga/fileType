@@ -169,6 +169,21 @@ a = Analysis(
     excludes=EXCLUDES,
     noarchive=False,
 )
+
+# ---- v1.0.0 体积精简：Qt 单栈后不再需要这些 Qt 模块 ------------------------------
+# 说明：EXCLUDES 只影响 Python 绑定模块，Qt 的 DLL 仍会被 PySide6 hook 收进来，
+# 因此这里按文件名再过滤一次。已核实依赖：QtCore/Gui/Widgets/Multimedia/PrintSupport
+# 均不引用 Qml/Quick/Pdf/VirtualKeyboard（用二进制导入表检查过）。
+_DROP_BINARY_TOKENS = (
+    "Qt6Qml", "Qt6Quick", "Qt6Pdf", "Qt6VirtualKeyboard",
+    "QtQml", "QtQuick", "QtPdf", "QtVirtualKeyboard",
+)
+a.binaries = [item for item in a.binaries
+              if not any(token in item[0] for token in _DROP_BINARY_TOKENS)]
+a.datas = [item for item in a.datas
+           if not (item[0].replace("\\", "/").startswith("PySide6/qml")
+                   or "virtualkeyboard" in item[0].lower())]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
