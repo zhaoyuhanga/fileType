@@ -2,7 +2,7 @@
 
 > 本地离线的一站式阅读、转换、音乐、影视与图库工作台 —— 板块化设计，能力可扩展。
 
-**当前版本：v0.3.0（定版）** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：
+**当前版本：v1.0.0（定版）** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：
 `dist\ModuWorkbench\`（onedir）与 `dist\墨软工作台-Setup-0.3.0.exe`（NSIS 安装包）。
 
 由两个历史项目合并演进而来，现为五大板块：
@@ -205,8 +205,6 @@ pwsh -ExecutionPolicy Bypass -File packaging\build_webfront.ps1   # 首次会 np
 ```
 
 脚本流程：安装渲染进程最小依赖 → 目录联接 `node_modules` → `vite build` →
-`python -m modu_workbench.services.web_prepare`（清理旧产物、写入 `qtwebchannel.js`/`bridge_shim.js`、注入版本号）。
-纯 Python 改动无需重建前端。
 
 ## 品牌图形（应用图标 / 安装包图形）
 

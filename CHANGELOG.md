@@ -3,9 +3,30 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml`、内嵌前端注入版本保持一致，见 `tests/test_web_bridge.py::test_version_single_source`）。
 
-## v1.0.0 — 架构重构与定版（进行中）
+## v1.0.0 — 架构重构与定版（墨软·工作台）
 
-> 目标、目录设计与阶段验收见 `docs/REFACTOR_PLAN.md`。
+本版是**重构定版**：不改产品功能定位，把工程结构、数据层、界面规范与前端技术栈统一收口，
+为后续加板块/加源提供稳定底座。六个阶段（P1~P6）全部落地，每个阶段都跑通全量测试并单独提交。
+
+### 定版要点（一句话版）
+
+- **目录即边界**：五大板块各自成包（`boards/<板块>/`），依赖规则由测试强制，板块之间互不影响；
+- **公共层收口**：`core/platform`（路径/HTTP/媒体工具/文件扫描/单库），消除板块互相借代码；
+- **数据层统一**：单库 `modu.db` + 版本化迁移 + 旧分库自动导入（旧文件保留备份）；
+- **界面统一**：设计令牌 + 组件库（页面骨架/卡片/空状态/任务条），圆角≥10px、留白有刻度、空列表有引导；
+- **前端统一**：Qt 单栈，移除内嵌 React 与 QtWebEngine（包体积 731MB → 389MB）；
+- **测试与文档**：测试按板块/层级分层 + 架构闸门；文档补齐 ARCHITECTURE/DATABASE/UI_GUIDE/TESTING/RELEASE/BOARDS。
+
+### 升级须知（从 v0.3.x）
+
+1. 首次启动自动把 `library.db` / `music.db` / `video.db` / `gallery.db` / `llm.db`
+   合并进 `modu.db`，旧文件改名为 `*.imported.bak`（不删除，可人工回退）；
+2. 设置项从各库的 `settings` 表迁到 `app_settings`（键带板块命名空间，如 `video/sources/enabled`）；
+3. 影视内置源清单随版本更新（失效源下线、新增可用源），自填的接口地址保留；
+4. 界面整体重排：功能位置与流程不变，布局/配色/空状态按新设计规范统一。
+
+> 目标、目录设计与阶段验收见 `docs/REFACTOR_PLAN.md`；表结构见 `docs/DATABASE.md`；
+> 界面规范见 `docs/UI_GUIDE.md`；测试与发版见 `docs/TESTING.md` / `docs/RELEASE.md`。
 
 ### P1 目录与包边界重构
 
