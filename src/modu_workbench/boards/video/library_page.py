@@ -73,6 +73,7 @@ class VideoLibraryPage(QWidget):
         self._task = task_bar
         self._videos = []
         self._convert_worker: ConvertWorker | None = None
+        self._tail_stretch = False
         self._fallback_status = QLabel("就绪。")   # 兼容旧引用/单页自测
 
         outer = QVBoxLayout(self)
@@ -151,10 +152,11 @@ class VideoLibraryPage(QWidget):
         self._cancel_button.setEnabled(False)
         self._list_card.add(row(QLabel("转换为"), self._target, self._convert_button,
                                 self._cancel_button,
-                                hint_label("转换需要 ffmpeg（未安装时请设置 MODU_FFMPEG）"),
+                                hint_label("转换需要 ffmpeg（可用 MODU_FFMPEG 指定）"),
                                 stretch_last=True))
 
         self._page.add(self._list_card)
+        self._set_tail_stretch(True)
         self.reload()
 
     # ------------------------------------------------------------------ 数据
@@ -187,6 +189,7 @@ class VideoLibraryPage(QWidget):
         self._count_chip.setText(f"{len(videos)} 项")
         self._empty.setVisible(not videos)
         self._table.setVisible(bool(videos))
+        self._set_tail_stretch(not videos)
         self._update_buttons()
 
     def _reload_collections(self, keep=None) -> None:  # noqa: ANN001
@@ -384,6 +387,17 @@ class VideoLibraryPage(QWidget):
         self._convert_worker = None
         self._cancel_button.setEnabled(False)
         self._convert_button.setEnabled(True)
+
+
+    def _set_tail_stretch(self, enabled: bool) -> None:
+        """页面末尾弹簧：列表为空时插入，让卡片保持自然高度（避免行与行被拉开）。"""
+        layout = self._page.body
+        if enabled and not self._tail_stretch:
+            layout.addStretch(1)
+            self._tail_stretch = True
+        elif not enabled and self._tail_stretch and layout.count():
+            layout.takeAt(layout.count() - 1)
+            self._tail_stretch = False
 
     # ------------------------------------------------------------------ 状态
 

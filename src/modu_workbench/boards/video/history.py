@@ -63,6 +63,7 @@ class VideoHistoryPage(QWidget):
         self._toaster = toaster
         self._task = task_bar
         self._entries: list = []
+        self._tail_stretch = False
         self._fallback_status = QLabel("就绪。")
 
         outer = QVBoxLayout(self)
@@ -109,7 +110,19 @@ class VideoHistoryPage(QWidget):
         self._history_card.add(row(self._play_button, self._download_button,
                                    self._favorite_button, clear, stretch_last=True))
         self._page.add(self._history_card)
+        self._set_tail_stretch(True)
         self._count = self._count_chip      # 兼容旧引用（筛选行右侧计数）
+
+
+    def _set_tail_stretch(self, enabled: bool) -> None:
+        """页面末尾弹簧：列表为空时插入，让卡片保持自然高度（避免行与行被拉开）。"""
+        layout = self._page.body
+        if enabled and not self._tail_stretch:
+            layout.addStretch(1)
+            self._tail_stretch = True
+        elif not enabled and self._tail_stretch and layout.count():
+            layout.takeAt(layout.count() - 1)
+            self._tail_stretch = False
 
     # ------------------------------------------------------------------ 状态
 
@@ -146,8 +159,12 @@ class VideoHistoryPage(QWidget):
                 self._table.setItem(row, index, item)
         select_all(self._table, False)
         self._count.setText(f"共 {len(self._entries)} 条")
+        # 有记录给表格，无记录给空状态（不留一张空表格）
+        self._empty.setVisible(not self._entries)
+        self._table.setVisible(bool(self._entries))
+        self._set_tail_stretch(not self._entries)
         if not self._entries:
-            self._report("还没有记录。去「搜索下载」找一部片子看看？")
+            self._fallback_status.setText("还没有记录。去「搜索下载」找一部片子看看？")
         self._update_buttons()
 
     def _selected_entry(self):  # noqa: ANN201

@@ -85,10 +85,14 @@ def divider() -> QFrame:
 
 
 def chip(text: str) -> QLabel:
-    """小徽章（胶囊形）：用于状态/计数，不抢视线。"""
+    """小徽章（胶囊形）：用于状态/计数，不抢视线。
+
+    尺寸固定：卡片标题行里若被拉伸，胶囊会变成一根高高的竖条（v1.0.0 修过这个）。
+    """
     label = QLabel(text)
     label.setObjectName("statChip")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     return label
 
 
@@ -182,7 +186,7 @@ class SectionCard(QFrame):
                 head.addWidget(hint_widget)
             head.addStretch(1)
             for widget in actions or []:
-                head.addWidget(widget)
+                head.addWidget(widget, 0, Qt.AlignmentFlag.AlignVCenter)
             layout.addLayout(head)
 
         self.body_layout = layout
