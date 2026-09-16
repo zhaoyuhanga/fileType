@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from typing import Iterable, List
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -115,9 +115,20 @@ class ThumbnailGrid(QListWidget):
 
     # ---------- 数据 ----------
 
-    def set_items(self, items: Iterable[ImageItem]) -> None:
+    def set_items(self, items: Iterable[ImageItem], *, keep_selection: bool = True) -> None:
+        """替换整个列表。
+
+        `keep_selection=True` 时会尽量保留原来的当前项与选中项：
+        否则每次搜索/刷新后 currentRow 变成 -1，"下一张"之类的操作就没反应。
+        """
+        previous_id = 0
+        current = self.current_item()
+        if keep_selection and current is not None:
+            previous_id = current.id
+
         self._items = list(items)
         self._loaded.clear()
+        self._fill_cursor = 0
         self.clear()
         for item in self._items:
             entry = QListWidgetItem(item.display())
@@ -129,7 +140,29 @@ class ThumbnailGrid(QListWidget):
             if item.favorited:
                 entry.setForeground(QColor("#b9790a"))
             self.addItem(entry)
+
+        # 恢复选中：优先原来的项，否则默认选中第一项（大图查看/快捷键都依赖它）
+        target = 0
+        if previous_id:
+            for row, item in enumerate(self._items):
+                if item.id == previous_id:
+                    target = row
+                    break
+        if self._items:
+            self.setCurrentRow(target)
         self._load_visible()
+        # 视口之外的部分稍后分批补全：避免用户滚动前一直看到灰色占位
+        QTimer.singleShot(120, self.fill_thumbnails_lazily)
+
+    def ensure_current(self) -> ImageItem | None:
+        """确保有当前项（供"下一张/编辑"等操作使用），返回它。"""
+        current = self.current_item()
+        if current is not None:
+            return current
+        if not self._items:
+            return None
+        self.setCurrentRow(0)
+        return self.current_item()
 
     def set_thumb_size(self, size: int, columns: int = 0) -> None:
         self._thumb_size = max(96, int(size))
@@ -192,22 +225,65 @@ class ThumbnailGrid(QListWidget):
     # ---------- 懒加载 ----------
 
     def _load_visible(self) -> None:
-        """只加载视口附近的项目缩略图（前后各留一屏余量）。"""
+        """加载当前视口附近项目的缩略图。
+
+        这里不能用 `indexAt(视口左下角)` 推断首行：当视口上方/下方是空白时
+        `indexAt` 返回 -1，首行会被误判成 0，导致只有前十几项加载缩略图、
+        其余长期显示灰色占位（表现就是"图片显示很丑"）。改用网格几何直接算行号。
+        """
         if not self._items:
             return
-        viewport_rect = self.viewport().rect()
-        margin = viewport_rect.height()
-        near = viewport_rect.adjusted(0, -margin, 0, margin)
+        count = self.count()
+        grid = self.gridSize()
+        cell_h = max(1, grid.height())
+        # 一屏大约能放几行
+        per_row = max(1, self._per_row())
+        rows_on_screen = max(1, self.viewport().height() // cell_h + 1)
 
-        first = self.indexAt(near.topLeft()).row()
-        last = self.indexAt(near.bottomRight()).row()
-        if first < 0:
-            first = 0
-        if last < 0:
-            last = min(self.count() - 1, first + self._columns * 4)
+        # 内容坐标下的可见区间（用滚动条位置换算，避免依赖 indexAt 的空白判定）
+        scroll_y = self.verticalScrollBar().value()
+        first_row = max(0, scroll_y // cell_h - 1)
+        last_row = min((count - 1) // per_row, first_row + rows_on_screen + 1)
 
-        for row in range(max(0, first), min(self.count(), last + 1)):
+        for row in range(first_row * per_row, min(count, (last_row + 1) * per_row)):
             self._load_row(row)
+        self._loaded_range = (first_row, last_row)
+
+    def _per_row(self) -> int:
+        """当前每行能放几个（由控件宽度与格子宽度决定）。"""
+        width = max(1, self.viewport().width())
+        cell_w = max(1, self.gridSize().width())
+        return max(1, width // cell_w)
+
+    def load_all_thumbnails(self, on_progress=None) -> int:  # noqa: ANN001
+        """把全部缩略图加载出来（用于"生成全部缩略图"或导出前预热）。"""
+        produced = 0
+        total = self.count()
+        for row in range(total):
+            self._load_row(row)
+            produced += 1
+            if on_progress and row % 20 == 0:
+                on_progress(row, total, f"生成缩略图 {row}/{total}")
+        return produced
+
+    def fill_thumbnails_lazily(self, chunk: int = 40) -> None:
+        """分批把剩余缩略图补齐，保持界面响应。
+
+        为什么需要它：懒加载只覆盖可见区，用户还没滚动时其余项是灰色占位图 ——
+        观感很差（"图片显示好丑"）。缩略图本身很小（WEBP 几十 KB），
+        分批补齐的成本远低于一直显示占位的体验损失。
+        """
+        total = self.count()
+        if not total:
+            return
+        # 优先补齐当前可见位置之后的，用户往下滚时立刻有图
+        start = max(0, getattr(self, "_fill_cursor", 0))
+        end = min(total, start + max(1, chunk))
+        for row in range(start, end):
+            self._load_row(row)
+        self._fill_cursor = end
+        if end < total:
+            QTimer.singleShot(30, self.fill_thumbnails_lazily)
 
     def _load_row(self, row: int) -> None:
         if row in self._loaded:
@@ -220,6 +296,10 @@ class ThumbnailGrid(QListWidget):
         thumb = self._library.thumbnail(item, self._thumb_size)
         if thumb:
             entry.setIcon(icon_from_file(thumb, self._thumb_size))
+        else:
+            # 生成失败（格式不支持/文件丢失）也标记为已处理，避免反复重试
+            entry.setIcon(icon_from_file(None, self._thumb_size))
+            entry.setToolTip(entry.toolTip() + "\n（无法生成缩略图：格式不支持或文件已丢失）")
 
     def refresh_row(self, image_id: int) -> None:
         """单张图改动后刷新它的缩略图（覆盖原图/编辑保存时用）。"""
@@ -239,6 +319,12 @@ class ThumbnailGrid(QListWidget):
         super().resizeEvent(event)
         self._load_visible()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        # 控件首次显示时布局才确定，此时再补一次可见区加载，
+        # 否则从隐藏页切过来会满屏灰色占位
+        super().showEvent(event)
+        self._load_visible()
+
 
 # --------------------------------------------------------------------------- 大图查看器
 
@@ -248,6 +334,8 @@ class ImageViewer(QScrollArea):
 
     用 QLabel 承载 QPixmap 并放进 QScrollArea —— 比自绘简单且滚动条天然可用。
     """
+
+    zoomChanged = Signal(int, bool)      # (百分比, 是否适应窗口)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -299,6 +387,12 @@ class ImageViewer(QScrollArea):
                                      Qt.TransformationMode.SmoothTransformation)
         self._label.setPixmap(scaled)
         self._label.resize(scaled.size())
+        self.zoomChanged.emit(self._display_percent(scaled.width()), self._fit)
+
+    def _display_percent(self, shown_width: int) -> int:
+        if self._source.isNull() or not shown_width:
+            return 100
+        return max(1, int(round(shown_width * 100 / max(1, self._source.width()))))
 
     def _target_size(self) -> QSize:
         if self._fit:
@@ -336,10 +430,12 @@ class ImageViewer(QScrollArea):
     def zoom_percent(self) -> int:
         if self._source.isNull():
             return 0
-        shown = self._label.pixmap().width() if self._label.pixmap() else 0
-        if not shown:
-            return 100
-        return int(shown * 100 / max(1, self._source.width()))
+        pixmap = self._label.pixmap()
+        return self._display_percent(pixmap.width() if pixmap else 0)
+
+    @property
+    def is_fitted(self) -> bool:
+        return self._fit
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         if self._source.isNull():

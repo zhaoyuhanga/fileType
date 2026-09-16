@@ -1,7 +1,8 @@
-# 墨软·工作台 —— Windows 一键重新打包（onedir）
+﻿# 墨软·工作台 —— Windows 一键重新打包（onedir）
 #
-# 用法（在仓库根目录）：
-#   pwsh -ExecutionPolicy Bypass -File packaging\build_app.ps1
+# 用法（在仓库根目录，Windows PowerShell 5.1 或 PowerShell 7 均可）：
+#   powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1
+#   pwsh -ExecutionPolicy Bypass -File packaging\build_app.ps1      # PowerShell 7
 #
 # 可选参数：
 #   -NoClean      保留 PyInstaller 缓存（默认会 --clean：新增模块时缓存会导致漏打包）
@@ -186,9 +187,9 @@ Write-Ok "已生成：$exePath"
 
 # ---------------------------------------------------------------- 打包后验证
 
-Write-Step "打包后验证（第四板块是否随包）"
+Write-Step "打包后验证（第四/第五板块是否随包）"
 
-# 关键点：墨软影视模块必须真的进了包，否则首页只有三个板块。
+# 关键点：墨软影视 / 墨软图库模块必须真的进了包，否则首页板块卡会缺。
 # onedir 下纯 Python 模块名存放在 exe 内嵌的 PYZ 归档里，磁盘上没有 .pyz 文件，
 # 因此在 exe 字节流中直接检索模块名（模块名以明文 UTF-8 存在归档索引里）。
 $exeBytes = [System.IO.File]::ReadAllBytes($exePath)
@@ -200,16 +201,23 @@ $required = @(
     "modu_workbench.boards.video_player",
     "modu_workbench.core.video.sources",
     "modu_workbench.core.video.sources.providers.cms_vod",
-    "modu_workbench.core.video.downloader"
+    "modu_workbench.core.video.downloader",
+    "modu_workbench.boards.gallery_board",
+    "modu_workbench.boards.gallery_widgets",
+    "modu_workbench.boards.gallery_editor",
+    "modu_workbench.boards.gallery_enhance",
+    "modu_workbench.core.image.library",
+    "modu_workbench.core.image.enhance",
+    "modu_workbench.core.image.ai"
 )
 $missing = @()
 foreach ($name in $required) {
     if (-not $exeText.Contains($name)) { $missing += $name }
 }
 if ($missing.Count -gt 0) {
-    Fail ("打包产物缺少影视模块：" + ($missing -join ", ") + "`n    请确认 workbench.spec 的 hiddenimports 未被改动。")
+    Fail ("打包产物缺少板块模块：" + ($missing -join ", ") + "`n    请确认 workbench.spec 的 hiddenimports 未被改动。")
 }
-Write-Ok "影视模块已随包（$($required.Count) 项全部命中）"
+Write-Ok "影视 / 图库模块已随包（$($required.Count) 项全部命中）"
 
 # 真正跑一次打包产物：MODU_CHECK_DEPS 会输出各能力自检结果（含 video_core）
 Write-Step "运行打包产物做能力自检"
@@ -235,21 +243,25 @@ if (Test-Path $checkOut2) {
     if ($null -eq $json2.video_core) {
         Write-Warn2 "自检结果里没有 video_core 项，请确认 main.py 的 record(\"video_core\", ...) 存在。"
     }
+    if ($null -eq $json2.gallery_core) {
+        Write-Warn2 "自检结果里没有 gallery_core 项，请确认 main.py 的 record(\"gallery_core\", ...) 存在。"
+    }
 } else {
-    Write-Warn2 "打包产物未输出自检结果，请手动运行 $exePath 确认首页有四张板块卡。"
+    Write-Warn2 "打包产物未输出自检结果，请手动运行 $exePath 确认首页有五张板块卡。"
 }
 
 # ---------------------------------------------------------------- 安装包（可选）
 
 if ($Installer) {
     Write-Step "生成 NSIS 安装包"
-    $makensis = Get-Command makensis -ErrorAction SilentlyContinue
-    if (-not $makensis) {
-        Write-Warn2 "未找到 makensis，跳过。请安装 NSIS 后重跑，或手动执行："
-        Write-Warn2 "  pwsh -ExecutionPolicy Bypass -File packaging\build_installer.ps1"
-    } else {
-        & pwsh -ExecutionPolicy Bypass -File (Join-Path $scriptDir "build_installer.ps1")
-        if ($LASTEXITCODE -ne 0) { Write-Warn2 "安装包生成失败（退出码 $LASTEXITCODE）" }
+    # 不再依赖 pwsh：Windows PowerShell 5.1 里没有 pwsh 命令，直接同会话调用脚本更稳
+    $installerScript = Join-Path $scriptDir "build_installer.ps1"
+    try {
+        & $installerScript
+        Write-Ok "安装包已生成（dist\墨软工作台-Setup-<版本>.exe）"
+    } catch {
+        Write-Warn2 "安装包生成失败：$($_.Exception.Message)"
+        Write-Warn2 "  可单独重跑：powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1"
     }
 }
 
@@ -257,5 +269,5 @@ if ($Installer) {
 
 Write-Step "完成"
 Write-Ok "onedir 产物：dist\ModuWorkbench\ModuWorkbench.exe"
-Write-Ok "启动后首页应显示四张板块卡：墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视"
+Write-Ok "启动后首页应显示五张板块卡：墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视 / 墨软图库"
 Write-Host ""

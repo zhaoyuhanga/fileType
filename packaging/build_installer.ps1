@@ -1,7 +1,7 @@
 ﻿# 生成 Windows 安装包（NSIS）：从 pyproject 读取版本号，覆盖 installer.nsi 的默认值。
 #
-# 用法：
-#   pwsh -ExecutionPolicy Bypass -File packaging\build_installer.ps1
+# 用法（Windows PowerShell 5.1 或 PowerShell 7 均可）：
+#   powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1
 #   pwsh -ExecutionPolicy Bypass -File packaging\build_installer.ps1 -Makensis "C:\path\makensis.exe"
 param(
     [string]$Makensis,

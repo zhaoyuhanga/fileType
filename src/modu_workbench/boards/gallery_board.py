@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -24,13 +24,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QSplitter,
     QStackedWidget,
     QTextBrowser,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -89,6 +89,8 @@ class GalleryBoardPage(QWidget):
         self._analyze_worker: AnalyzeWorker | None = None
         self._duplicate_worker: DuplicateWorker | None = None
         self._duplicates: list[list[ImageItem]] = []
+        # 「最近 N 天导入」筛选（由左侧树设置；改动其它筛选时重置）
+        self._recent_days = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -141,11 +143,11 @@ class GalleryBoardPage(QWidget):
         self._search = QLineEdit()
         self._search.setObjectName("searchBox")
         self._search.setPlaceholderText("搜索文件名 / 相机 / 标签 / AI 描述（回车）")
-        self._search.returnPressed.connect(self.reload)
+        self._search.returnPressed.connect(self._on_filter_changed)
         row.addWidget(self._search, 1)
 
         search_button = QPushButton("搜索")
-        search_button.clicked.connect(self.reload)
+        search_button.clicked.connect(self._on_filter_changed)
         row.addWidget(search_button)
 
         self._ai_search = QPushButton("AI 检索")
@@ -179,28 +181,28 @@ class GalleryBoardPage(QWidget):
         filter_row.setSpacing(8)
         self._kind_combo = QComboBox()
         self._kind_combo.addItem("全部相册", 0)
-        self._kind_combo.currentIndexChanged.connect(self.reload)
+        self._kind_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._kind_combo)
 
         self._tag_combo = QComboBox()
         self._tag_combo.addItem("全部标签", "")
-        self._tag_combo.currentIndexChanged.connect(self.reload)
+        self._tag_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._tag_combo)
 
         self._source_combo = QComboBox()
         self._source_combo.addItem("全部来源", "")
         for key, label in SOURCE_LABELS.items():
             self._source_combo.addItem(label, key)
-        self._source_combo.currentIndexChanged.connect(self.reload)
+        self._source_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._source_combo)
 
         self._favorite_only = QCheckBox("仅收藏")
-        self._favorite_only.toggled.connect(self.reload)
+        self._favorite_only.toggled.connect(self._on_filter_changed)
         filter_row.addWidget(self._favorite_only)
 
         self._timeline_combo = QComboBox()
         self._timeline_combo.addItem("全部时间", "")
-        self._timeline_combo.currentIndexChanged.connect(self.reload)
+        self._timeline_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._timeline_combo)
 
         filter_row.addStretch(1)
@@ -222,13 +224,18 @@ class GalleryBoardPage(QWidget):
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        self._side = QListWidget()
+        # 左侧：按「图库 / 相册 / 时间 / 标签 / 来源」分组的可折叠导航树。
+        # 用户希望"左侧显示有哪些图片、并能按时间或搜索条件分类查看"，
+        # 因此这里做成树形：点任意节点即把右侧网格筛成对应集合。
+        self._side = QTreeWidget()
         self._side.setObjectName("gallerySide")
-        self._side.setFixedWidth(190)
+        self._side.setHeaderHidden(True)
+        self._side.setMinimumWidth(190)
         self._side.itemClicked.connect(self._on_side_clicked)
         self._splitter.addWidget(self._side)
 
         self._grid = ThumbnailGrid(self._library)
+        self._grid.setMinimumWidth(260)
         self._grid.itemActivated.connect(self._open_viewer)
         self._grid.selectionChangedItems.connect(self._on_selection_changed)
         self._grid.customContextMenuRequested.connect(self._on_grid_menu)
@@ -236,11 +243,30 @@ class GalleryBoardPage(QWidget):
 
         self._details = QTextBrowser()
         self._details.setOpenExternalLinks(True)
-        self._details.setFixedWidth(280)
+        self._details.setMinimumWidth(200)
         self._splitter.addWidget(self._details)
-        self._splitter.setSizes([190, 760, 280])
+        self._splitter.setSizes([210, 700, 260])
+        self._splitter.setStretchFactor(1, 1)          # 只有网格随窗口拉伸
+        self._splitter.setCollapsible(1, False)        # 网格不允许被拖没
         layout.addWidget(self._splitter)
         return page
+
+    def _schedule_side_refresh(self) -> None:
+        """把左侧树的重建延后到当前点击处理结束之后。
+
+        必要性：`_on_side_clicked` 里直接重建树会把**正在处理点击事件的那个节点**
+        销毁，Qt/PySide 随后访问它就抛
+        "Internal C++ object (QTreeWidgetItem) already deleted"。
+        """
+        if getattr(self, "_side_refresh_pending", False):
+            return
+        self._side_refresh_pending = True
+
+        def run() -> None:
+            self._side_refresh_pending = False
+            self._refresh_side()
+
+        QTimer.singleShot(0, run)
 
     # ------------------------------------------------------------------ 大图页
 
@@ -255,6 +281,8 @@ class GalleryBoardPage(QWidget):
         layout.addWidget(self._viewer_info)
 
         self._viewer = ImageViewer()
+        # 缩放比例标签必须随缩放变化更新（此前只在换图时刷新，看起来"不变"）
+        self._viewer.zoomChanged.connect(self._update_zoom_label)
         layout.addWidget(self._viewer, 1)
 
         row = QHBoxLayout()
@@ -410,6 +438,11 @@ class GalleryBoardPage(QWidget):
     def on_shown(self) -> None:
         self.reload()
 
+    def _on_filter_changed(self) -> None:
+        """用户手动改筛选条件时，清掉左侧树的「最近 N 天」范围，避免叠加成空结果。"""
+        self._recent_days = 0
+        self.reload()
+
     # ------------------------------------------------------------------ 数据
 
     def reload(self) -> None:
@@ -427,14 +460,46 @@ class GalleryBoardPage(QWidget):
             favorite_only=self._favorite_only.isChecked(), order=order,
             date_from=int(date_from),
         )
+        # 「最近导入」节点：在结果集上再按时间收窄（放在最后，避免与其它筛选冲突）
+        recent_days = getattr(self, "_recent_days", 0)
+        if recent_days:
+            cutoff = int(time.time()) - recent_days * 86400
+            self._items = [item for item in self._items if (item.added_at or 0) >= cutoff]
         self._grid.set_items(self._items)
         total = self._library.storage.count_images()
         shown = len(self._items)
-        suffix = f"（筛选后 {shown} 张）" if shown != total else ""
+        suffix = f"（当前筛选 {shown} 张）" if shown != total else ""
+        scope = self._scope_text()
         self._count_label.setText(
-            f"共 {total} 张{suffix} · 磁盘 {format_size(self._library.disk_usage())}"
+            f"{scope}共 {total} 张{suffix} · 磁盘 {format_size(self._library.disk_usage())}"
         )
         self._update_buttons()
+
+    def _scope_text(self) -> str:
+        """当前筛选范围的可读描述（让用户一眼知道自己在看哪个集合）。"""
+        parts: list[str] = []
+        if getattr(self, "_recent_days", 0):
+            parts.append(f"最近 {self._recent_days} 天导入")
+        if self._favorite_only.isChecked():
+            parts.append("仅收藏")
+        album_id = self._kind_combo.currentData()
+        if album_id:
+            album = self._library.storage.get_album(int(album_id))
+            if album is not None:
+                parts.append(f"相册「{album.name}」")
+        tag = self._tag_combo.currentData()
+        if tag:
+            parts.append(f"标签「{tag}」")
+        source = self._source_combo.currentData()
+        if source:
+            parts.append(source_label(source))
+        month = self._timeline_combo.currentText()
+        if self._timeline_combo.currentData():
+            parts.append(month.split("（")[0])
+        keyword = self._search.text().strip()
+        if keyword:
+            parts.append(f"搜索「{keyword}」")
+        return (" · ".join(parts) + " · ") if parts else ""
 
     def _refresh_filters(self) -> None:
         current_album = self._kind_combo.currentData()
@@ -472,48 +537,147 @@ class GalleryBoardPage(QWidget):
         self._timeline_combo.setCurrentIndex(index if index >= 0 else 0)
         self._timeline_combo.blockSignals(False)
 
-        self._refresh_side()
+        # 延后重建：直接重建会在左侧树节点点击事件处理中销毁该节点（shiboken 崩溃）
+        self._schedule_side_refresh()
 
     def _refresh_side(self) -> None:
-        """左栏快捷入口：全部 / 收藏 / 相册 / 标签。"""
+        """重建左侧导航树：图库概览 / 相册 / 时间 / 标签 / 来源。
+
+        每个节点携带筛选条件（payload），点击即筛选右侧网格。
+        """
         self._side.clear()
-        entry = QListWidgetItem(f"🖼 全部图片（{self._library.storage.count_images()}）")
-        entry.setData(ITEM_ROLE, ("all", 0))
-        self._side.addItem(entry)
 
-        for album in self._library.list_albums():
-            label = f"{'★ ' if album.kind == 'favorite' else '📁 '}{album.name}（{album.image_count}）"
-            item = QListWidgetItem(label)
-            item.setData(ITEM_ROLE, ("album", album.id))
-            self._side.addItem(item)
+        def add(parent, text: str, payload: dict | None, *, bold: bool = False):  # noqa: ANN001
+            entry = QTreeWidgetItem([text])
+            if payload is not None:
+                entry.setData(0, ITEM_ROLE, payload)
+            else:
+                entry.setFlags(Qt.ItemFlag.ItemIsEnabled)      # 纯分组标题不可点
+            if bold:
+                font = entry.font(0)
+                font.setBold(True)
+                entry.setFont(0, font)
+            if parent is None:
+                self._side.addTopLevelItem(entry)
+            else:
+                parent.addChild(entry)
+            return entry
 
-        auto_tags = self._library.list_tags(source="auto")
-        if auto_tags:
-            header = QListWidgetItem("—— 自动标签 ——")
-            header.setFlags(Qt.ItemFlag.NoItemFlags)
-            self._side.addItem(header)
-            for tag in auto_tags[:20]:
-                item = QListWidgetItem(f"🏷 {tag.name}（{tag.use_count}）")
-                item.setData(ITEM_ROLE, ("tag", tag.name))
-                self._side.addItem(item)
+        total = self._library.storage.count_images()
+        root = add(None, f"🖼 全部图片（{total}）", {"all": True}, bold=True)
+        add(root, f"★ 我的收藏（{self._favorite_count()}）", {"favorite": True})
+        add(root, "🆕 最近导入（7 天）", {"recent_days": 7})
 
-    def _on_side_clicked(self, entry: QListWidgetItem) -> None:
-        payload = entry.data(ITEM_ROLE)
+        albums_node = add(None, "📁 相册", None, bold=True)
+        albums = [a for a in self._library.list_albums() if not a.is_favorite]
+        if albums:
+            for album in albums:
+                add(albums_node, f"{album.name}（{album.image_count}）", {"album": album.id})
+        else:
+            add(albums_node, "（还没有相册，右键图片可加入）", None)
+
+        time_node = add(None, "🗓 时间", None, bold=True)
+        for bucket, count in self._library.storage.timeline()[:48]:
+            add(time_node, f"{bucket}（{count}）", {"month": bucket})
+
+        tags_node = add(None, "🏷 标签", None, bold=True)
+        tags = self._library.list_tags()
+        if tags:
+            for tag in tags[:40]:
+                add(tags_node, f"{tag.name}（{tag.use_count}）", {"tag": tag.name})
+        else:
+            add(tags_node, "（还没有标签）", None)
+
+        source_node = add(None, "📥 来源", None, bold=True)
+        counts = self._source_counts()
+        for key, label in SOURCE_LABELS.items():
+            if counts.get(key):
+                add(source_node, f"{label}（{counts[key]}）", {"source": key})
+
+        self._side.expandAll()
+
+    def _favorite_count(self) -> int:
+        return len(self._library.storage.list_images(favorite_only=True, limit=100000))
+
+    def _source_counts(self) -> dict:
+        counts: dict = {}
+        for item in self._library.storage.list_images(limit=100000):
+            counts[item.source or "unknown"] = counts.get(item.source or "unknown", 0) + 1
+        return counts
+
+    def _on_side_clicked(self, entry: QTreeWidgetItem, _column: int = 0) -> None:
+        payload = entry.data(0, ITEM_ROLE)
         if not payload:
             return
-        kind, value = payload
-        if kind == "all":
-            self._kind_combo.setCurrentIndex(0)
-            self._tag_combo.setCurrentIndex(0)
-        elif kind == "album":
-            index = self._kind_combo.findData(value)
+        self.show_page(BROWSE_KEY)
+        # 清空其它筛选，避免叠加后结果为空让用户困惑
+        self._search.blockSignals(True)
+        self._search.clear()
+        self._search.blockSignals(False)
+        self._kind_combo.blockSignals(True)
+        self._kind_combo.setCurrentIndex(0)
+        self._kind_combo.blockSignals(False)
+        self._tag_combo.blockSignals(True)
+        self._tag_combo.setCurrentIndex(0)
+        self._tag_combo.blockSignals(False)
+        self._source_combo.blockSignals(True)
+        self._source_combo.setCurrentIndex(0)
+        self._source_combo.blockSignals(False)
+        self._favorite_only.blockSignals(True)
+        self._favorite_only.setChecked(False)
+        self._favorite_only.blockSignals(False)
+        self._timeline_combo.blockSignals(True)
+        self._timeline_combo.setCurrentIndex(0)
+        self._timeline_combo.blockSignals(False)
+
+        # 清掉上一次的「最近 N 天」范围，避免与本次点击的节点叠加成空结果
+        self._recent_days = 0
+
+        if payload.get("all"):
+            self._sort_combo.blockSignals(True)
+            self._sort_combo.setCurrentIndex(list(SORT_MODES).index(DEFAULT_SORT))
+            self._sort_combo.blockSignals(False)
+        elif payload.get("favorite"):
+            self._favorite_only.setChecked(True)
+        elif payload.get("album"):
+            index = self._kind_combo.findData(payload["album"])
             if index >= 0:
                 self._kind_combo.setCurrentIndex(index)
-        elif kind == "tag":
-            index = self._tag_combo.findData(value)
+        elif payload.get("tag"):
+            index = self._tag_combo.findData(payload["tag"])
             if index >= 0:
                 self._tag_combo.setCurrentIndex(index)
+        elif payload.get("source"):
+            index = self._source_combo.findData(payload["source"])
+            if index >= 0:
+                self._source_combo.setCurrentIndex(index)
+        elif payload.get("month"):
+            # 时间轴节点：切到「按拍摄时间」排序并用月份筛选
+            self._sort_combo.blockSignals(True)
+            self._sort_combo.setCurrentIndex(list(SORT_MODES).index("taken"))
+            self._sort_combo.blockSignals(False)
+            index = self._timeline_combo.findData(self._month_start(payload["month"]))
+            if index >= 0:
+                self._timeline_combo.setCurrentIndex(index)
+        elif payload.get("recent_days"):
+            self._timeline_combo.blockSignals(True)
+            self._timeline_combo.setCurrentIndex(0)
+            self._timeline_combo.blockSignals(False)
+            self._recent_days = int(payload["recent_days"])
+            self._sort_combo.blockSignals(True)
+            self._sort_combo.setCurrentIndex(list(SORT_MODES).index("added"))
+            self._sort_combo.blockSignals(False)
+
         self.reload()
+        # 树的重建延后执行：本次点击的节点此刻还在事件处理中，不能立即销毁
+        self._schedule_side_refresh()
+
+    @staticmethod
+    def _month_start(bucket: str) -> int:
+        try:
+            return int(time.mktime(time.strptime(bucket + "-01", "%Y-%m-%d")))
+        except ValueError:
+            return 0
 
     # ------------------------------------------------------------------ 视图
 
@@ -847,17 +1011,31 @@ class GalleryBoardPage(QWidget):
             f"{item.display()} · {item.resolution} · {item.size_text} · {item.taken_text}"
             + ("" if ok else "（无法显示，可能是格式不支持）")
         )
-        self._viewer_zoom.setText(f"缩放 {self._viewer.zoom_percent}%")
+        self._update_zoom_label()
         self._library.storage.mark_opened(item.id)
 
+    def _update_zoom_label(self, *_args) -> None:  # noqa: ANN002
+        percent = self._viewer.zoom_percent
+        if self._viewer.is_fitted:
+            self._viewer_zoom.setText(f"适应窗口（当前显示 {percent}%）")
+        else:
+            self._viewer_zoom.setText(f"缩放 {percent}%")
+
     def _step_viewer(self, delta: int) -> None:
+        """切换上一张/下一张。
+
+        走的是「当前视图里的列表」而不是图库全量列表 —— 搜索/筛选后应当
+        只在结果集内翻页，否则会跳到用户没在看的图片上。
+        """
         items = self._grid.items()
         if not items:
+            self._toaster.info("当前没有可查看的图片（请先调整筛选条件）")
             return
-        current = self._grid.current_item()
+        current = self._grid.ensure_current()
         index = items.index(current) if current in items else 0
         target = max(0, min(len(items) - 1, index + delta))
         self._grid.setCurrentRow(target)
+        self.show_page(VIEWER_KEY)
         self._show_in_viewer(items[target])
 
     def _toggle_slideshow(self, enabled: bool) -> None:

@@ -72,6 +72,17 @@
   1. `thumbs.py` 按「路径+mtime+大小+目标尺寸」生成**磁盘缩略图缓存**，滚动只读几十 KB 小图；
   2. 网格**懒加载**——只为视口上下各一屏的项目创建 QPixmap，其余保持占位；
   3. 缩略图缓存带内存 LRU（只丢索引，磁盘缓存保留）。
+  懒加载之外还有 `fill_thumbnails_lazily()`：替换数据后**分批补齐视口外的缩略图**（`QTimer` 分块，
+  不阻塞界面），否则用户没滚动到的位置会一直是灰色占位（实测反馈「图片显示好丑」）。
+- **左侧分类导航树**（`_refresh_side()`）：按「全部图片（含我的收藏 / 最近导入 7 天）／相册／
+  时间（年月）／标签／来源」生成节点，节点文本带数量、`ITEM_ROLE` 存筛选 payload（字典），
+  点击即调用 `reload()` 重查；分组标题只置灰不可点。状态栏 `_scope_text()` 回显当前范围。
+  注意：**树的重建必须延后**（`QTimer.singleShot(0, ...)`，带重入保护）——在点击处理中直接
+  `clear()` 会销毁正在派发事件的那个 `QTreeWidgetItem`，随后报
+  `libshiboken: Internal C++ object (QTreeWidgetItem) already deleted`。
+- **结果集语义一致**：`ThumbnailGrid.set_items()` 会**尽量保留原选中项、否则选中第一张**，
+  并提供 `ensure_current()`；上一张/下一张、编辑等操作都以「当前网格列表」为准，
+  因此搜索/筛选后翻页不会跳到结果集之外的图片（`currentRow == -1` 曾导致「下一张没反应」）。
 - **两级去重**：`sha256` 内容哈希（导入阶段直接跳过完全相同的文件）+
   `dhash` 感知哈希（汉明距离聚类，识别原图与缩放/微调副本）。
   注意 dhash 必须用 numpy 取像素 —— 旧版 `Image.getdata()` 在新 Pillow 上会返回空序列，
