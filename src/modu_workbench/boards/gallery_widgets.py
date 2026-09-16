@@ -9,8 +9,8 @@ import threading
 from pathlib import Path
 from typing import Iterable, List
 
-from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QStyle,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -44,7 +46,13 @@ from modu_workbench.services import app_context
 from modu_workbench.ui_kit.toast import Toaster
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
+FAVORITE_ROLE = Qt.ItemDataRole.UserRole + 1
 PLACEHOLDER_COLOR = QColor(226, 232, 240)
+
+# 缩略图卡片几何：图片区恒为 thumb×thumb，文件名单独占一条，绝不压在图上
+CARD_PAD = 4          # 卡片与格子边缘的间距
+INNER_PAD = 4         # 卡片内图片四周留白
+TITLE_HEIGHT = 22     # 底部文件名条高度
 
 
 # --------------------------------------------------------------------------- 缩略图
@@ -75,6 +83,96 @@ def icon_from_file(path: str | None, size: int) -> QIcon:
     return QIcon(pixmap_from_file(path, size))
 
 
+# --------------------------------------------------------------------------- 卡片绘制
+
+
+class ThumbnailDelegate(QStyledItemDelegate):
+    """把每个缩略图画成一张「卡片」：图片在上、文件名在下。
+
+    为什么不用默认绘制：QListView 图标模式下文件名会压在缩略图底部（用户反馈
+    「名字在图片重叠」），而且默认样式没有卡片间距、选中态也不明显。
+    这里把几何算死 —— 图片区恒为 thumb×thumb，文件名单独占 TITLE_HEIGHT 高的一条，
+    两者永不重叠；文件名过长用中间省略（保留扩展名）。
+    """
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._cell = QSize(THUMB_MEDIUM + 16, THUMB_MEDIUM + 16 + TITLE_HEIGHT)
+
+    def set_cell(self, cell: QSize) -> None:
+        self._cell = QSize(cell)
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: ANN001, N802
+        return QSize(self._cell)
+
+    def paint(self, painter, option, index) -> None:  # noqa: ANN001, N802
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        card = QRectF(option.rect).adjusted(CARD_PAD, CARD_PAD, -CARD_PAD, -CARD_PAD)
+        if card.width() <= 4 or card.height() <= 4:
+            painter.restore()
+            return
+
+        background = QColor("#ffffff")
+        if selected:
+            background = QColor("#e8f0ff")
+        elif hovered:
+            background = QColor("#f5f9ff")
+        painter.setBrush(QBrush(background))
+        painter.setPen(QPen(QColor("#5b7ff0") if selected else QColor("#e3e8f2"),
+                            2 if selected else 1))
+        painter.drawRoundedRect(card, 10, 10)
+
+        image_rect = QRectF(
+            card.left() + INNER_PAD, card.top() + INNER_PAD,
+            card.width() - 2 * INNER_PAD,
+            card.height() - 2 * INNER_PAD - TITLE_HEIGHT,
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#dde8ff") if selected else QColor("#f1f4fa")))
+        painter.drawRoundedRect(image_rect, 7, 7)
+
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        if isinstance(icon, QIcon) and not icon.isNull():
+            side = int(min(image_rect.width(), image_rect.height()))
+            pixmap = icon.pixmap(QSize(side, side))
+            if not pixmap.isNull():
+                painter.drawPixmap(
+                    int(image_rect.left() + (image_rect.width() - pixmap.width()) / 2),
+                    int(image_rect.top() + (image_rect.height() - pixmap.height()) / 2),
+                    pixmap,
+                )
+
+        if index.data(FAVORITE_ROLE):
+            badge = QRectF(image_rect.right() - 24, image_rect.top() + 6, 18, 18)
+            painter.setBrush(QBrush(QColor(255, 249, 224, 240)))
+            painter.setPen(QPen(QColor("#e0a800"), 1))
+            painter.drawEllipse(badge)
+            star_font = QFont(option.font)
+            star_font.setPointSizeF(max(8.0, option.font.pointSizeF()))
+            painter.setFont(star_font)
+            painter.setPen(QColor("#c98a00"))
+            painter.drawText(badge, int(Qt.AlignmentFlag.AlignCenter), "★")
+
+        title_rect = QRectF(
+            card.left() + INNER_PAD, image_rect.bottom() + 1,
+            card.width() - 2 * INNER_PAD, TITLE_HEIGHT - 2,
+        )
+        painter.setFont(option.font)
+        painter.setPen(QColor("#1b3fa8") if selected else QColor("#2b3445"))
+        title = painter.fontMetrics().elidedText(
+            str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
+            Qt.TextElideMode.ElideMiddle,
+            int(max(10, title_rect.width())),
+        )
+        painter.drawText(title_rect, int(Qt.AlignmentFlag.AlignCenter), title)
+        painter.restore()
+
+
 # --------------------------------------------------------------------------- 网格
 
 
@@ -102,9 +200,16 @@ class ThumbnailGrid(QListWidget):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setUniformItemSizes(True)
-        self.setSpacing(6)
-        self.setWordWrap(True)
+        self.setSpacing(2)
+        self.setWordWrap(False)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        # 浅灰底 + 白色卡片：没有底色时卡片与空白糊在一起，看起来"很丑"
+        self.setStyleSheet(
+            "QListWidget { background: #eef1f7; border: 1px solid #e3e8f2;"
+            " border-radius: 10px; padding: 6px; }"
+        )
+        self._delegate = ThumbnailDelegate(self)
+        self.setItemDelegate(self._delegate)
 
         self.verticalScrollBar().valueChanged.connect(self._load_visible)
         self.itemDoubleClicked.connect(self._emit_activated)
@@ -130,15 +235,14 @@ class ThumbnailGrid(QListWidget):
         self._loaded.clear()
         self._fill_cursor = 0
         self.clear()
+        cell = self._cell_size()
         for item in self._items:
             entry = QListWidgetItem(item.display())
             entry.setData(ITEM_ROLE, item.id)
+            entry.setData(FAVORITE_ROLE, bool(item.favorited))
             entry.setToolTip(self._tooltip(item))
-            entry.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
             entry.setIcon(icon_from_file(None, self._thumb_size))
-            entry.setSizeHint(QSize(self._thumb_size, self._thumb_size + 26))
-            if item.favorited:
-                entry.setForeground(QColor("#b9790a"))
+            entry.setSizeHint(cell)
             self.addItem(entry)
 
         # 恢复选中：优先原来的项，否则默认选中第一项（大图查看/快捷键都依赖它）
@@ -172,13 +276,19 @@ class ThumbnailGrid(QListWidget):
         self._loaded.clear()
         for row in range(self.count()):
             entry = self.item(row)
-            entry.setSizeHint(QSize(self._thumb_size, self._thumb_size + 26))
+            entry.setSizeHint(self._cell_size())
             entry.setIcon(icon_from_file(None, self._thumb_size))
         self._load_visible()
 
+    def _cell_size(self) -> QSize:
+        side = self._thumb_size + 2 * CARD_PAD + 2 * INNER_PAD
+        return QSize(side, side + TITLE_HEIGHT)
+
     def _apply_metrics(self) -> None:
         self.setIconSize(QSize(self._thumb_size, self._thumb_size))
-        self.setGridSize(QSize(self._thumb_size + 14, self._thumb_size + 34))
+        cell = self._cell_size()
+        self.setGridSize(cell)
+        self._delegate.set_cell(cell)
 
     def _tooltip(self, item: ImageItem) -> str:
         parts = [item.display(), f"{item.resolution} · {item.size_text}"]
@@ -221,6 +331,28 @@ class ThumbnailGrid(QListWidget):
             return selected
         current = self.current_item()
         return [current] if current else []
+
+    def item_at_pos(self, pos) -> ImageItem | None:  # noqa: ANN001
+        entry = self.itemAt(pos)
+        if entry is None:
+            return None
+        return self.item_at_row(self.row(entry))
+
+    def focus_at(self, pos) -> ImageItem | None:  # noqa: ANN001
+        """右键落点即目标：命中哪张就把哪张设为当前项并选中。
+
+        默认行为里右键**不会**改变选中项，于是菜单会作用在"上一次选中的图片"上，
+        甚至在没有选中项时直接返回 —— 用户看到的就是「右键点了没反应」。
+        """
+        item = self.item_at_pos(pos)
+        if item is None:
+            return None
+        entry = self.itemAt(pos)
+        if entry is not None and not entry.isSelected():
+            self.clearSelection()
+            entry.setSelected(True)
+            self.setCurrentItem(entry)
+        return item
 
     # ---------- 懒加载 ----------
 
@@ -333,21 +465,29 @@ class ImageViewer(QScrollArea):
     """大图查看：滚轮缩放（Ctrl/直接）、拖拽平移、双击复位、适应窗口。
 
     用 QLabel 承载 QPixmap 并放进 QScrollArea —— 比自绘简单且滚动条天然可用。
+
+    缩放模型（用户反馈「缩放和下一张后的缩放不一致」）：
+    - `_mode == "fit"`：按窗口自适应，百分比随图片比例变化；
+    - `_mode == "manual"`：**记住百分比**，翻到上一张/下一张仍保持同一个缩放比例；
+    - 从「适应窗口」按 +/- 时，先把当前的适应百分比换算成手动百分比再乘系数，
+      所以画面是连续变化的（此前会从 39% 直接跳到 125%，看起来"缩放不一致"）。
     """
 
     zoomChanged = Signal(int, bool)      # (百分比, 是否适应窗口)
+    CANVAS_COLOR = QColor("#eef1f6")     # 画布底色：让留白看起来是"相框"而不是空白
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._label = QLabel()
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setBackgroundRole(self.backgroundRole())
+        self._label.setStyleSheet(f"background:{self.CANVAS_COLOR.name()};")
         self.setWidget(self._label)
         self.setWidgetResizable(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFrameShape(QScrollArea.Shape.NoFrame)
         self._source = QPixmap()
-        self._scale = 1.0
-        self._fit = True
+        self._mode = "fit"
+        self._percent = 100
         self._drag_origin = None
         self.setMinimumSize(320, 240)
 
@@ -363,7 +503,9 @@ class ImageViewer(QScrollArea):
             self._label.setText("无法解码该图片（可能是 HEIC/RAW 等需要额外解码器的格式）")
             return False
         self._source = pixmap
-        self._fit = True
+        # 保留当前缩放模式：手动缩放过就继续用手动百分比，否则依旧自适应
+        if self._mode != "manual":
+            self._mode = "fit"
         self._render()
         return True
 
@@ -385,9 +527,19 @@ class ImageViewer(QScrollArea):
         target = self._target_size()
         scaled = self._source.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
                                      Qt.TransformationMode.SmoothTransformation)
-        self._label.setPixmap(scaled)
-        self._label.resize(scaled.size())
-        self.zoomChanged.emit(self._display_percent(scaled.width()), self._fit)
+        self._label.setPixmap(self._framed(scaled))
+        self._label.resize(scaled.width() + 2, scaled.height() + 2)
+        self.zoomChanged.emit(self._display_percent(scaled.width()), self._mode == "fit")
+
+    @staticmethod
+    def _framed(pixmap: QPixmap) -> QPixmap:
+        """给显示中的图片描一圈 1px 细边 —— 白底照片在浅色画布上才看得出边界。"""
+        framed = QPixmap(pixmap.width() + 2, pixmap.height() + 2)
+        framed.fill(QColor("#ccd4e2"))
+        painter = QPainter(framed)
+        painter.drawPixmap(1, 1, pixmap)
+        painter.end()
+        return framed
 
     def _display_percent(self, shown_width: int) -> int:
         if self._source.isNull() or not shown_width:
@@ -395,11 +547,11 @@ class ImageViewer(QScrollArea):
         return max(1, int(round(shown_width * 100 / max(1, self._source.width()))))
 
     def _target_size(self) -> QSize:
-        if self._fit:
+        if self._mode == "fit":
             available = self.viewport().size()
             return QSize(max(1, available.width() - 8), max(1, available.height() - 8))
-        return QSize(max(1, int(self._source.width() * self._scale)),
-                     max(1, int(self._source.height() * self._scale)))
+        return QSize(max(1, int(self._source.width() * self._percent / 100)),
+                     max(1, int(self._source.height() * self._percent / 100)))
 
     def zoom_in(self) -> None:
         self._zoom(1.25)
@@ -410,20 +562,21 @@ class ImageViewer(QScrollArea):
     def _zoom(self, factor: float) -> None:
         if self._source.isNull():
             return
-        self._fit = False
-        self._scale = max(0.05, min(12.0, self._scale * factor))
+        # 从「适应窗口」开始缩放时，先把当前适应比例接上，画面才不会突然跳变
+        base = self.zoom_percent if self._mode == "fit" else self._percent
+        self._percent = int(max(5, min(1200, round(max(1, base) * factor))))
+        self._mode = "manual"
         self._render()
 
     def reset_zoom(self) -> None:
-        self._fit = True
-        self._scale = 1.0
+        self._mode = "fit"
         self._render()
 
     def actual_size(self) -> None:
         if self._source.isNull():
             return
-        self._fit = False
-        self._scale = 1.0
+        self._mode = "manual"
+        self._percent = 100
         self._render()
 
     @property
@@ -431,11 +584,12 @@ class ImageViewer(QScrollArea):
         if self._source.isNull():
             return 0
         pixmap = self._label.pixmap()
-        return self._display_percent(pixmap.width() if pixmap else 0)
+        # _framed() 每边多 1px，扣除后再算百分比
+        return self._display_percent(max(0, pixmap.width() - 2) if pixmap else 0)
 
     @property
     def is_fitted(self) -> bool:
-        return self._fit
+        return self._mode == "fit"
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         if self._source.isNull():
@@ -472,7 +626,7 @@ class ImageViewer(QScrollArea):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        if self._fit:
+        if self._mode == "fit":
             self._render()
 
 

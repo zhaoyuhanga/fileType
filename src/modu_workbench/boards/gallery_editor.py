@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (

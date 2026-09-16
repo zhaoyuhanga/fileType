@@ -104,7 +104,8 @@ class GalleryBoardPage(QWidget):
         self._stack.addWidget(self._build_viewer())
         layout.addWidget(self._stack, 1)
 
-        layout.addWidget(self._build_bottom())
+        self._bottom = self._build_bottom()
+        layout.addWidget(self._bottom)
 
         self._install_shortcuts()
         self.reload()
@@ -273,19 +274,36 @@ class GalleryBoardPage(QWidget):
     def _build_viewer(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
 
-        self._viewer_info = QLabel("未选择图片")
-        self._viewer_info.setObjectName("readerStatus")
-        layout.addWidget(self._viewer_info)
+        body = QHBoxLayout()
+        body.setSpacing(8)
 
         self._viewer = ImageViewer()
         # 缩放比例标签必须随缩放变化更新（此前只在换图时刷新，看起来"不变"）
         self._viewer.zoomChanged.connect(self._update_zoom_label)
-        layout.addWidget(self._viewer, 1)
+        body.addWidget(self._viewer, 1)
+
+        # 右侧详情：竖图左右本来就有一大片空白，用它放信息比留白好看，
+        # 也省得为了看参数再切回网格页。
+        details_box = QVBoxLayout()
+        details_box.setSpacing(4)
+        self._viewer_info = QLabel("未选择图片")
+        self._viewer_info.setObjectName("readerStatus")
+        self._viewer_info.setWordWrap(True)
+        details_box.addWidget(self._viewer_info)
+        self._viewer_details = QTextBrowser()
+        self._viewer_details.setOpenExternalLinks(True)
+        details_box.addWidget(self._viewer_details, 1)
+        holder = QWidget()
+        holder.setLayout(details_box)
+        holder.setFixedWidth(272)
+        body.addWidget(holder)
+        layout.addLayout(body, 1)
 
         row = QHBoxLayout()
+        row.setSpacing(8)
         for label, handler, tip in (
             ("◀ 上一张", lambda: self._step_viewer(-1), "上一张（←）"),
             ("下一张 ▶", lambda: self._step_viewer(1), "下一张（→）"),
@@ -315,7 +333,6 @@ class GalleryBoardPage(QWidget):
         self._viewer_zoom = QLabel("")
         self._viewer_zoom.setObjectName("readerStatus")
         row.addWidget(self._viewer_zoom)
-
         layout.addLayout(row)
         return page
 
@@ -434,6 +451,11 @@ class GalleryBoardPage(QWidget):
         self._stack.setCurrentIndex(index)
         for nav_key, button in self._nav_buttons.items():
             set_nav_active(button, nav_key == key)
+        # 大图查看时收起"导入/整理"底栏：这些按钮只对网格里的选中项有意义，
+        # 留着会白占近百像素的高度（用户反馈"大图页面空白太多"）。
+        bottom = getattr(self, "_bottom", None)
+        if bottom is not None:
+            bottom.setVisible(key == BROWSE_KEY)
 
     def on_shown(self) -> None:
         self.reload()
@@ -916,7 +938,7 @@ class GalleryBoardPage(QWidget):
         from .gallery_editor import ImageEditorDialog
 
         dialog = ImageEditorDialog(self._library, item, self)
-        dialog.saved.connect(lambda _path: self._after_edit())
+        dialog.saved.connect(self._on_edit_saved)
         dialog.exec()
 
     def _open_enhance(self) -> None:
@@ -927,11 +949,27 @@ class GalleryBoardPage(QWidget):
         from .gallery_enhance import EnhanceDialog
 
         dialog = EnhanceDialog(self._library, items, self)
-        dialog.finishedAll.connect(lambda *_: self._after_edit())
+        dialog.finishedAll.connect(self._on_enhance_done)
         dialog.exec()
 
     def _after_edit(self) -> None:
         self.reload()
+
+    def _on_edit_saved(self, path: str) -> None:
+        """编辑保存后回报到底栏 —— 否则进度条一直停在 0%，看起来像没执行。"""
+        self._progress.setValue(100)
+        self._status.setText(f"已保存编辑结果：{Path(path).name}（原图未改动）")
+        self._after_edit()
+
+    def _on_enhance_done(self, outputs: list, errors: list) -> None:
+        """AI 优化（本地增强）结束后把进度与结果写回底栏。"""
+        total = len(outputs) + len(errors)
+        self._progress.setValue(100 if not errors else int(len(outputs) * 100 / max(1, total)))
+        message = f"AI 优化完成：生成 {len(outputs)} 张新图"
+        if errors:
+            message += f"，失败 {len(errors)} 张（{errors[0]}）"
+        self._status.setText(message + "；原图未改动")
+        self._after_edit()
 
     def _analyze_selected(self) -> None:
         items = self._grid.action_items()
@@ -1011,6 +1049,7 @@ class GalleryBoardPage(QWidget):
             f"{item.display()} · {item.resolution} · {item.size_text} · {item.taken_text}"
             + ("" if ok else "（无法显示，可能是格式不支持）")
         )
+        self._viewer_details.setHtml(self._details_html(item))
         self._update_zoom_label()
         self._library.storage.mark_opened(item.id)
 
@@ -1075,8 +1114,14 @@ class GalleryBoardPage(QWidget):
         self._status.setText("正在取消任务…")
 
     def _on_grid_menu(self, pos) -> None:  # noqa: ANN001
+        # 右键落点即操作对象：默认右键不改选中项，会出现"菜单作用于上一张图"
+        # 甚至没有任何选中项时菜单根本不弹（表现：右键没反应）
+        clicked = self._grid.focus_at(pos)
         items = self._grid.action_items()
+        if clicked is not None:
+            items = [clicked]
         if not items:
+            self._toaster.info("请右键点在某张图片上")
             return
         from PySide6.QtWidgets import QMenu
 

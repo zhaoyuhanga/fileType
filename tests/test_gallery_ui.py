@@ -17,8 +17,18 @@ import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from modu_workbench.boards.gallery_board import BROWSE_KEY, VIEWER_KEY, GalleryBoardPage
-from modu_workbench.boards.gallery_widgets import ITEM_ROLE
+from modu_workbench.boards.gallery_board import (
+    BROWSE_KEY,
+    THUMB_STEPS,
+    VIEWER_KEY,
+    GalleryBoardPage,
+)
+from modu_workbench.boards.gallery_widgets import (
+    CARD_PAD,
+    INNER_PAD,
+    ITEM_ROLE,
+    TITLE_HEIGHT,
+)
 from modu_workbench.core.image import ImageLibrary, ImageStorage
 
 
@@ -295,3 +305,115 @@ def test_viewer_page_navigation_keeps_scope(page: GalleryBoardPage, qapp: QAppli
     assert page._stack.currentIndex() == 1
     page.show_page(BROWSE_KEY)
     assert page._stack.currentIndex() == 0
+
+
+# ------------------------------------------------- 第二轮反馈：卡片排版 / 缩放 / 右键 / 进度
+
+
+def test_grid_cell_keeps_title_below_thumbnail(page: GalleryBoardPage) -> None:
+    """文件名必须有自己的位置，不能压在缩略图上（"名字在图片重叠"）。"""
+    cell = page._grid._cell_size()
+    assert cell.height() - 2 * CARD_PAD - 2 * INNER_PAD - TITLE_HEIGHT == page._grid._thumb_size
+    assert cell.width() - 2 * CARD_PAD - 2 * INNER_PAD == page._grid._thumb_size
+    entry = page._grid.item(0)
+    assert entry.sizeHint() == cell
+    assert page._grid.gridSize() == cell
+
+    for size, columns in THUMB_STEPS:
+        page._grid.set_thumb_size(size, columns=columns)
+        grown = page._grid._cell_size()
+        assert grown.height() - 2 * CARD_PAD - 2 * INNER_PAD - TITLE_HEIGHT == page._grid._thumb_size
+
+
+def test_zoom_percent_survives_next_image(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """手动缩放后翻到下一张，缩放比例必须保持一致（用户反馈的不一致）。"""
+    page._step_viewer(0)
+    qapp.processEvents()
+    fitted = page._viewer_zoom.text()
+    assert "适应窗口" in fitted
+
+    page._viewer.zoom_in()
+    qapp.processEvents()
+    zoomed = page._viewer.zoom_percent
+    assert page._viewer_zoom.text() == f"缩放 {zoomed}%"
+
+    page._step_viewer(1)
+    qapp.processEvents()
+    assert not page._viewer.is_fitted
+    assert page._viewer.zoom_percent == zoomed
+    assert page._viewer_zoom.text() == f"缩放 {zoomed}%"
+
+    page._viewer.reset_zoom()
+    qapp.processEvents()
+    assert "适应窗口" in page._viewer_zoom.text()
+
+
+def test_zoom_from_fit_is_continuous(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """从「适应窗口」放大应按当前比例连续变化，而不是直接跳到 125%。"""
+    page._step_viewer(0)
+    qapp.processEvents()
+    fitted_percent = page._viewer.zoom_percent
+    page._viewer.zoom_in()
+    qapp.processEvents()
+    assert abs(page._viewer.zoom_percent - round(fitted_percent * 1.25)) <= 2
+    assert page._viewer.zoom_percent != 125
+
+    page._viewer.zoom_out()
+    qapp.processEvents()
+    assert abs(page._viewer.zoom_percent - fitted_percent) <= 2
+
+
+def test_viewer_page_hides_browse_bottom_bar(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """大图页收起"导入/整理"底栏，把高度让给图片。"""
+    page.show_page(BROWSE_KEY)
+    qapp.processEvents()
+    assert page._bottom.isVisible()
+
+    page.show_page(VIEWER_KEY)
+    qapp.processEvents()
+    assert not page._bottom.isVisible()
+
+    page.show_page(BROWSE_KEY)
+    qapp.processEvents()
+    assert page._bottom.isVisible()
+
+
+def test_right_click_targets_image_under_cursor(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """没有任何选中项时右键也要命中光标下的图片（否则菜单/编辑都是"没反应"）。"""
+    grid = page._grid
+    grid.clearSelection()
+    grid.setCurrentRow(-1)
+    assert grid.action_items() == []
+
+    entry = grid.item(2)
+    target = grid.item_at_row(2)
+    assert target is not None
+    hit = grid.focus_at(grid.visualItemRect(entry).center())
+    assert hit is not None and hit.id == target.id
+    assert grid.currentRow() == 2
+    assert [item.id for item in grid.selected_items()] == [target.id]
+    assert [item.id for item in grid.action_items()] == [target.id]
+
+
+def test_enhance_completion_reports_progress(page: GalleryBoardPage, qapp: QApplication) -> None:
+    """AI 优化结束后底栏百分比必须变化（此前一直停在 0%）。"""
+    page._progress.setValue(0)
+    page._on_enhance_done(["C:/tmp/a.jpg", "C:/tmp/b.jpg"], [])
+    qapp.processEvents()
+    assert page._progress.value() == 100
+    assert "AI 优化完成" in page._status.text()
+    assert "2 张新图" in page._status.text()
+
+    page._on_enhance_done(["C:/tmp/a.jpg"], ["坏图：无法解码"])
+    qapp.processEvents()
+    assert page._progress.value() == 50
+    assert "失败 1 张" in page._status.text()
+
+
+def test_edit_save_reports_progress(page: GalleryBoardPage, qapp: QApplication) -> None:
+    page._progress.setValue(0)
+    page._on_edit_saved("C:/tmp/风景_edited.jpg")
+    qapp.processEvents()
+    assert page._progress.value() == 100
+    assert "已保存编辑结果" in page._status.text()
+    assert "风景_edited.jpg" in page._status.text()
