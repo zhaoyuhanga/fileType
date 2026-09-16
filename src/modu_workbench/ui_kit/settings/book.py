@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QFormLayout, QLabel, QSpinBox, QVBoxLayout
 
-from modu_workbench.services import config
+from modu_workbench.core.platform import paths as config
 
 from .base import SettingsPage, app_settings
 

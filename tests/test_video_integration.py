@@ -39,7 +39,7 @@ VIDEO_MODULES = [
     "modu_workbench.boards.video.widgets",
     "modu_workbench.app.registry",
     "modu_workbench.services.app_context",
-    "modu_workbench.services.config",
+    "modu_workbench.core.platform.paths",
     "modu_workbench.services.media_server",
 ]
 
@@ -65,7 +65,7 @@ def test_app_entry_imports_cleanly() -> None:
 
 
 def test_video_storage_paths_configured() -> None:
-    from modu_workbench.services.config import video_db_path, video_dir, video_download_dir
+    from modu_workbench.core.platform.paths import video_db_path, video_dir, video_download_dir
 
     assert video_db_path().endswith("video.db")
     assert Path(video_dir()).is_dir()
@@ -73,7 +73,7 @@ def test_video_storage_paths_configured() -> None:
 
 
 def test_app_context_returns_video_singletons() -> None:
-    from modu_workbench.services import app_context
+    from modu_workbench.app import context as app_context
 
     library = app_context.video_library()
     assert library is app_context.video_library()
@@ -84,7 +84,7 @@ def test_app_context_returns_video_singletons() -> None:
 
 def test_video_registry_settings_persist_through_app_context() -> None:
     """源设置写入后应能从存储读回（验证配置持久化链路）。"""
-    from modu_workbench.services import app_context
+    from modu_workbench.app import context as app_context
 
     registry = app_context.video_registry()
     storage = app_context.video_storage()

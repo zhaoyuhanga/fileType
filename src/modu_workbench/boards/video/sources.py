@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.video import VideoRegistry
-from modu_workbench.services import app_context
+from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 
 COLUMNS = ["启用", "数据源", "能力", "状态", "接口地址（可改）"]

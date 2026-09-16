@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from modu_workbench.core.convert.engine import run_conversion
-from modu_workbench.core.convert.media_io import find_ffmpeg
+from modu_workbench.core.platform.media import find_ffmpeg
 from modu_workbench.core.convert.registry import get_action
 
 

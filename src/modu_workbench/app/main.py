@@ -349,7 +349,7 @@ def _run_dependency_check(output_path: str) -> int:
         """
         import subprocess
 
-        from modu_workbench.core.convert.media_io import find_ffmpeg, find_ffprobe
+        from modu_workbench.core.platform.media import find_ffmpeg, find_ffprobe
 
         ffmpeg = find_ffmpeg()
         if not ffmpeg:

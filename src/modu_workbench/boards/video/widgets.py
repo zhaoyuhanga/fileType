@@ -39,7 +39,7 @@ from modu_workbench.core.video import (
     VideoStorage,
 )
 from modu_workbench.core.video import hls
-from modu_workbench.services import app_context
+from . import context as app_context
 
 REMOTE_ROLE = Qt.ItemDataRole.UserRole + 1
 VIDEO_ID_ROLE = Qt.ItemDataRole.UserRole
@@ -58,7 +58,7 @@ def video_settings():  # noqa: ANN201
 
 def video_download_dir_pref() -> str:
     """影视下载目录：优先用户设置，否则默认 ~/Videos/墨软影视。"""
-    from modu_workbench.services.config import video_download_dir
+    from modu_workbench.core.platform.paths import video_download_dir
 
     stored = str(video_settings().value("video/download_dir", "", type=str) or "").strip()
     return stored or str(video_download_dir())

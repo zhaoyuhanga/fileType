@@ -282,7 +282,7 @@ def qapp() -> QApplication:
 def test_llm_settings_page_manages_profiles(qapp: QApplication, tmp_path: Path,
                                             monkeypatch) -> None:
     """设置页能添加/重命名/上移下移/停用/删除，并反映调用顺序。"""
-    from modu_workbench.services import app_context
+    from modu_workbench.app import context as app_context
     from modu_workbench.ui_kit.settings.llm import LlmSettingsPage
 
     store = LlmStorage(tmp_path / "page.db")
@@ -337,7 +337,7 @@ def test_llm_settings_page_manages_profiles(qapp: QApplication, tmp_path: Path,
 def test_gallery_settings_points_to_llm_page(qapp: QApplication, tmp_path: Path,
                                              monkeypatch) -> None:
     """图库页不再重复配置 Key，而是指向「大模型」页并显示可用数量。"""
-    from modu_workbench.services import app_context
+    from modu_workbench.app import context as app_context
     from modu_workbench.ui_kit.settings.gallery import GallerySettingsPage
 
     store = LlmStorage(tmp_path / "g.db")

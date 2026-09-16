@@ -11,7 +11,10 @@ import threading
 from pathlib import Path
 from typing import Callable, Iterable, List
 
-from modu_workbench.core.convert.media_io import find_ffmpeg
+from modu_workbench.core.platform.media import (
+    find_ffmpeg,
+    probe_duration_ms as _probe_duration_ms,
+)
 
 from .downloader import DownloadResult, copy_local, download_episode, download_many
 from .models import (
@@ -48,10 +51,11 @@ def scan_video_files(paths: Iterable[str | Path]) -> List[str]:
 
 
 def probe_duration_ms(path: str | Path) -> int:
-    """用 ffprobe 读取时长（毫秒）；不可用时返回 0（不做硬依赖）。"""
-    from modu_workbench.core.music.library import probe_duration_ms as _probe
+    """用 ffprobe 读取时长（毫秒）；不可用时返回 0（不做硬依赖）。
 
-    return _probe(path)
+    统一走 `core/platform/media`：影视不再依赖乐库的实现（v1.0.0 解耦）。
+    """
+    return _probe_duration_ms(path)
 
 
 class VideoLibrary:

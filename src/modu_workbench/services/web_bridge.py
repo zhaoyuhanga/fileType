@@ -19,7 +19,7 @@ from modu_workbench.core.convert import engine as convert_engine
 from modu_workbench.core.convert.formats import format_from_extension
 from modu_workbench.core.convert.registry import get_action
 from modu_workbench.core.convert.text_io import read_text_smart, write_text
-from modu_workbench.services.file_scan import scan_paths
+from modu_workbench.core.platform.files import scan_paths
 
 
 def file_item_json(file_path: str, index: int) -> dict:
@@ -201,7 +201,7 @@ class WebBridge(QObject):
         return ""
 
     def handle_getEngineStatus(self) -> list[dict]:
-        from modu_workbench.core.convert.media_io import find_ffmpeg
+        from modu_workbench.core.platform.media import find_ffmpeg
         from modu_workbench.core.convert.office_io import find_soffice
 
         return [

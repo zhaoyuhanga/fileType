@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.video import MEDIA_KIND_LABELS, RemoteVideo, VideoLibrary, VideoStorage
-from modu_workbench.services import app_context
+from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 
 from .detail import VideoDetailDialog

@@ -1,4 +1,4 @@
-"""文件扫描：收集可转换/可预览的本地文件（唯一实现，供桥接与导入复用）。"""
+"""本地文件扫描：把文件/文件夹展开为受支持的文件列表（导入与预览共用）。"""
 from __future__ import annotations
 
 from pathlib import Path

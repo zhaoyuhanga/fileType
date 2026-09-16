@@ -337,7 +337,7 @@ def test_source_dialog_lists_all_sources(qapp: QApplication) -> None:
 
 
 def test_source_dialog_toggle_enabled(qapp: QApplication) -> None:
-    from modu_workbench.services import app_context
+    from modu_workbench.app import context as app_context
 
     dialog = VideoSourceDialog()
     try:

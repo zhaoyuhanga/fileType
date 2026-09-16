@@ -18,7 +18,7 @@ from modu_workbench.core.music import (
     MusicPlayer,
     format_duration,
 )
-from modu_workbench.services import app_context
+from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 

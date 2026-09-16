@@ -5,7 +5,7 @@
 
 典型用法（图库/影视/任何需要大模型的板块）::
 
-    from modu_workbench.services import app_context
+    from modu_workbench.app import context as app_context
 
     router = app_context.llm_router()
     text, profile = router.chat("text", [{"role": "user", "content": "你好"}])

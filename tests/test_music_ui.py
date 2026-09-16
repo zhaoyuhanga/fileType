@@ -400,7 +400,7 @@ def test_preview_uses_shared_player_bar(qapp: QApplication, storage: MusicStorag
     from modu_workbench.core.music import MusicPlayer as Player
 
     fake_player = Player(silent=True)
-    monkeypatch.setattr("modu_workbench.services.app_context.music_player", lambda: fake_player)
+    monkeypatch.setattr("modu_workbench.boards.music.context.music_player", lambda: fake_player)
 
     class FakeResolver(QObject):
         finishedResults = Signal(object, object)

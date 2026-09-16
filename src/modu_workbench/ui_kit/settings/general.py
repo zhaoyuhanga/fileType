@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from modu_workbench.core.convert.media_io import find_ffmpeg, find_ffprobe
+from modu_workbench.core.platform.media import find_ffmpeg, find_ffprobe
 from modu_workbench.core.convert.office_io import find_soffice
-from modu_workbench.services import config
+from modu_workbench.core.platform import paths as config
 
 from .base import SettingsPage, app_settings
 

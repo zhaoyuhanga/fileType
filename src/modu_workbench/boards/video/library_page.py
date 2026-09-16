@@ -345,7 +345,7 @@ class VideoLibraryPage(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def _open_library_dir(self) -> None:
-        from modu_workbench.services.config import video_download_dir
+        from modu_workbench.core.platform.paths import video_download_dir
 
         target = Path(video_download_dir_pref() or video_download_dir())
         target.mkdir(parents=True, exist_ok=True)

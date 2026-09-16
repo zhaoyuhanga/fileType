@@ -504,7 +504,7 @@ class ImageLibrary:
     @staticmethod
     def _llm_router():  # noqa: ANN205
         """应用级大模型路由器（多类型 / 多配置 / 优先级降级）。"""
-        from modu_workbench.services import app_context
+        from modu_workbench.app import context as app_context
 
         return app_context.llm_router()
 

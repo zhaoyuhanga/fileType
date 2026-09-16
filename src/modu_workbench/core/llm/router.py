@@ -56,7 +56,7 @@ class OpenAiCompatClient:
     def _client(self):  # noqa: ANN202
         if self._http is not None:
             return self._http
-        from modu_workbench.core.video.sources.http import HttpClient
+        from modu_workbench.core.platform.http import HttpClient
 
         return HttpClient(timeout=float(self.profile.timeout or 60.0), attempts=2)
 

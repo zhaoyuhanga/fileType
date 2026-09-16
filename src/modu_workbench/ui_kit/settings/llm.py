@@ -34,7 +34,7 @@ from modu_workbench.core.llm import (
     kind_label,
     provider_preset,
 )
-from modu_workbench.services import app_context
+from modu_workbench.app import context as app_context
 
 from .base import SettingsPage
 

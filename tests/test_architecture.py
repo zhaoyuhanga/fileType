@@ -26,11 +26,6 @@ BOARD_KEYS = ("book", "convert", "music", "video", "gallery")
 
 # 允许的跨板块依赖（键 = (来源包, 目标包)）：P2 解耦完成后应为空
 PENDING_DECOUPLING: dict[tuple[str, str], str] = {
-    ("core.video", "core.music"): "P2：probe_duration_ms 抽到 core/platform",
-    ("core.video", "core.convert"): "P2：ffmpeg 定位抽到 core/platform",
-    ("core.music", "core.convert"): "P2：ffmpeg/ffprobe 定位抽到 core/platform",
-    ("core.gallery", "core.video"): "P2：HTTP 客户端（sources.http）抽到 core/platform",
-    ("core.llm", "core.video"): "P2：HTTP 客户端（sources.http）抽到 core/platform",
     ("ui_kit.settings", "core.video"): "P4：设置页迁到各板块包内",
     ("ui_kit.settings", "core.music"): "P4：设置页迁到各板块包内",
     ("ui_kit.settings", "core.gallery"): "P4：设置页迁到各板块包内",
@@ -38,6 +33,10 @@ PENDING_DECOUPLING: dict[tuple[str, str], str] = {
     ("ui_kit.settings", "core.book"): "P4：设置页迁到各板块包内",
     ("ui_kit.settings", "core.llm"): "P4：设置页迁到各板块包内",
 }
+
+# `core.convert` 是共享转换引擎（PDF/图片/归档/音视频/表格/文本），
+# 影视、乐库、图库都会调用它输出文件；但它自己不得反向依赖任何板块。
+SHARED_CORE = ("core.convert",)
 
 
 def module_files() -> list[Path]:
@@ -124,6 +123,8 @@ def violations() -> list[str]:
             elif source.startswith("core."):
                 if target in ("core.platform", "core.llm", "ui_kit", "services"):
                     continue
+                if target in SHARED_CORE and source not in SHARED_CORE:
+                    continue          # 共享转换引擎：其他板块可以调用它
                 if target.startswith("core.") and (source, target) in PENDING_DECOUPLING:
                     continue
                 if target.startswith("core."):

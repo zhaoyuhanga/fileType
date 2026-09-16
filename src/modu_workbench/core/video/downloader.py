@@ -131,7 +131,7 @@ def looks_like_video(path: str | Path, content_type: str = "") -> bool:
 
 def find_ffmpeg() -> str | None:
     """复用转换引擎的 ffmpeg 定位逻辑（含 MODU_FFMPEG 环境变量与 PATH）。"""
-    from modu_workbench.core.convert.media_io import find_ffmpeg as _find
+    from modu_workbench.core.platform.media import find_ffmpeg as _find
 
     return _find()
 

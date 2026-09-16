@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from modu_workbench.core.convert.media_io import find_ffmpeg
+from modu_workbench.core.platform.media import find_ffmpeg
 from modu_workbench.core.convert.office_io import find_soffice
 
 from .base import SettingsPage, app_settings

@@ -34,8 +34,8 @@ from modu_workbench.core.video import (
     apply_quality_choice,
     looks_like_media_url,
 )
-from modu_workbench.services import app_context
-from modu_workbench.services.config import video_dir
+from . import context as app_context
+from modu_workbench.core.platform.paths import video_dir
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 

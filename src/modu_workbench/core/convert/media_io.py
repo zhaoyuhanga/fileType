@@ -5,8 +5,6 @@ ffmpeg 解析顺序：环境变量 MODU_FFMPEG → PATH。未找到时抛出中�
 """
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import threading
 import time
@@ -45,66 +43,13 @@ CONTAINER_FORMATS = {"aac": "adts", "webm": "webm", "flv": "flv", "ts": "mpegts"
 AUDIO_ONLY_TARGETS = AUDIO_TARGETS | {"mp3"}
 
 
-def bundled_dir() -> Path | None:
-    """随包携带的 ffmpeg 目录（打包时放到 _MEIPASS/tools/ffmpeg）。
-
-    这样用户无需自行安装 ffmpeg，HLS 下载开箱即可输出 MP4。
-    """
-    import sys
-
-    candidates = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidates.append(Path(meipass) / "tools" / "ffmpeg")
-    # 源码运行：仓库根的 tools/ffmpeg
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidate = parent / "tools" / "ffmpeg"
-        if candidate.is_dir():
-            candidates.append(candidate)
-            break
-    for candidate in candidates:
-        if candidate.is_dir():
-            return candidate
-    return None
-
-
-def _tool_name(stem: str) -> str:
-    return f"{stem}.exe" if os.name == "nt" else stem
-
-
-def find_ffmpeg() -> str | None:
-    """定位 ffmpeg 可执行文件。
-
-    优先级：`MODU_FFMPEG` 环境变量 → 随包 tools/ffmpeg → PATH。
-    """
-    override = os.environ.get("MODU_FFMPEG")
-    if override and Path(override).is_file():
-        return override
-    bundled = bundled_dir()
-    if bundled is not None:
-        candidate = bundled / _tool_name("ffmpeg")
-        if candidate.is_file():
-            return str(candidate)
-    return shutil.which("ffmpeg") or None
-
-
-def find_ffprobe() -> str | None:
-    """定位 ffprobe（与 ffmpeg 同一套优先级）。"""
-    override = os.environ.get("MODU_FFPROBE")
-    if override and Path(override).is_file():
-        return override
-    ffmpeg = find_ffmpeg()
-    if ffmpeg:
-        sibling = Path(ffmpeg).with_name(_tool_name("ffprobe"))
-        if sibling.is_file():
-            return str(sibling)
-    bundled = bundled_dir()
-    if bundled is not None:
-        candidate = bundled / _tool_name("ffprobe")
-        if candidate.is_file():
-            return str(candidate)
-    return shutil.which("ffprobe") or None
+# ffmpeg / ffprobe 定位已统一到 core/platform/media.py（板块无关能力），
+# 这里再导出一次，兼容既有 `from ...media_io import find_ffmpeg` 的调用方。
+from modu_workbench.core.platform.media import (  # noqa: E402
+    bundled_dir,
+    find_ffmpeg,
+    find_ffprobe,
+)
 
 
 def convert_media(source_path: str | Path, target_format: str, output_path: str | Path,

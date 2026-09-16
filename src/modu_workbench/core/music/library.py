@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, Iterable, List
 
-from modu_workbench.core.convert.media_io import AUDIO_TARGETS, find_ffmpeg
-from modu_workbench.core.convert.media_io import find_ffprobe as _find_ffprobe
+from modu_workbench.core.convert.media_io import AUDIO_TARGETS
+from modu_workbench.core.platform.media import (
+    find_ffmpeg,
+    find_ffprobe as _find_ffprobe,
+    probe_duration_ms as _probe_duration_ms,
+)
 
 from .models import AUDIO_EXTENSIONS, MUSIC_TARGETS, RemoteTrack, Track, parse_track_name
 from .storage import MusicStorage
@@ -36,27 +39,12 @@ def scan_audio_files(paths: Iterable[str | Path]) -> List[str]:
 
 
 def find_ffprobe() -> str | None:
-    """兼容旧调用：统一走转换引擎的定位逻辑（含随包 tools/ffmpeg）。"""
+    """兼容旧调用：统一走 core/platform/media 的定位逻辑（含随包 tools/ffmpeg）。"""
     return _find_ffprobe()
 
 
-def probe_duration_ms(path: str | Path) -> int:
-    """用 ffprobe 读取时长（毫秒）；不可用时返回 0（不做硬依赖）。"""
-    ffprobe = _find_ffprobe()
-    if not ffprobe:
-        return 0
-    try:
-        output = subprocess.run(
-            [ffprobe, "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        value = (output.stdout or "").strip().splitlines()
-        seconds = float(value[0]) if value and value[0] else 0.0
-        return int(seconds * 1000)
-    except Exception:  # noqa: BLE001
-        return 0
+# 时长探测统一实现在 core/platform/media（影视板块也用它，避免板块互相依赖）
+probe_duration_ms = _probe_duration_ms
 
 
 class MusicLibrary:

@@ -207,7 +207,7 @@ def test_library_convert_guards(library: MusicLibrary, tmp_path: Path) -> None:
 
 
 def test_library_convert_with_ffmpeg(library: MusicLibrary, tmp_path: Path) -> None:
-    from modu_workbench.core.convert.media_io import find_ffmpeg
+    from modu_workbench.core.platform.media import find_ffmpeg
 
     ffmpeg = find_ffmpeg()
     if not ffmpeg:

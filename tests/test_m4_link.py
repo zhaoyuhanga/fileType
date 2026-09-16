@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 
 from modu_workbench.boards.book.online import OnlineDownloadPage
 from modu_workbench.core.book import Library
-from modu_workbench.services import app_context
+from modu_workbench.app import context as app_context
 from modu_workbench.ui_kit.settings import PAGE_ROLE, SettingsDialog
 from modu_workbench.ui_kit.toast import Toaster
 

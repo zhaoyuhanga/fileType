@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.gallery import format_size, load_ai_config, save_ai_config
 from modu_workbench.core.llm import KIND_IMAGE, KIND_TEXT, kind_label
-from modu_workbench.services import app_context, config
+from modu_workbench.app import context as app_context
+from modu_workbench.core.platform import paths as config
 
 from .base import SettingsPage, app_settings
 

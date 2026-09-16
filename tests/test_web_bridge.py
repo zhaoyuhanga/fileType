@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from modu_workbench import __version__
-from modu_workbench.services.file_scan import SUPPORTED_IMPORT_EXTENSIONS, scan_paths
+from modu_workbench.core.platform.files import SUPPORTED_IMPORT_EXTENSIONS, scan_paths
 from modu_workbench.services.web_bridge import _BatchWorker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

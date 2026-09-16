@@ -25,7 +25,7 @@ from modu_workbench.core.music import (
     Track,
     scan_audio_files,
 )
-from modu_workbench.services.config import music_dir
+from modu_workbench.core.platform.paths import music_dir
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (

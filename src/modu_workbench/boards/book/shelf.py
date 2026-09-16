@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.book import BookRecord, Library
-from modu_workbench.services.config import walk_book_files
+from modu_workbench.core.book.files import walk_book_files
 from modu_workbench.ui_kit.toast import Toaster
 
 

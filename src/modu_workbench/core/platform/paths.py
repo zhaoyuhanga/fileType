@@ -1,8 +1,7 @@
-"""本地数据目录与旧版数据迁移（墨软书库）。
+"""数据目录与文件布局（板块无关）。
 
-优先级：
-1. 环境变量 MODU_DATA_DIR（测试/便携模式）
-2. %APPDATA%\\ModuWorkbench（Windows）或 ~/.ModuWorkbench
+优先级：环境变量 `MODU_DATA_DIR`（测试/便携模式）→ `%APPDATA%\\ModuWorkbench` → `~/.ModuWorkbench`。
+各板块只从这里取路径，不自己拼目录，保证"数据目录可整体搬移"。
 """
 from __future__ import annotations
 
@@ -12,7 +11,6 @@ from pathlib import Path
 
 APP_DIR_NAME = "ModuWorkbench"
 LEGACY_APP_DIR_NAME = "WinEBook"  # win-e-book 旧数据目录
-SUPPORTED_BOOK_EXTENSIONS = (".txt", ".epub")
 
 
 def app_data_dir() -> Path:
@@ -27,9 +25,13 @@ def app_data_dir() -> Path:
     return path
 
 
+# ---------- 墨软书库 ----------
+
 def library_db_path() -> str:
     return str(app_data_dir() / "library.db")
 
+
+# ---------- 墨软乐库 ----------
 
 def music_db_path() -> str:
     """墨软乐库曲库数据库路径。"""
@@ -51,6 +53,8 @@ def music_download_dir() -> Path:
     return path
 
 
+# ---------- 墨软影视 ----------
+
 def video_db_path() -> str:
     """墨软影视影视库数据库路径。"""
     return str(app_data_dir() / "video.db")
@@ -70,6 +74,8 @@ def video_download_dir() -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+
+# ---------- 墨软图库 ----------
 
 def gallery_db_path() -> str:
     """墨软图库数据库路径。"""
@@ -98,10 +104,14 @@ def gallery_import_dir() -> Path:
     return path
 
 
+# ---------- 大模型 ----------
+
 def llm_db_path() -> str:
     """大模型配置数据库路径（所有板块共用同一份配置）。"""
     return str(app_data_dir() / "llm.db")
 
+
+# ---------- 旧数据 ----------
 
 def legacy_db_path() -> Path | None:
     """win-e-book 旧库位置（%APPDATA%\\WinEBook\\library.db）。"""
@@ -112,7 +122,7 @@ def legacy_db_path() -> Path | None:
 
 
 def ensure_legacy_migration() -> str:
-    """首次运行时若发现墨软旧库则复制到新位置（返回实际使用的 db 路径）。"""
+    """首次运行时若发现墨软书库旧库则复制到新位置（返回实际使用的 db 路径）。"""
     target = library_db_path()
     if Path(target).is_file():
         return target
@@ -121,21 +131,3 @@ def ensure_legacy_migration() -> str:
         Path(target).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(legacy), target)
     return target
-
-
-def walk_book_files(paths: list[str]) -> list[str]:
-    """扫描给定文件/文件夹，收集受支持的书本文件（递归、去重）。"""
-    result: list[str] = []
-    for raw in paths:
-        p = Path(raw)
-        if not p.exists():
-            continue
-        if p.is_file():
-            if p.suffix.lower() in SUPPORTED_BOOK_EXTENSIONS:
-                result.append(str(p))
-            continue
-        if p.is_dir():
-            for child in p.rglob("*"):
-                if child.is_file() and child.suffix.lower() in SUPPORTED_BOOK_EXTENSIONS:
-                    result.append(str(child))
-    return list(dict.fromkeys(result))

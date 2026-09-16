@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from modu_workbench.core.book import Library
-from modu_workbench.services import app_context
+from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 

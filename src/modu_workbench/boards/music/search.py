@@ -29,7 +29,7 @@ from modu_workbench.core.music import (
     get_source,
     list_sources,
 )
-from modu_workbench.services import app_context
+from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (

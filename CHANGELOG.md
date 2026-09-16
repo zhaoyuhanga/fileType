@@ -19,6 +19,24 @@
   「板块之间互不影响」，并显式登记待解耦清单（P2 清空）。
 - 全部用 `git mv` 迁移以保留历史；全量 pytest 通过。
 
+### P2 依赖解耦（core/platform 公共层）
+
+- 新增 `core/platform/` 作为**唯一允许被所有板块依赖**的公共层：
+  - `paths.py`：数据目录与文件布局（原 `services/config.py`，书库专用的扫描函数移入 `core/book/files.py`）；
+  - `http.py`：统一 HTTP 客户端（UA/超时/退避重试/错误翻译）——音源与视频源此前各写一份，
+    现在合并为唯一实现，板块只用 `hint` 定制错误提示；
+  - `media.py`：ffmpeg/ffprobe 定位（原 `core/convert/media_io.py`）与媒体时长探测
+    （原 `core/music/library.py`）；`media_io` 保留同名再导出以兼容旧引用；
+  - `files.py`：本地文件扫描（原 `services/file_scan.py`）。
+- **应用级上下文拆分**：单例回到各自板块（`boards/<板块>/context.py`），
+  大模型单例放 `core.llm.context`；`app/context.py` 做按名字懒加载的聚合，
+  `services/app_context.py` 退化为懒转发兼容层。板块内部改用 `from . import context as app_context`。
+- 依赖方向修正：影视不再依赖乐库（时长探测统一到 `core/platform/media`）、
+  图库与大模型不再依赖影视的 HTTP 模块。
+- `tests/test_architecture.py`：待解耦清单只剩设置页一项（P4 处理），
+  并明确 `core.convert` 为共享转换引擎（可被调用，但不得反向依赖板块）。
+- 全量 pytest + 应用依赖自检（15 项）通过。
+
 ## v0.3.1 — 墨软影视修复版
 
 ### 修复：影视板块「播放和下载都失败」
