@@ -1,4 +1,4 @@
-"""墨读音乐核心测试：存储 / 歌单 / 音源解析 / 下载 / 播放队列 / 转换入口。"""
+"""墨软乐库核心测试：存储 / 歌单 / 音源解析 / 下载 / 播放队列 / 转换入口。"""
 from __future__ import annotations
 
 import threading

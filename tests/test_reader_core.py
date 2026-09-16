@@ -1,4 +1,4 @@
-"""墨读书库核心流程测试：storage 持久化 + library 导入/进度/历史。"""
+"""墨软书库核心流程测试：storage 持久化 + library 导入/进度/历史。"""
 from __future__ import annotations
 
 import tempfile

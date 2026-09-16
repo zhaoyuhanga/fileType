@@ -1,4 +1,4 @@
-"""墨读音乐界面共享组件：表格、对话框与后台工作线程。"""
+"""墨软乐库界面共享组件：表格、对话框与后台工作线程。"""
 from __future__ import annotations
 
 import threading
@@ -48,7 +48,7 @@ def music_settings():  # noqa: ANN201
 
 
 def music_download_dir_pref() -> str:
-    """音乐下载目录：优先用户设置，否则默认 ~/Music/墨读音乐。"""
+    """音乐下载目录：优先用户设置，否则默认 ~/Music/墨软乐库。"""
     from modu_workbench.services.config import music_download_dir
 
     stored = str(music_settings().value("music/download_dir", "", type=str) or "").strip()

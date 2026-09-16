@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 墨读·工作台 macOS 打包脚本（在 Mac 上执行）
+# 墨软·工作台 macOS 打包脚本（在 Mac 上执行）
 # 用法: bash packaging/build_mac.sh
 set -euo pipefail
 
@@ -27,7 +27,7 @@ if [ -d "$APP" ]; then
   echo "  xattr -dr com.apple.quarantine \"$APP\""
   echo
   echo "如需制作 DMG 安装镜像（Mac 上执行）："
-  echo "  hdiutil create -volname \"墨读工作台\" -srcfolder \"$APP\" -ov -format UDZO \"dist/墨读工作台-0.3.0-mac.dmg\""
+  echo "  hdiutil create -volname \"墨软工作台\" -srcfolder \"$APP\" -ov -format UDZO \"dist/墨软工作台-0.3.0-mac.dmg\""
 else
   echo "打包失败：未找到 $APP" >&2
   exit 1

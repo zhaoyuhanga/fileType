@@ -1,4 +1,4 @@
-"""墨读转换引擎（自 fileType 转换能力迁移）。
+"""墨软转换引擎（自 fileType 转换能力迁移）。
 
 - registry.py  动作注册与能力判定
 - formats.py   格式集合 / 扩展名映射

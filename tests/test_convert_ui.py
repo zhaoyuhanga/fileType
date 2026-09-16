@@ -1,4 +1,4 @@
-"""墨读转换板块 UI 冒烟测试（offscreen）：导入/动作/批量执行/文档查看器。"""
+"""墨软转换板块 UI 冒烟测试（offscreen）：导入/动作/批量执行/文档查看器。"""
 from __future__ import annotations
 
 from pathlib import Path

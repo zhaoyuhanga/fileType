@@ -834,7 +834,7 @@ async function writeDocx(outputPath: string, text: string, title: string): Promi
     .map((line) => new docx.Paragraph({ children: [new docx.TextRun(line || " ")] }));
 
   const document = new docx.Document({
-    creator: "万能格式转换器",
+    creator: "墨软转换",
     title,
     sections: [{ children: paragraphs }]
   });

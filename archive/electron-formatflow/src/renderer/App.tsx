@@ -244,7 +244,7 @@ export function App() {
             ⇄
           </span>
           <div>
-            <h1>万能格式转换器</h1>
+            <h1>墨软转换</h1>
             <p>本地离线 · 转换 / 预览 / 编辑</p>
           </div>
         </div>

@@ -1,4 +1,4 @@
-"""墨读转换 · Web 前端宿主：加载 main 分支 React 构建并桥接 Python。
+"""墨软转换 · Web 前端宿主：加载 main 分支 React 构建并桥接 Python。
 
 仅真实桌面环境使用（offscreen/无资源时由 ConvertBoardPage 回退 Qt 界面）。
 """

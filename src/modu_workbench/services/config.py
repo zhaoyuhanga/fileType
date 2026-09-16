@@ -1,4 +1,4 @@
-"""本地数据目录与旧版数据迁移（墨读书库）。
+"""本地数据目录与旧版数据迁移（墨软书库）。
 
 优先级：
 1. 环境变量 MODU_DATA_DIR（测试/便携模式）
@@ -32,21 +32,21 @@ def library_db_path() -> str:
 
 
 def music_db_path() -> str:
-    """墨读音乐曲库数据库路径。"""
+    """墨软乐库曲库数据库路径。"""
     return str(app_data_dir() / "music.db")
 
 
 def music_dir() -> Path:
-    """墨读音乐默认存放目录（下载/转换输出/复制入库）。"""
+    """墨软乐库默认存放目录（下载/转换输出/复制入库）。"""
     path = app_data_dir() / "music"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def music_download_dir() -> Path:
-    """墨读音乐默认下载目录（用户可见的音乐文件夹）。"""
+    """墨软乐库默认下载目录（用户可见的音乐文件夹）。"""
     override = os.environ.get("MODU_MUSIC_DIR")
-    path = Path(override) if override else Path.home() / "Music" / "墨读音乐"
+    path = Path(override) if override else Path.home() / "Music" / "墨软乐库"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -60,7 +60,7 @@ def legacy_db_path() -> Path | None:
 
 
 def ensure_legacy_migration() -> str:
-    """首次运行时若发现墨读旧库则复制到新位置（返回实际使用的 db 路径）。"""
+    """首次运行时若发现墨软旧库则复制到新位置（返回实际使用的 db 路径）。"""
     target = library_db_path()
     if Path(target).is_file():
         return target

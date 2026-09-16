@@ -103,7 +103,7 @@ def _run_dependency_check(output_path: str) -> int:
         return (front / "index.html").is_file() and (front / "bridge_shim.js").is_file()
 
     def check_multimedia() -> bool:
-        """墨读音乐播放依赖 QtMultimedia（打包必须带上）。"""
+        """墨软乐库播放依赖 QtMultimedia（打包必须带上）。"""
         try:
             from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer  # noqa: F401
 

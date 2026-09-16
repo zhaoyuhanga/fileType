@@ -1,4 +1,4 @@
-"""墨读书库板块：书架 / 在线书库 / 阅读视图。"""
+"""墨软书库板块：书架 / 在线书库 / 阅读视图。"""
 from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget

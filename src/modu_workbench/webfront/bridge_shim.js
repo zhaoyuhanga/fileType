@@ -1,4 +1,4 @@
-/* 墨读·工作台 ⇄ main 分支前端桥接注入脚本（须在 React 入口前执行）。
+/* 墨软·工作台 ⇄ main 分支前端桥接注入脚本（须在 React 入口前执行）。
  * 关键：window.formatFlow 同步定义（React 启动即认为桌面能力可用），
  * 方法内部等待 QWebChannel 桥就绪后再执行，避免“桌面能力未加载”竞态。 */
 (function () {

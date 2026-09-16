@@ -1,2 +1,2 @@
-# 墨读·工作台运行依赖（安装到 .venv：pip install -e .）
+# 墨软·工作台运行依赖（安装到 .venv：pip install -e .）
 -e .

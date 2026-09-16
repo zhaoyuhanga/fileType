@@ -1,4 +1,4 @@
-"""内嵌 main 分支前端（墨读转换 + 文档预览）的资源定位。
+"""内嵌 main 分支前端（墨软转换 + 文档预览）的资源定位。
 
 资源目录 webfront/ 由构建脚本生成（Vite 产物 + qtwebchannel/bridge 注入）。
 开发时位于 src/modu_workbench/webfront；打包后位于 <bundle>/modu_workbench/webfront

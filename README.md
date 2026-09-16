@@ -1,12 +1,12 @@
-# 墨读·工作台 (Modu Workbench)
+# 墨软·工作台 (Modu Workbench)
 
 > 本地离线的一站式阅读与转换工作台 —— 板块化设计，能力可扩展。
 
 由两个历史项目合并演进而来，现为三大板块：
 
-- **墨读书库**：承接 win-e-book —— TXT/EPUB 本地书库、章节自动解析、进度记忆、阅读主题、在线书库下载（个人学习用途，默认开启）。
-- **墨读转换**：承接 fileType —— 六类本地离线转换（文档 / 表格 / 图片 / 媒体 / 归档）与 txt/md/json/mp4 查看编辑。
-- **墨读音乐**：新增 —— 联网搜索与下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史、音频格式转换。
+- **墨软书库**：承接 win-e-book —— TXT/EPUB 本地书库、章节自动解析、进度记忆、阅读主题、在线书库下载（个人学习用途，默认开启）。
+- **墨软转换**：承接 fileType —— 六类本地离线转换（文档 / 表格 / 图片 / 媒体 / 归档）与 txt/md/json/mp4 查看编辑。
+- **墨软乐库**：新增 —— 联网搜索与下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史、音频格式转换。
 
 旧 Electron/React 工程归档于 `archive/electron-formatflow/`：其渲染进程（React 界面）仍作为**内嵌前端**使用 ——
 构建产物整理进 `src/modu_workbench/webfront/`，由 QtWebEngine 加载，经 QWebChannel 桥接到 Python 引擎；
@@ -18,12 +18,12 @@ Electron 主进程代码仅作参考，不再构建维护。
 
 | 板块 | 内容 | 状态 |
 |---|---|---|
-| 墨读书库 | 书架（导入/搜索/卡片/历史）、阅读器（TOC/主题/字号/进度记忆/快捷键）、在线书库（00shu 整本直链下载 + 合规开关） | ✅ |
-| 墨读转换 | 文本互转/PDF(Qt)/图片/Word/表格/归档/媒体，查看编辑与 JSON 美化、批量任务（进度/取消/输出防覆盖/解压防穿越） | ✅ |
-| 墨读音乐 | 在线搜索（歌曲/歌手/专辑/类型）与批量下载、内置播放条（顺序/列表循环/单曲循环/随机）、我的音乐（导入/收藏/分类/筛选）、歌单收藏（含待下载项）、播放历史、批量音频格式转换 | ✅ |
+| 墨软书库 | 书架（导入/搜索/卡片/历史）、阅读器（TOC/主题/字号/进度记忆/快捷键）、在线书库（00shu 整本直链下载 + 合规开关） | ✅ |
+| 墨软转换 | 文本互转/PDF(Qt)/图片/Word/表格/归档/媒体，查看编辑与 JSON 美化、批量任务（进度/取消/输出防覆盖/解压防穿越） | ✅ |
+| 墨软乐库 | 在线搜索（歌曲/歌手/专辑/类型）与批量下载、内置播放条（顺序/列表循环/单曲循环/随机）、我的音乐（导入/收藏/分类/筛选）、歌单收藏（含待下载项）、播放历史、批量音频格式转换 | ✅ |
 | （可扩展） | 新增板块：`boards/registry.py` 注册一条即可，首页与顶栏自动出现 | — |
 
-### 墨读音乐使用说明
+### 墨软乐库使用说明
 
 - **音源**（可插拔多音源，见 `core/music/sources/`，全部免费、本地直连、无需登录）：
   | 音源 | 能力 | 说明 | 密钥 |
@@ -104,11 +104,19 @@ Get-Content $env:MODU_CHECK_DEPS
 ```
 
 共 11 项：markdown 渲染 / 高亮 / Pygments / WebEngine 导入与渲染 / webfront 产物 / QtMultimedia /
-**真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/ 音乐库建表读写。全部为 `true` 才算打包正常。
+**真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/ 音乐库建表读写（含 8 个音源与匹配器）。全部为 `true` 才算打包正常。
 播放自检需要真实桌面与音频设备；设置 `QT_QPA_PLATFORM=offscreen` 时会跳过解码检查。
 
 可选环境变量：`MODU_DATA_DIR`（数据目录，默认 `%APPDATA%\ModuWorkbench`）、`MODU_FFMPEG`、`MODU_SOFFICE`。
 首次启动会自动迁移 win-e-book 旧库（`%APPDATA%\WinEBook\library.db`）。
+
+### 命名说明（显示名 vs 内部标识）
+
+- **显示名称**（界面、安装包、快捷方式、文档）统一为「墨软」系列：
+  墨软·工作台 / 墨软书库 / 墨软转换 / 墨软乐库；安装包输出为 `dist\墨软工作台-Setup-<版本>.exe`。
+- **内部标识刻意保持不变**，以便已有数据与脚本继续可用：
+  Python 包名 `modu_workbench`、可执行文件 `ModuWorkbench.exe`、
+  环境变量 `MODU_*`、数据目录 `%APPDATA%\ModuWorkbench`（书库 `library.db`、曲库 `music.db` 原地沿用）。
 
 ## 目录结构
 
@@ -119,19 +127,19 @@ src/modu_workbench/
 ├── boards/                    # ★ 板块注册与页面
 │   ├── registry.py / base.py  # 板块注册表（可扩展）
 │   ├── home_board.py          # 首页：介绍 + 板块入口
-│   ├── book_board.py          # 墨读书库
+│   ├── book_board.py          # 墨软书库
 │   ├── book_shelf.py          # 书架
 │   ├── book_reader.py         # 阅读器
 │   ├── book_online.py         # 在线书库
-│   ├── convert_board.py       # 墨读转换（Qt 回退实现）
-│   ├── convert_web.py         # 墨读转换（内嵌前端 + QWebChannel）
+│   ├── convert_board.py       # 墨软转换（Qt 回退实现）
+│   ├── convert_web.py         # 墨软转换（内嵌前端 + QWebChannel）
 │   ├── doc_viewer.py          # 文档查看/编辑器（Qt 回退实现）
-│   ├── music_board.py         # 墨读音乐（板块外壳 + 底部播放条）
-│   ├── music_search.py        # 墨读音乐：在线搜索与批量下载
-│   ├── music_library_page.py  # 墨读音乐：我的音乐 + 格式转换
-│   ├── music_playlist.py      # 墨读音乐：歌单收藏
-│   ├── music_history.py       # 墨读音乐：播放历史
-│   └── music_widgets.py       # 墨读音乐：表格/对话框/后台线程
+│   ├── music_board.py         # 墨软乐库（板块外壳 + 底部播放条）
+│   ├── music_search.py        # 墨软乐库：在线搜索与批量下载
+│   ├── music_library_page.py  # 墨软乐库：我的音乐 + 格式转换
+│   ├── music_playlist.py      # 墨软乐库：歌单收藏
+│   ├── music_history.py       # 墨软乐库：播放历史
+│   └── music_widgets.py       # 墨软乐库：表格/对话框/后台线程
 ├── core/reader/               # 书库引擎（迁移自 win-e-book）
 │   ├── parser.py / storage.py / library.py / online.py
 ├── core/music/                # 音乐引擎
@@ -172,12 +180,12 @@ docs/ARCHITECTURE.md           # 架构与合并方案
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | M0 | Python 骨架 / 首页 / 板块注册 / ui_kit 主题 | ✅ |
-| M1 | 墨读书库（书库/阅读/在线书库，旧库迁移） | ✅ |
+| M1 | 墨软书库（书库/阅读/在线书库，旧库迁移） | ✅ |
 | M2 | 转换基础（文本/PDF(Qt)/图片/归档/查看编辑/任务队列） | ✅ |
 | M3 | 转换高级（Word/表格/媒体，LibreOffice 高保真） | ✅ |
 | M4 | 跨板块联动 / 设置 / PyInstaller 打包 / 推送 | ✅ |
 | M5 | 内嵌 main 分支前端（QtWebEngine + QWebChannel）/ mp4 内联预览 / NSIS 安装包 | ✅ |
-| M6 | 墨读音乐板块（在线搜索下载 / 播放器 / 歌单收藏分类 / 播放历史 / 音频格式转换） | ✅ |
+| M6 | 墨软乐库板块（在线搜索下载 / 播放器 / 歌单收藏分类 / 播放历史 / 音频格式转换） | ✅ |
 
 ## 协议
 

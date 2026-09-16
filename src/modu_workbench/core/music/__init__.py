@@ -1,4 +1,4 @@
-"""墨读音乐核心：曲库存储、在线音源、下载、转换与播放。"""
+"""墨软乐库核心：曲库存储、在线音源、下载、转换与播放。"""
 from __future__ import annotations
 
 from .downloader import DownloadResult, download_many, download_track, unique_path

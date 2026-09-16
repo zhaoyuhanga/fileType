@@ -1,4 +1,4 @@
-"""墨读音乐板块：搜索下载 / 我的音乐 / 歌单 / 格式转换 / 播放历史 + 底部播放条。"""
+"""墨软乐库板块：搜索下载 / 我的音乐 / 歌单 / 格式转换 / 播放历史 + 底部播放条。"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -190,7 +190,7 @@ class MusicPlayerBar(QFrame):
 
 
 class MusicBoardPage(QWidget):
-    """墨读音乐板块：五个子页 + 常驻播放条。"""
+    """墨软乐库板块：五个子页 + 常驻播放条。"""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)

@@ -222,6 +222,6 @@ class OnlineDownloadPage(QWidget):
 
 
 def default_download_dir() -> Path:
-    base = Path.home() / "Downloads" / "墨读书库下载"
+    base = Path.home() / "Downloads" / "墨软书库下载"
     base.mkdir(parents=True, exist_ok=True)
     return base

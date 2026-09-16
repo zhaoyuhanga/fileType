@@ -5,7 +5,7 @@ from modu_workbench.boards.doc_viewer import _render_json, _render_markdown, hig
 
 
 def test_highlight_json_code() -> None:
-    html = highlight_code('{"name": "墨读", "count": 3}', "json")
+    html = highlight_code('{"name": "墨软", "count": 3}', "json")
     assert html.startswith("<pre")
     assert "color:" in html  # 内联 token 颜色（Pygments）
 

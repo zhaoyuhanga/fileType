@@ -1,4 +1,4 @@
-"""墨读音乐：歌单页（歌单/收藏/分类管理，支持顺序、循环、随机播放与待下载项）。"""
+"""墨软乐库：歌单页（歌单/收藏/分类管理，支持顺序、循环、随机播放与待下载项）。"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal

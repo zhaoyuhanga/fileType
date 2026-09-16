@@ -1,4 +1,4 @@
-"""全局设计令牌与 QSS 主题（墨读·工作台统一设计规范）。
+"""全局设计令牌与 QSS 主题（墨软·工作台统一设计规范）。
 
 设计语言：浅色专业风格 ——
 - 页面底色柔和浅灰蓝，卡片/面板为白；
@@ -405,7 +405,7 @@ QPushButton#actionOption[active="true"] {{
     color: {t.accent_strong};
 }}
 
-/* ---------- 墨读音乐：播放条与控件 ---------- */
+/* ---------- 墨软乐库：播放条与控件 ---------- */
 QFrame#musicPlayerBar {{
     background: {t.surface};
     border-top: 1px solid {t.border};
@@ -466,7 +466,7 @@ QListWidget::item:hover {{ background: {t.surface_hover}; }}
 
 
 def apply_theme(app) -> None:
-    """套用墨读·工作台浅色主题（Fusion 风格保证一致性）。"""
+    """套用墨软·工作台浅色主题（Fusion 风格保证一致性）。"""
     app.setStyle("Fusion")
     app.setStyleSheet(app_qss(TOKENS))
     # 兜底：原生控件（勾选框、单选框箭头等）用相近的浅色调色板

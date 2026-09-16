@@ -1,4 +1,4 @@
-"""墨读音乐：我的音乐（本地曲库）与音频格式转换页。"""
+"""墨软乐库：我的音乐（本地曲库）与音频格式转换页。"""
 from __future__ import annotations
 
 from pathlib import Path

@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "modu-workbench"
 version = "0.3.0"
-description = "墨读·工作台：本地离线的一站式阅读与转换工作台（PySide6 单应用）"
+description = "墨软·工作台：本地离线的一站式阅读与转换工作台（PySide6 单应用）"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "PySide6>=6.8",
-    "ebooklib>=0.18",      # EPUB 解析（墨读书库）
+    "ebooklib>=0.18",      # EPUB 解析（墨软书库）
     "beautifulsoup4>=4.12",
     "lxml>=4.9",
     "chardet>=5.2",

@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# 墨读·工作台 macOS 打包配置（在 Mac 上运行，onedir → .app）
+# 墨软·工作台 macOS 打包配置（在 Mac 上运行，onedir → .app）
 # 构建：pyinstaller workbench_mac.spec --noconfirm --clean
 # 产物：dist/ModuWorkbench.app
 
@@ -98,7 +98,7 @@ app = BUNDLE(
     info_plist={
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
-        "CFBundleDisplayName": "墨读·工作台",
+        "CFBundleDisplayName": "墨软·工作台",
         "CFBundleShortVersionString": "0.3.0",
     },
 )

@@ -20,7 +20,7 @@ async function createWindow(): Promise<void> {
     height: 860,
     minWidth: 1024,
     minHeight: 720,
-    title: "万能格式转换器",
+    title: "墨软转换",
     backgroundColor: "#f4f6fb",
     webPreferences: {
       preload: resolvePreloadPath(),

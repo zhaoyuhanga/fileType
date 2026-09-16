@@ -32,7 +32,7 @@ def sample_txt(tmp_path: Path) -> Path:
 @pytest.fixture()
 def sample_md(tmp_path: Path) -> Path:
     path = tmp_path / "readme.md"
-    path.write_text("# 墨读\n\n一段正文。", encoding="utf-8")
+    path.write_text("# 墨软\n\n一段正文。", encoding="utf-8")
     return path
 
 

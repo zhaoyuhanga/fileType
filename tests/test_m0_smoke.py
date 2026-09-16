@@ -81,6 +81,9 @@ def test_shell_pages_and_navigation(qapp: QApplication) -> None:
     assert shell.current_key == HOME_KEY
     assert isinstance(shell.current_page(), HomePage)
 
+    # 标题栏使用「墨软」品牌名
+    assert "墨软·工作台" in shell.windowTitle()
+
     # 跳转到两个板块页
     for spec in ACTIVE_BOARDS:
         shell.go_page(spec.key)
@@ -91,3 +94,12 @@ def test_shell_pages_and_navigation(qapp: QApplication) -> None:
     shell.go_page(HOME_KEY)
     assert shell.current_key == HOME_KEY
     shell.close()
+
+
+def test_board_titles_use_moruan_branding() -> None:
+    """板块显示名统一为墨软系列（防止重命名回退）。"""
+    titles = {spec.key: spec.title for spec in ACTIVE_BOARDS}
+    assert titles["book"] == "墨软书库"
+    assert titles["convert"] == "墨软转换"
+    assert titles["music"] == "墨软乐库"
+    assert "墨读" not in "".join(titles.values())

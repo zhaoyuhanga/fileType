@@ -125,7 +125,7 @@ def resolve_and_run(action_id: str, file: dict, output_dir: str, cancel) -> conv
         action = get_action(f"{source}-to-{target}") if target else None
     if action is None:
         return convert_engine.ConversionResult(
-            action_id, path, "failed", message="该转换组合当前暂未提供（墨读引擎内）。"
+            action_id, path, "failed", message="该转换组合当前暂未提供（墨软引擎内）。"
         )
     return convert_engine.run_conversion(action, path, output_dir, cancel=cancel)
 

@@ -38,7 +38,7 @@ class HomePage(QWidget):
         layout.setSpacing(10)
         scroll.setWidget(body)
 
-        intro = QLabel(f"欢迎使用墨读·工作台")
+        intro = QLabel(f"欢迎使用墨软·工作台")
         intro.setObjectName("introTitle")
         layout.addWidget(intro)
 
@@ -83,7 +83,7 @@ class HomePage(QWidget):
 
         footer_row = QHBoxLayout()
         footer_row.addStretch(1)
-        footer = QLabel("墨读·工作台 © 2026 · 本地离线 · 仅供学习使用")
+        footer = QLabel("墨软·工作台 © 2026 · 本地离线 · 仅供学习使用")
         footer.setObjectName("footerText")
         footer_row.addWidget(footer)
         layout.addLayout(footer_row)

@@ -1,7 +1,7 @@
 """应用设置对话框（QSettings 持久化）。
 
 - 在线书库合规开关（默认开启）；
-- 墨读音乐：下载目录、Jamendo client_id；
+- 墨软乐库：下载目录、Jamendo client_id；
 - 环境信息：ffmpeg / LibreOffice 检测与数据目录展示。
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ class SettingsDialog(QDialog):
 
         self._compliance.toggled.connect(lambda checked: self._settings.setValue("online/compliance_required", checked))
 
-        # ---- 墨读音乐 ----
+        # ---- 墨软乐库 ----
         music_row = QWidget()
         music_layout = QHBoxLayout(music_row)
         music_layout.setContentsMargins(0, 0, 0, 0)

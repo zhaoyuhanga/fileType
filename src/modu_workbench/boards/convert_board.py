@@ -1,4 +1,4 @@
-"""墨读转换板块：文件列表 + 动作选择 + 批量执行（后台线程/取消/进度）。"""
+"""墨软转换板块：文件列表 + 动作选择 + 批量执行（后台线程/取消/进度）。"""
 from __future__ import annotations
 
 import threading
@@ -405,6 +405,6 @@ class ConvertBoardPage(QWidget):
 
 
 def default_output_dir() -> Path:
-    base = Path.home() / "Documents" / "墨读转换输出"
+    base = Path.home() / "Documents" / "墨软转换输出"
     base.mkdir(parents=True, exist_ok=True)
     return base

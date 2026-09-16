@@ -1,4 +1,4 @@
-"""墨读音乐：播放历史页。"""
+"""墨软乐库：播放历史页。"""
 from __future__ import annotations
 
 from datetime import datetime

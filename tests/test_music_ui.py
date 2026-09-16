@@ -1,4 +1,4 @@
-"""墨读音乐界面测试（offscreen）：板块导航 / 播放条 / 曲库 / 歌单 / 历史 / 搜索。"""
+"""墨软乐库界面测试（offscreen）：板块导航 / 播放条 / 曲库 / 歌单 / 历史 / 搜索。"""
 from __future__ import annotations
 
 import types

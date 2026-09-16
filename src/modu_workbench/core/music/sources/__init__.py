@@ -1,4 +1,4 @@
-"""墨读音乐音源层：多音源注册表 + 重试 + 跨源兜底。
+"""墨软乐库音源层：多音源注册表 + 重试 + 跨源兜底。
 
 对外保持稳定 API（`get_source` / `list_sources` / `search_all` / `SourceError` …），
 内部按音源拆分到 `providers/`，由 `registry.MusicRegistry` 统一编排。

@@ -17,7 +17,7 @@ from pathlib import Path
 from modu_workbench import __version__
 
 SHIM_SOURCE = Path(__file__).resolve().parent / "bridge_shim.js"
-APP_TITLE = "墨读·工作台 · 墨读转换"
+APP_TITLE = "墨软·工作台 · 墨软转换"
 STALE_ENTRIES = ("assets", "index.html", "bridge_shim.js", "qtwebchannel.js")
 
 

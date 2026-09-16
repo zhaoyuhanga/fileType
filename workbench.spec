@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# 墨读·工作台 PyInstaller 打包配置（Windows onedir，随包依赖）
+# 墨软·工作台 PyInstaller 打包配置（Windows onedir，随包依赖）
 # 构建：pyinstaller workbench.spec --noconfirm --clean
 # 产物：dist/ModuWorkbench/ModuWorkbench.exe
 
@@ -75,7 +75,7 @@ a = Analysis(
         "PySide6.QtWebChannel",
         "modu_workbench.boards.convert_web",
         "modu_workbench.services.web_bridge",
-        # 墨读音乐：板块页面与核心引擎（含 QtMultimedia 播放与在线音源）
+        # 墨软乐库：板块页面与核心引擎（含 QtMultimedia 播放与在线音源）
         "modu_workbench.boards.music_board",
         "modu_workbench.boards.music_search",
         "modu_workbench.boards.music_library_page",

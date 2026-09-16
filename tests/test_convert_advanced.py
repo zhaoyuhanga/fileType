@@ -89,10 +89,10 @@ def test_xlsx_to_csv_html_pdf(qapp: QApplication, tmp_path: Path, out_dir: Path)
 
 def test_csv_to_html(tmp_path: Path, out_dir: Path) -> None:
     csv_file = tmp_path / "data.csv"
-    csv_file.write_text("id,name\n1,墨读", encoding="utf-8")
+    csv_file.write_text("id,name\n1,墨软", encoding="utf-8")
     result = run_conversion(get_action("csv-to-html"), csv_file, out_dir)
     assert result.status == "succeeded", result.message
-    assert "墨读" in (out_dir / "data.html").read_text(encoding="utf-8")
+    assert "墨软" in (out_dir / "data.html").read_text(encoding="utf-8")
 
 
 def test_media_conversion_when_ffmpeg_available(qapp: QApplication, tmp_path: Path, out_dir: Path) -> None:

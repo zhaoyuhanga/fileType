@@ -1,4 +1,4 @@
-"""墨读书库 UI 冒烟测试（offscreen）：书架构建 / 阅读器导航。"""
+"""墨软书库 UI 冒烟测试（offscreen）：书架构建 / 阅读器导航。"""
 from __future__ import annotations
 
 from pathlib import Path

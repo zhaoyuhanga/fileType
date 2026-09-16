@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import APP_SLOGAN, __version__
+from . import APP_NAME, APP_SLOGAN, __version__
 from .boards.home_board import HomePage
 from .boards.registry import ACTIVE_BOARDS
 from .ui_kit.widgets import make_nav_button, set_nav_active
@@ -24,6 +24,7 @@ HOME_KEY = "home"
 class AppShell(QMainWindow):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self.setWindowTitle(f"{APP_NAME} v{__version__}")   # 任务栏/标题栏显示墨软·工作台
         self._nav_buttons: dict[str, QPushButton] = {}
         self._pages: dict[str, int] = {}
         self.current_key = HOME_KEY
@@ -61,7 +62,7 @@ class AppShell(QMainWindow):
 
         brand = QVBoxLayout()
         brand.setSpacing(0)
-        title = QLabel("墨读·工作台")
+        title = QLabel("墨软·工作台")
         title.setObjectName("brandTitle")
         sub = QLabel(f"{APP_SLOGAN} · v{__version__}")
         sub.setObjectName("brandSub")

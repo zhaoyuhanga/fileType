@@ -58,7 +58,7 @@ $arguments = @("/DAPP_VERSION=$version", "/DSOURCE_DIR=$SourceDir", (Join-Path $
 $code = Invoke-Native $Makensis $arguments
 if ($code -ne 0) { throw "makensis 失败（exit $code）" }
 
-$output = Join-Path $repoRoot "dist\墨读工作台-Setup-$version.exe"
+$output = Join-Path $repoRoot "dist\墨软工作台-Setup-$version.exe"
 if (Test-Path $output) {
     $size = [math]::Round((Get-Item $output).Length / 1MB, 1)
     Write-Host "完成：$output（${size} MB）"
