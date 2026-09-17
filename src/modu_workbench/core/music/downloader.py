@@ -18,6 +18,7 @@ from .models import RemoteTrack, safe_filename
 from modu_workbench.core.platform.media import probe_duration_ms
 
 from .sources import MusicSource, SourceError, clean_lyrics, describe_network_error, get_source
+from .sources import quality
 
 ProgressFn = Callable[[int, int, str], None]  # written, total, message
 
@@ -141,8 +142,9 @@ def download_track(
                                       cancel=cancel, save_cover=save_cover,
                                       save_lyrics=save_lyrics, timeout=timeout)
             return path, resolved
-        except RuntimeError:
-            raise                      # 用户取消
+        # 注意顺序：SourceError 继承自 RuntimeError，必须先捕获，
+        # 否则会被下面"用户取消"那条吞掉 —— 换源重试就永远不会发生
+        # （表现：下载片段/受限曲目时只报错，不会去别的音源找完整版）。
         except SourceError as error:
             if registry is None or not allow_cross_source:
                 raise
@@ -155,6 +157,8 @@ def download_track(
             tried.append(resolved.source)
             if on_progress:
                 on_progress(0, 0, resolved.note or f"改用 {_label_of(registry, resolved.source)}")
+        except RuntimeError:
+            raise                      # 用户取消
 
 
 def _download_resolved(
@@ -172,6 +176,16 @@ def _download_resolved(
     url = resolved.url
     if not url:
         raise SourceError("该曲目没有可用的下载地址")
+
+    # 试听/片段条目：连下都不用下 —— 直接交给上层换源找完整版
+    # （酷我里这类 10~40 秒的"片段/铃声/串烧"很多，下载下来也不能完整听）
+    reason = quality.preview_reason(track)
+    if reason:
+        raise SourceError(
+            f"{reason}；这不是完整曲目，已尝试换源获取完整版"
+            "（若确实想保留该片段，请在搜索页关闭「下载/试听失败时自动换源」）"
+        )
+
     dest = Path(dest_dir)
     response = None
     last_error: Exception | None = None

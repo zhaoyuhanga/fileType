@@ -79,9 +79,16 @@ class RemoteTrack:
     cover_url: str = ""
     category: str = ""
     extra: dict = field(default_factory=dict)
+    # 试听/片段判定（见 core/music/sources/quality.py）：默认隐藏、排在完整曲目之后
+    preview: bool = False
+    preview_reason: str = ""
 
     def display(self) -> str:
         return f"{self.artist} - {self.title}" if self.artist else self.title
+
+    @property
+    def duration_text(self) -> str:
+        return format_duration(self.duration_ms)
 
     def to_json(self) -> dict:
         return {
@@ -94,6 +101,8 @@ class RemoteTrack:
             "url": self.url,
             "coverUrl": self.cover_url,
             "category": self.category,
+            "preview": self.preview,
+            "previewReason": self.preview_reason,
         }
 
     @classmethod
@@ -108,6 +117,8 @@ class RemoteTrack:
             url=str(data.get("url", "")),
             cover_url=str(data.get("coverUrl", data.get("cover_url", ""))),
             category=str(data.get("category", "")),
+            preview=bool(data.get("preview", False)),
+            preview_reason=str(data.get("previewReason", data.get("preview_reason", ""))),
         )
 
 

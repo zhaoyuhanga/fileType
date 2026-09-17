@@ -19,6 +19,20 @@ from .base import (
 )
 from .http import DEFAULT_UA, HttpClient, SourceError, describe_network_error, host_of
 from .matcher import artist_score, best_match, duration_score, match_score, title_score
+from .quality import (
+    DEFAULT_MIN_FULL_SECONDS,
+    annotate,
+    annotate_many,
+    describe_hidden,
+    is_preview,
+    is_source_preview,
+    min_full_seconds,
+    preview_reason,
+    set_min_full_seconds,
+    should_hide,
+    sort_full_first,
+    split_by_quality,
+)
 from .providers import DEFAULT_PROVIDER_ORDER, build_default_providers, provider_class
 from .providers.archive_org import ArchiveOrgSource
 from .providers.audius import AudiusSource
@@ -63,6 +77,7 @@ def search_all(keyword: str, kind: str = "song", limit: int = 20,
 
 
 __all__ = [
+    "DEFAULT_MIN_FULL_SECONDS",
     "DEFAULT_PROVIDER_ORDER",
     "DEFAULT_UA",
     "DEGRADE_AFTER",
@@ -90,18 +105,29 @@ __all__ = [
     "SourceError",
     "SourceHealth",
     "SourceInfo",
+    "annotate",
+    "annotate_many",
     "artist_score",
     "best_match",
     "build_default_providers",
     "clean_lyrics",
+    "describe_hidden",
     "describe_network_error",
     "duration_score",
     "get_source",
     "host_of",
+    "is_preview",
+    "is_source_preview",
     "list_sources",
     "match_score",
+    "min_full_seconds",
+    "preview_reason",
     "provider_class",
     "registry",
     "search_all",
+    "set_min_full_seconds",
+    "should_hide",
+    "sort_full_first",
+    "split_by_quality",
     "title_score",
 ]

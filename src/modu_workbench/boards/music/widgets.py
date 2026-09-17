@@ -5,6 +5,7 @@ import threading
 from typing import Iterable, List
 
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -62,6 +63,38 @@ def jamendo_client_id_pref() -> str:
     return stored or os.environ.get("MODU_JAMENDO_CLIENT_ID", "")
 
 
+def hide_preview_pref() -> bool:
+    """是否隐藏「试听/片段」条目（默认隐藏 —— 用户反馈酷我里这类太多）。"""
+    return bool(music_settings().value("music/hide_preview", True, type=bool))
+
+
+def set_hide_preview_pref(value: bool) -> None:
+    music_settings().setValue("music/hide_preview", bool(value))
+
+
+def min_full_seconds_pref() -> int:
+    """完整曲目的最短时长（秒），低于它视为试听/片段。"""
+    from modu_workbench.core.music.sources.quality import DEFAULT_MIN_FULL_SECONDS
+
+    try:
+        stored = int(music_settings().value("music/min_full_seconds",
+                                            DEFAULT_MIN_FULL_SECONDS) or 0)
+    except (TypeError, ValueError):
+        stored = DEFAULT_MIN_FULL_SECONDS
+    return stored or DEFAULT_MIN_FULL_SECONDS
+
+
+def set_min_full_seconds_pref(seconds: int) -> None:
+    music_settings().setValue("music/min_full_seconds", int(seconds))
+
+
+def apply_quality_prefs() -> None:
+    """把设置里的时长阈值推给核心判定（板块启动/设置保存后调用）。"""
+    from modu_workbench.core.music.sources.quality import set_min_full_seconds
+
+    set_min_full_seconds(min_full_seconds_pref())
+
+
 # --------------------------------------------------------------------------- 表格
 
 def configure_table(table: QTableWidget, headers: list[str]) -> QTableWidget:
@@ -113,20 +146,47 @@ def fill_track_row(table: QTableWidget, row: int, track: Track, columns: list[st
         table.setItem(row, index, item)
 
 
+_SOURCE_LABELS: dict[str, str] = {}
+
+
+def source_label(key: str) -> str:
+    """音源显示名（带缓存；未知 key 原样返回）。"""
+    if key in _SOURCE_LABELS:
+        return _SOURCE_LABELS[key]
+    try:
+        from modu_workbench.core.music import get_source
+
+        label = get_source(key).label
+    except Exception:  # noqa: BLE001
+        label = key
+    _SOURCE_LABELS[key] = label
+    return label
+
+
 def fill_remote_row(table: QTableWidget, row: int, remote: RemoteTrack, columns: list[str] | None = None) -> None:
     values = columns or ["title", "artist", "album", "duration", "source"]
     for index, key in enumerate(values):
         if key == "title":
             item = make_item(remote.title, checkable=True)
             item.setData(REMOTE_ROLE, remote.to_json())
+            if remote.preview:
+                # 片段条目标黄，鼠标停上去写明原因
+                item.setForeground(QColor("#b9790a"))
+                item.setToolTip(remote.preview_reason or "试听/片段")
         elif key == "artist":
             item = make_item(remote.artist)
         elif key == "album":
             item = make_item(remote.album)
         elif key == "duration":
-            item = make_item(format_duration(remote.duration_ms))
+            text = format_duration(remote.duration_ms)
+            item = make_item(f"{text} · 试听" if remote.preview else text)
+            if remote.preview:
+                item.setForeground(QColor("#b9790a"))
         elif key == "source":
-            item = make_item(remote.source)
+            label = source_label(remote.source)
+            item = make_item(f"{label} · 试听" if remote.preview else label)
+            if remote.preview:
+                item.setForeground(QColor("#b9790a"))
         elif key == "category":
             item = make_item(remote.category)
         else:

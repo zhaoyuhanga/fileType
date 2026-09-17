@@ -14,11 +14,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from modu_workbench.app import context as app_context
+from modu_workbench.core.music.sources.quality import DEFAULT_MIN_FULL_SECONDS
 from modu_workbench.core.platform import paths as config
 
 from .base import SettingsPage, app_settings
@@ -56,6 +58,22 @@ class MusicSettingsPage(SettingsPage):
 
         self._auto_switch = QCheckBox("下载/试听失败时自动换源重试")
         form.addRow("容错", self._auto_switch)
+
+        self._hide_preview = QCheckBox("搜索结果隐藏「试听/片段」条目（推荐）")
+        self._hide_preview.setToolTip(
+            "酷我等音源会返回同一首歌的片段/铃声/串烧版本（时长常常只有十几秒），\n"
+            "它们下载后不能完整播放。勾选后在搜索页默认不显示这类条目。"
+        )
+        form.addRow("试听过滤", self._hide_preview)
+
+        self._min_full = QSpinBox()
+        self._min_full.setRange(15, 600)
+        self._min_full.setSuffix(" 秒")
+        self._min_full.setToolTip(
+            "短于此时长的结果视为「试听/片段」：会被隐藏、排在完整曲目之后，\n"
+            "下载时也会直接换源去找完整版（实测酷我片段多为 10~40 秒）"
+        )
+        form.addRow("完整曲目最短时长", self._min_full)
 
         library_dir = QLabel(str(config.music_dir()))
         library_dir.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -102,6 +120,13 @@ class MusicSettingsPage(SettingsPage):
         self._auto_switch.setChecked(
             self._settings.value("music/auto_switch", True, type=bool)
         )
+        self._hide_preview.setChecked(
+            self._settings.value("music/hide_preview", True, type=bool)
+        )
+        self._min_full.setValue(
+            int(self._settings.value("music/min_full_seconds",
+                                     DEFAULT_MIN_FULL_SECONDS) or DEFAULT_MIN_FULL_SECONDS)
+        )
         for key, check in self._source_checks.items():
             check.setChecked(self._registry.is_enabled(key))
         self._sync_jamendo()
@@ -110,6 +135,12 @@ class MusicSettingsPage(SettingsPage):
         self._settings.setValue("music/download_dir", self._download_dir.text().strip())
         self._settings.setValue("music/jamendo_client_id", self._jamendo.text().strip())
         self._settings.setValue("music/auto_switch", self._auto_switch.isChecked())
+        self._settings.setValue("music/hide_preview", self._hide_preview.isChecked())
+        self._settings.setValue("music/min_full_seconds", self._min_full.value())
+        # 立刻生效：核心判定用新阈值（无需重启）
+        from modu_workbench.core.music.sources.quality import set_min_full_seconds
+
+        set_min_full_seconds(self._min_full.value())
         for key, check in self._source_checks.items():
             self._registry.set_enabled(key, check.isChecked())
         provider = self._registry.get("jamendo")

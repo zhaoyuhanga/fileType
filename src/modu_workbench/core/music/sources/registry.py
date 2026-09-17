@@ -13,7 +13,8 @@ from typing import Iterable, List
 
 from ..models import RemoteTrack
 from ..storage import MusicStorage
-from .base import MusicSource, ResolvedAudio, SourceHealth, SourceInfo
+from . import quality
+from .base import KIND_DIRECT, MusicSource, ResolvedAudio, SourceHealth, SourceInfo
 from .http import SourceError
 from .matcher import best_match
 from .providers import DEFAULT_PROVIDER_ORDER, build_default_providers
@@ -143,10 +144,15 @@ class MusicRegistry:
         """跨音源搜索：返回 (结果, 错误信息列表)。
 
         默认跳过被熔断的音源；若显式指定 sources 则按指定来（忽略熔断）。
+
+        结果统一做两件事（用户反馈：酷我里混着大量试听片段）：
+        - 标注每条结果是否为「试听/片段」（试听型音源整体标注）；
+        - **稳定排序：完整曲目在前、试听/片段在后**，组内保持音源相关度顺序。
         """
         results: List[RemoteTrack] = []
         errors: List[str] = []
         now = time.time()
+        is_direct_keyword = keyword.strip().lower().startswith(("http://", "https://"))
         if sources is None:
             chosen = [p.key for p in self.providers() if include_degraded or not self.health(p.key).is_degraded(now)]
         else:
@@ -157,8 +163,14 @@ class MusicRegistry:
                 continue
             if not provider.available():
                 continue
+            # 「音频直链」音源只在关键词本身是 http(s) 地址时才有意义，
+            # 否则每次搜索都会多一条"请输入以 http(s) 开头的音频直链"的假错误。
+            if provider.info.kind == KIND_DIRECT and not is_direct_keyword:
+                continue
             try:
-                results.extend(provider.search(keyword, kind=kind, limit=limit))
+                found = provider.search(keyword, kind=kind, limit=limit)
+                quality.annotate_many(found, source_kind=provider.info.kind)
+                results.extend(found)
                 self.record_success(key)
             except SourceError as error:
                 self.record_failure(key, error)
@@ -166,7 +178,7 @@ class MusicRegistry:
             except Exception as error:  # noqa: BLE001
                 self.record_failure(key, error)
                 errors.append(f"{provider.label}：{error}")
-        return results, errors
+        return quality.sort_full_first(results), errors
 
     # ---------- 跨源兜底解析 ----------
 
@@ -216,7 +228,10 @@ class MusicRegistry:
                 self.record_failure(key, error)
                 reasons.append(f"{key}：{error}")
                 continue
-            matched = best_match(track, candidates, threshold=min_score)
+            # 换源时优先要**完整曲目**：片段/铃声版即使曲名很像也会让用户白下
+            quality.annotate_many(candidates, source_kind=candidate_source.info.kind)
+            usable = [item for item in candidates if not item.preview] or candidates
+            matched = best_match(track, usable, threshold=min_score)
             if matched is None:
                 continue
             try:

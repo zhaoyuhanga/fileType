@@ -38,14 +38,17 @@ from .widgets import (
     PlaylistPicker,
     SearchWorker,
     action_remotes,
+    apply_quality_prefs,
     as_remote_batch,
     attach_context_menu,
     configure_table,
     fill_remote_row,
+    hide_preview_pref,
     jamendo_client_id_pref,
     music_download_dir_pref,
     row_remote,
     select_all,
+    set_hide_preview_pref,
 )
 
 
@@ -128,6 +131,8 @@ class MusicSearchPage(QWidget):
         self._fallback_status = QLabel("就绪。")
         self._toaster = toaster
         self._results: list = []
+        self._hidden_previews: list = []      # 被"隐藏试听/片段"过滤掉的结果（供状态栏计数）
+        apply_quality_prefs()                 # 把设置里的"完整曲目最短时长"推给核心判定
         self._worker: SearchWorker | None = None
         self._download: DownloadWorker | None = None
         self._preview_worker: _PreviewResolver | None = None
@@ -241,8 +246,23 @@ class MusicSearchPage(QWidget):
         self._compliance.toggled.connect(self._update_buttons)
         layout.addWidget(self._compliance)
 
+        # 试听/片段过滤：酷我里混着大量 10~40 秒的片段条目，默认直接隐藏
+        self._hide_preview = QCheckBox("隐藏试听/片段（推荐：完整曲目才显示，可在工具栏取消）")
+        self._hide_preview.setToolTip(
+            "酷我等音源会把同一首歌的片段/铃声/串烧版本一起返回，时长通常只有十几秒，\n"
+            "下载后既不能完整听也常常提示会员受限。勾选后这类条目不出现在结果里；\n"
+            "取消勾选可以看到全部结果（试听条目标黄并在时长列注明「试听」）。"
+        )
+        self._hide_preview.setChecked(hide_preview_pref())
+        self._hide_preview.toggled.connect(self._on_hide_preview_toggled)
+        layout.addWidget(self._hide_preview)
+
         self._auto_switch = QCheckBox("下载/试听失败时自动换源重试（推荐：某音源失效或会员受限时改用其他音源）")
         self._auto_switch.setChecked(True)
+        self._auto_switch.setToolTip(
+            "开启后：片段/试听条目或受限曲目会自动到其他音源找完整版再下载。\n"
+            "关闭后：直接报出真实原因（例如「该音源只提供 22 秒试听片段」），不换源。"
+        )
         layout.addWidget(self._auto_switch)
 
         self._progress = QProgressBar()
@@ -300,12 +320,28 @@ class MusicSearchPage(QWidget):
         self._worker.start()
 
     def _on_results(self, tracks: list, errors: list) -> None:
-        self._results = list(tracks)
+        """填表：默认隐藏「试听/片段」条目，并在状态里说明隐藏了多少。"""
+        from modu_workbench.core.music.sources import annotate_many, describe_hidden
+        from modu_workbench.core.music.sources.quality import should_hide
+
+        annotate_many(tracks or [])
+        hidden = [track for track in (tracks or []) if should_hide(track)]
+        self._hidden_previews = hidden
+        hiding = self._hide_preview.isChecked()
+        visible = [track for track in (tracks or [])
+                   if not (hiding and should_hide(track))]
+        self._results = list(visible)
+
         self._table.setRowCount(len(self._results))
         for row, remote in enumerate(self._results):
             fill_remote_row(self._table, row, remote)
         select_all(self._table, False)
         message = f"共 {len(self._results)} 条结果"
+        if hidden:
+            if hiding:
+                message += f"（{describe_hidden(hidden)}）"
+            else:
+                message += f"（其中 {len(hidden)} 条为试听/片段，已标黄）"
         if errors:
             message += "；" + "；".join(errors)
         self._empty.setVisible(not self._results)
@@ -313,6 +349,11 @@ class MusicSearchPage(QWidget):
         self._actions_widget.setVisible(bool(self._results))     # 空结果不显示一排禁用按钮
         self._report(message)
         self._update_buttons()
+
+    def _on_hide_preview_toggled(self, checked: bool) -> None:
+        set_hide_preview_pref(checked)
+        if self._results or getattr(self, "_hidden_previews", None):
+            self._on_results(self._results + getattr(self, "_hidden_previews", []), [])
 
     def _on_search_failed(self, message: str) -> None:
         self._report(f"搜索失败：{message}")
