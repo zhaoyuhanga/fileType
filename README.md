@@ -2,22 +2,21 @@
 
 > 本地离线的一站式阅读、转换、音乐、影视与图库工作台 —— 板块化设计，能力可扩展。
 
-**当前版本：v1.0.0（定版）** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：
-`dist\ModuWorkbench\`（onedir）与 `dist\墨软工作台-Setup-0.3.0.exe`（NSIS 安装包）。
+**当前版本：v1.0.2** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：
+`dist\ModuWorkbench\ModuWorkbench.exe`（PyInstaller onedir）与 `dist\墨软工作台-Setup-1.0.2.exe`（NSIS 安装包）。
 
 由两个历史项目合并演进而来，现为五大板块：
 
 - **墨软书库**：承接 win-e-book —— TXT/EPUB 本地书库、章节自动解析、进度记忆、阅读主题、在线书库下载（个人学习用途，默认开启）。
-- **墨软转换**：承接 fileType —— 六类本地离线转换（文档 / 表格 / 图片 / 媒体 / 归档）与 txt/md/json/mp4 查看编辑。
+- **墨软转换**：承接 fileType —— 六类本地离线转换（文本 / 文档 / 表格 / 图片 / 媒体 / 归档）与 txt/md/json/mp4 查看编辑。
 - **墨软乐库**：联网搜索与下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史、音频格式转换。
 - **墨软影视**：联网搜索电影/电视剧/动漫并下载到本地、内置播放器（多清晰度/倍速/续播）、
   分类与收藏、播放历史、视频格式转换；多数据源可切换并可自行扩展。
 - **墨软图库**：本地相册（网格/瀑布流/时间轴）、相册与标签收藏、批量导入与去重、
   EXIF、重复识别、图片美化（非破坏性可撤销）与本地增强优化；可选接入 DeepSeek 生成描述/标签。
 
-旧 Electron/React 工程归档于 `archive/electron-formatflow/`：其渲染进程（React 界面）仍作为**内嵌前端**使用 ——
-构建产物整理进 `src/modu_workbench/webfront/`，由 QtWebEngine 加载，经 QWebChannel 桥接到 Python 引擎；
-Electron 主进程代码仅作参考，不再构建维护。
+旧 Electron/React 工程归档于 `archive/electron-formatflow/`，仅作历史参考，不参与构建与运行；
+v1.0.0 起界面为**纯 Qt Widgets 单栈**，原有的内嵌 React 前端与 QtWebEngine/QWebChannel 桥接已全部移除。
 
 ## 板块
 
@@ -96,7 +95,7 @@ Electron 主进程代码仅作参考，不再构建维护。
   简介与清晰度；支持「在线播放」「下载选中集」「下载全部集」。
 - **清晰度多选项**：优先读取 m3u8 主清单里的真实分辨率（1080P / 720P / 4K …），
   解析不到时回退到源给出的线路画质；播放中可随时切换清晰度，会尽量保留当前进度。
-- **播放器**：原生解码（QtMultimedia）优先，m3u8 或原生不支持的地址自动切到内嵌网页内核（hls.js）；
+- **播放器**：QtMultimedia 原生解码（m3u8 由随包 FFmpeg 后端直接解码，远程地址统一经本机流服务代理）；
   支持播放/暂停、进度拖动、上一集/下一集、倍速（0.5x–2x）、音量/静音、全屏、快捷键
   （空格播放暂停、←/→ 快退快进 10 秒、F11 全屏）与**断点续播**。
 - **本地播放与下载**：只要联网即可边看边下；下载支持 HLS 分片合流（有 ffmpeg 时输出 MP4，
@@ -106,7 +105,7 @@ Electron 主进程代码仅作参考，不再构建维护。
   区分「本地」与「在线」条目；也可导入本地影片（可选复制进影视库目录）。
 - **播放历史**：记录每一次播放与下载（含集数、画质、实际使用的源）；双击记录即可**重新解析**继续观看
   —— 在线直链会过期，所以每次播放都会重新取地址。
-- **格式转换**：mp4 / mkv / mov / avi / webm / flv / ts / gif 互转，以及从视频**提取音频**
+- **格式转换**：mp4 / mkv / mov / avi / webm / flv / ts 互转，以及从视频**提取音频**
   （mp3 / m4a / wav）；优先流复制（快且无损），容器不兼容时自动回退重编码（依赖 ffmpeg，
   可用 `MODU_FFMPEG` 指定）。
 - **合规**：采集类数据源来自第三方站点，仅用于个人学习与技术研究；界面默认勾选合规声明，
@@ -173,7 +172,7 @@ Electron 主进程代码仅作参考，不再构建维护。
 
 ## 大模型能力中心
 
-设置 → 大模型（配置存 `%APPDATA%\ModuWorkbench\llm.db`，各板块共用）：
+设置 → 大模型（配置存在单库 `%APPDATA%\ModuWorkbench\modu.db`，各板块共用）：
 
 - **按类型分开配**：文字大模型（关键词/摘要/参数建议）、图片大模型（看图生成描述与标签）、
   视频大模型（预留给后续视频理解）；
@@ -188,11 +187,10 @@ Electron 主进程代码仅作参考，不再构建维护。
 ## 技术栈
 
 - Python 3.10+ / PySide6(Qt6) 单应用（**前端统一 Qt 单栈**：不依赖 Node/React/QtWebEngine）
-- 内嵌前端：QtWebEngine + QWebChannel（React 产物见 `src/modu_workbench/webfront/`，桥协议见 `services/bridge_shim.js`）
 - 解析：ebooklib（EPUB）、python-docx、openpyxl/xlrd、Pillow、markdown/html2text、chardet、Pygments（预览高亮）
-- 持久化：SQLite（stdlib sqlite3，`library.db` 书籍进度/历史、`music.db` 曲库/歌单/播放历史）
+- 持久化：SQLite 单库 `modu.db`（stdlib sqlite3，版本化迁移，旧分库首次启动自动导入；表结构见 `docs/DATABASE.md`）
 - 媒体：ffmpeg 子进程（`MODU_FFMPEG` 指定路径）；LibreOffice 可选（`MODU_SOFFICE`）；
-  WebView 内 mp4 通过本地流服务（`services/media_server.py`，支持 Range）播放，失败时回退原生播放器
+  远程 mp4/HLS 统一经本地流服务（`services/media_server.py`，支持 Range 并在服务端补 Referer/UA）喂给原生播放器
 - 音乐播放：QtMultimedia（QMediaPlayer + QAudioOutput）；在线音源用 requests 抓取公开接口
 - 测试：pytest（offscreen 无头 Qt，`MODU_DATA_DIR` 隔离数据）
 - 打包：PyInstaller（`workbench.spec`，onedir）+ NSIS（`packaging/installer.nsi`）
@@ -206,15 +204,6 @@ pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 python -m modu_workbench
 python -m pytest tests -q
 ```
-
-## 重建内嵌前端（仅在改动 `archive/electron-formatflow/` 界面时需要）
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File packaging\build_webfront.ps1   # 首次会 npm install 到 .webfront-build\
-# macOS / Linux: packaging/build_webfront.sh
-```
-
-脚本流程：安装渲染进程最小依赖 → 目录联接 `node_modules` → `vite build` →
 
 ## 品牌图形（应用图标 / 安装包图形）
 
@@ -272,8 +261,9 @@ $env:MODU_CHECK_DEPS = "$env:TEMP\modu-check.json"
 Get-Content $env:MODU_CHECK_DEPS
 ```
 
-共 15 项：markdown 渲染 / 代码块高亮 / JSON 高亮 / Pygments 词法器 / WebEngine 导入与渲染 /
-webfront 产物 / QtMultimedia / **真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/
+共 14 项：markdown 渲染 / 代码块高亮 / JSON 高亮 / Pygments 词法器 /
+**Qt 单栈**（AST 扫描确认无 QtWebEngine 导入，且无内嵌前端产物）/ **PDF 转换**（pypdf 抽取）/
+QtMultimedia / **真实音频解码播放**（播放一段静音 WAV 并确认播放位置前进）/
 音乐库建表读写（含 8 个音源与匹配器）/
 **影视核心**（影视库建表读写、m3u8 多清晰度解析、数据源注册表齐全、换源定位到同一集）/
 **图库核心**（建表读写、缩略图生成、感知哈希区分图片、编辑管线、增强算法、大模型未配置时明确报错）/
@@ -300,98 +290,122 @@ webfront 产物 / QtMultimedia / **真实音频解码播放**（播放一段静�
   墨软·工作台 / 墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视；安装包输出为 `dist\墨软工作台-Setup-<版本>.exe`。
 - **内部标识刻意保持不变**，以便已有数据与脚本继续可用：
   Python 包名 `modu_workbench`、可执行文件 `ModuWorkbench.exe`、
-  环境变量 `MODU_*`、数据目录 `%APPDATA%\ModuWorkbench`（书库 `library.db`、曲库 `music.db` 原地沿用）。
+  环境变量 `MODU_*`、数据目录 `%APPDATA%\ModuWorkbench`（单库 `modu.db` 原地沿用）。
 
 ## 目录结构
 
 ```
 src/modu_workbench/
-├── app/main.py / __main__.py      # 入口
-├── app/shell.py               # 主壳：顶栏（首页/板块/设置）+ 页面栈
-├── boards/                    # ★ 板块注册与页面
-│   ├── registry.py / base.py  # 板块注册表（可扩展）
-│   ├── home_board.py          # 首页：介绍 + 板块入口
-│   ├── book_board.py          # 墨软书库
-│   ├── book_shelf.py          # 书架
-│   ├── book_reader.py         # 阅读器
-│   ├── book_online.py         # 在线书库
-│   ├── convert_board.py       # 墨软转换（Qt 回退实现）
-│   ├── convert_web.py         # 墨软转换（内嵌前端 + QWebChannel）
-│   ├── doc_viewer.py          # 文档查看/编辑器（Qt 回退实现）
-│   ├── music_board.py         # 墨软乐库（板块外壳 + 底部播放条）
-│   ├── music_search.py        # 墨软乐库：在线搜索与批量下载
-│   ├── music_library_page.py  # 墨软乐库：我的音乐 + 格式转换
-│   ├── music_playlist.py      # 墨软乐库：歌单收藏
-│   ├── music_history.py       # 墨软乐库：播放历史
-│   ├── music_widgets.py       # 墨软乐库：表格/对话框/后台线程
-│   ├── video_board.py         # 墨软影视（板块外壳 + 播放/下载编排）
-│   ├── video_search.py        # 墨软影视：在线搜索与下载
-│   ├── video_detail.py        # 墨软影视：详情/选集/清晰度对话框
-│   ├── video_library_page.py  # 墨软影视：我的视频 + 分类收藏 + 格式转换
-│   ├── video_history.py       # 墨软影视：播放历史
-│   ├── video_sources.py       # 墨软影视：源设置（启用/优先级/接口地址/连通性测试）
-│   ├── video_player.py        # 墨软影视：播放器（原生优先 + hls.js 兜底）
-│   ├── video_widgets.py       # 墨软影视：表格/对话框/后台线程
-│   ├── gallery_board.py       # 墨软图库（板块外壳 + 网格/瀑布流/时间轴 + 大图查看）
-│   ├── gallery_widgets.py     # 墨软图库：缩略图网格/查看器/对话框/后台线程
-│   ├── gallery_editor.py      # 墨软图库：编辑美化（裁剪/滤镜/调节/文字/马赛克/涂鸦/边框）
-│   └── gallery_enhance.py     # 墨软图库：AI 优化（本地增强 + 前后对比）
-├── core/book/               # 书库引擎（迁移自 win-e-book）
-│   ├── parser.py / storage.py / library.py / online.py
-├── core/music/                # 音乐引擎
-│   ├── models.py              # 曲目/在线结果/歌单/历史模型
-│   ├── storage.py             # SQLite：曲库/歌单/待下载项/历史/设置
-│   ├── sources/               # ★ 音源层（多源 + 重试 + 熔断 + 跨源兜底）
-│   │   ├── base.py            # MusicSource 基类 / SourceInfo / 健康度
-│   │   ├── http.py            # 带退避重试的 HTTP 客户端 + 网络错误翻译
-│   │   ├── matcher.py         # 曲名/歌手/时长匹配（跨源找同一首歌）
-│   │   ├── registry.py        # 注册表：聚合搜索 / 熔断 / 换源解析 / 配置持久化
-│   │   └── providers/         # netease / kuwo / audius / archive / ccmixter / itunes / jamendo / direct
-│   ├── downloader.py          # 流式下载（进度/取消/封面/歌词/换源重试/音频校验）
-│   ├── library.py             # 本地曲库：导入/时长探测/转换入口
-│   └── player.py              # 播放器：队列/循环/随机/进度/音量/在线试听
-├── core/video/                # 影视引擎
-│   ├── models.py              # 片目/剧集/画质/收藏/历史模型
-│   ├── storage.py             # SQLite：影视库/分类收藏/历史/播放记录/设置
-│   ├── hls.py                 # m3u8 解析（主清单多清晰度 + 媒体清单分片）
-│   ├── sources/               # ★ 视频源层（多源 + 重试 + 熔断 + 跨源兜底）
-│   │   ├── base.py            # VideoSource 基类 / SourceInfo / 健康度
-│   │   ├── http.py            # 带退避重试的 HTTP 客户端 + 网络错误翻译
-│   │   ├── matcher.py         # 片名/年份/主演匹配（跨源找同一部、同一集）
-│   │   ├── registry.py        # 注册表：聚合搜索 / 熔断 / 换源解析 / 配置持久化
-│   │   └── providers/         # cms_vod（苹果CMS 采集）/ public（Archive·Wikimedia·直链·自定义）
-│   ├── downloader.py          # 下载（HLS 合流 / 直链；进度/取消/换源重试/容器嗅探）
-│   └── library.py             # 影视库：导入/在线解析/下载入库/转换入口
-├── core/gallery/                # 图库引擎
-│   ├── models.py              # 图片/相册/标签/编辑步骤/AI 任务模型
-│   ├── storage.py             # SQLite：图片/相册/标签/编辑历史/AI 任务/设置
-│   ├── hashing.py             # 内容哈希(sha256) + 感知哈希(dhash) 去重与相似识别
-│   ├── exif.py                # EXIF 解析（拍摄时间/相机/光圈快门 ISO/GPS/方向）
-│   ├── thumbs.py              # 缩略图生成与磁盘缓存（懒加载的基础）
-│   ├── edits.py               # 非破坏性编辑管线（裁剪/滤镜/调节/文字/贴纸/涂鸦/马赛克/边框）
-│   ├── enhance.py             # 本地增强算法（numpy+Pillow）：超分/降噪/去模糊/抠图/消除/风格化
-│   ├── ai.py                  # DeepSeek 集成（仅文本：描述/标签/检索/参数建议）
-│   └── library.py             # 图库业务层：导入/收集/分类/编辑导出/增强/AI 编排
-├── core/convert/              # 转换引擎
-│   ├── registry.py / engine.py / formats.py / text_io.py
-│   ├── pdf_out.py / image_io.py / archive_io.py
-│   ├── office_io.py / sheet_io.py / media_io.py
-├── services/                  # 桥接与运行时服务
-│   ├── web_bridge.py          # QWebChannel 桥（前端 RPC → Python 引擎）
-│   ├── bridge_shim.js         # 注入前端的 window.formatFlow 兼容层
-│   ├── web_prepare.py         # 整理 Vite 产物为 webfront
-│   ├── media_server.py        # 本地媒体流（Range）+ 远程直链/HLS 清单代理（补 Referer/UA）
-│   ├── media_player.py        # 原生播放器回退
-│   └── file_scan.py           # 导入文件扫描（唯一实现）
-├── webfront/                  # 内嵌前端产物（由 build_webfront 生成）
-├── ui_kit/                    # 统一设计规范（theme/toast/组件/设置）
-│   └── settings/              # 分板块设置页（通用/书库/转换/乐库/影视/图库）
-tests/                         # pytest（无头冒烟 + 单元）
-workbench.spec                 # PyInstaller 配置（Windows）
+├── __main__.py                # 入口（python -m modu_workbench）
+├── app/                       # ★ 应用骨架
+│   ├── bootstrap.py           # 启动：建库 + 迁移 + 旧分库导入
+│   ├── context.py             # 应用级上下文（按名字懒加载各板块单例）
+│   ├── main.py                # 入口 + 依赖自检（MODU_CHECK_DEPS）
+│   ├── registry.py            # 板块注册表（新增板块注册一条即可）
+│   └── shell.py               # 主壳：顶栏（首页/板块/设置）+ 页面栈
+├── boards/                    # ★ 五大板块各一个包，板块之间互不引用
+│   ├── base.py                # BoardSpec / BoardPage 基类
+│   ├── home/page.py           # 首页：介绍 + 板块入口
+│   ├── book/                  # 墨软书库
+│   │   ├── board.py           # 板块外壳
+│   │   ├── context.py         # 板块单例
+│   │   ├── shelf.py           # 书架
+│   │   ├── reader.py          # 阅读器
+│   │   └── online.py          # 在线书库
+│   ├── convert/               # 墨软转换（Qt 表格 + 动作面板）
+│   │   ├── board.py
+│   │   └── doc_viewer.py      # 文档查看/编辑器（QTextBrowser 渲染）
+│   ├── music/                 # 墨软乐库
+│   │   ├── board.py           # 板块外壳 + 底部播放条
+│   │   ├── context.py         # 板块单例
+│   │   ├── search.py          # 在线搜索与批量下载
+│   │   ├── library_page.py    # 我的音乐 + 格式转换
+│   │   ├── playlist.py        # 歌单收藏
+│   │   ├── history.py         # 播放历史
+│   │   └── widgets.py         # 表格/对话框/后台线程
+│   ├── video/                 # 墨软影视
+│   │   ├── board.py           # 板块外壳 + 播放/下载编排
+│   │   ├── context.py         # 板块单例
+│   │   ├── search.py          # 在线搜索与下载
+│   │   ├── detail.py          # 详情/选集/清晰度对话框
+│   │   ├── player.py          # 播放器（QtMultimedia 原生解码）
+│   │   ├── sources.py         # 源设置（启用/优先级/接口地址/连通性测试）
+│   │   ├── library_page.py    # 我的视频 + 分类收藏 + 格式转换
+│   │   ├── history.py         # 播放历史
+│   │   └── widgets.py         # 表格/对话框/后台线程
+│   └── gallery/               # 墨软图库
+│       ├── board.py           # 板块外壳 + 网格/瀑布流/时间轴 + 大图查看
+│       ├── context.py         # 板块单例
+│       ├── widgets.py         # 缩略图网格/查看器/对话框/后台线程
+│       ├── editor.py          # 编辑美化（裁剪/滤镜/调节/文字/马赛克/涂鸦/边框）
+│       └── enhance.py         # AI 优化（本地增强 + 前后对比）
+├── core/                      # ★ 业务内核，同样按板块分包
+│   ├── platform/              # ★ 板块无关的公共层（唯一允许被所有板块依赖）
+│   │   ├── paths.py / db.py   # 数据目录与文件布局 / 单库连接与设置
+│   │   ├── http.py / media.py # 统一 HTTP 客户端 / ffmpeg 定位与时长探测
+│   │   ├── files.py           # 本地文件扫描（唯一实现）
+│   │   ├── legacy.py          # 旧分库（5 个）自动导入
+│   │   └── migrations/        # 版本化迁移（v1_initial 等）
+│   ├── book/                  # 书库引擎（迁移自 win-e-book）
+│   │   ├── parser.py / storage.py / library.py / online.py / files.py
+│   ├── convert/               # 转换引擎
+│   │   ├── registry.py / engine.py / formats.py / text_io.py
+│   │   ├── pdf_out.py / image_io.py / archive_io.py
+│   │   └── office_io.py / sheet_io.py / media_io.py
+│   ├── music/                 # 音乐引擎
+│   │   ├── models.py          # 曲目/在线结果/歌单/历史模型
+│   │   ├── storage.py         # 曲库/歌单/待下载项/历史/设置
+│   │   ├── sources/           # ★ 音源层（多源 + 重试 + 熔断 + 跨源兜底）
+│   │   │   ├── base.py        # MusicSource 基类 / SourceInfo / 健康度
+│   │   │   ├── http.py        # 带退避重试的 HTTP 客户端 + 网络错误翻译
+│   │   │   ├── matcher.py     # 曲名/歌手/时长匹配（跨源找同一首歌）
+│   │   │   ├── quality.py     # 试听/片段判定（时长/标题/音源标记）
+│   │   │   ├── registry.py    # 注册表：聚合搜索 / 熔断 / 换源解析 / 配置持久化
+│   │   │   └── providers/     # netease / kuwo / audius / archive_org / ccmixter / itunes / jamendo / direct
+│   │   ├── downloader.py      # 流式下载（进度/取消/封面/歌词/换源重试/音频校验）
+│   │   ├── library.py         # 本地曲库：导入/时长探测/转换入口
+│   │   └── player.py          # 播放器：队列/循环/随机/进度/音量/在线试听
+│   ├── video/                 # 影视引擎
+│   │   ├── models.py          # 片目/剧集/画质/收藏/历史模型
+│   │   ├── storage.py         # 影视库/分类收藏/历史/播放记录/设置
+│   │   ├── hls.py             # m3u8 解析（主清单多清晰度 + 媒体清单分片）
+│   │   ├── aes.py             # AES-128 解密（纯标准库，无需 ffmpeg）
+│   │   ├── sources/           # ★ 视频源层（多源 + 重试 + 熔断 + 跨源兜底）
+│   │   │   ├── base.py / http.py / matcher.py / registry.py
+│   │   │   └── providers/     # cms_vod（苹果CMS 采集）/ public（Archive·Wikimedia·直链·自定义）
+│   │   ├── downloader.py      # 下载（HLS 合流 / 直链；进度/取消/换源重试/容器嗅探）
+│   │   └── library.py         # 影视库：导入/在线解析/下载入库/转换入口
+│   ├── gallery/               # 图库引擎
+│   │   ├── models.py          # 图片/相册/标签/编辑步骤/AI 任务模型
+│   │   ├── storage.py         # 图片/相册/标签/编辑历史/AI 任务/设置
+│   │   ├── hashing.py         # 内容哈希(sha256) + 感知哈希(dhash) 去重与相似识别
+│   │   ├── exif.py            # EXIF 解析（拍摄时间/相机/光圈快门 ISO/GPS/方向）
+│   │   ├── thumbs.py          # 缩略图生成与磁盘缓存（懒加载的基础）
+│   │   ├── edits.py           # 非破坏性编辑管线（裁剪/滤镜/调节/文字/涂鸦/马赛克/边框）
+│   │   ├── enhance.py         # 本地增强算法（numpy+Pillow）：超分/降噪/去模糊/抠图/消除/风格化
+│   │   ├── ai.py              # 大模型集成（仅文本：描述/标签/检索/参数建议）
+│   │   └── library.py         # 图库业务层：导入/收集/分类/编辑导出/增强/AI 编排
+│   └── llm/                   # 大模型能力中心（跨板块共用）
+│       ├── models.py          # 多类型/多份配置模型
+│       ├── router.py          # 按优先级调用 + 失败自动降级
+│       └── context.py         # 大模型单例
+├── services/                  # 跨板块的本地服务
+│   ├── app_context.py         # 懒转发兼容层（单例回到各板块 context）
+│   ├── assets.py              # 图标/安装包图形定位（窗口与任务栏图标）
+│   └── media_server.py        # 本地媒体流（Range）+ 远程直链/HLS 清单代理（补 Referer/UA）
+├── ui_kit/                    # 统一设计规范
+│   ├── theme.py / tokens.py   # 主题与设计令牌（间距/字号/圆角）
+│   ├── toast.py / widgets.py  # 轻提示与通用控件
+│   ├── components/            # 组件库（页面骨架/卡片/空状态/任务条）
+│   └── settings/              # 分板块设置页（通用/大模型/书库/转换/乐库/影视/图库）
+└── assets/                    # 应用图标与安装包图形（随包分发）
+tests/                         # pytest（architecture / platform / board_<板块> / smoke / helpers）
+workbench.spec                 # PyInstaller 配置（Windows onedir）
 workbench_mac.spec             # PyInstaller 配置（macOS，BUNDLE）
-packaging/                     # 一键打包脚本 + NSIS 安装脚本 + 前端构建脚本
-archive/electron-formatflow/   # 旧 Electron 版归档（前端源码 + 主进程参考）
-docs/ARCHITECTURE.md           # 架构与合并方案
+packaging/                     # 一键打包/安装包脚本 + 图标与界面截图工具
+archive/electron-formatflow/   # 旧 Electron 版归档（仅历史参考，不参与构建）
+tools/ffmpeg/                  # 随包 ffmpeg / ffprobe
+docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / RELEASE / REFACTOR_PLAN / BOARDS
 ```
 
 ## 文档索引
@@ -415,7 +429,7 @@ docs/ARCHITECTURE.md           # 架构与合并方案
 | M2 | 转换基础（文本/PDF(Qt)/图片/归档/查看编辑/任务队列） | ✅ |
 | M3 | 转换高级（Word/表格/媒体，LibreOffice 高保真） | ✅ |
 | M4 | 跨板块联动 / 设置 / PyInstaller 打包 / 推送 | ✅ |
-| M5 | 内嵌 main 分支前端（QtWebEngine + QWebChannel）/ mp4 内联预览 / NSIS 安装包 | ✅ |
+| M5 | 内嵌 main 分支前端（QtWebEngine + QWebChannel）/ mp4 内联预览 / NSIS 安装包 | 🗑 前端与内联预览已移除（v1.0.0 起 Qt 单栈）；NSIS 安装包保留 |
 | M6 | 墨软乐库板块（在线搜索下载 / 播放器 / 歌单收藏分类 / 播放历史 / 音频格式转换） | ✅ |
 | M7 | 墨软影视板块（多源搜索下载 / 多清晰度播放器 / 分类收藏 / 播放历史 / 视频格式转换） | ✅ |
 | M8 | 墨软图库板块（本地相册 / 分类标签收藏 / 导入去重 / 美化编辑 / 本地增强）+ 设置按板块分区 | ✅ |

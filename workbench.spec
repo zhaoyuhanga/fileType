@@ -94,6 +94,7 @@ a = Analysis(
         "modu_workbench.core.music.sources.http",
         "modu_workbench.core.music.sources.base",
         "modu_workbench.core.music.sources.matcher",
+        "modu_workbench.core.music.sources.quality",
         "modu_workbench.core.music.sources.registry",
         "modu_workbench.core.music.sources.providers",
         "modu_workbench.core.music.sources.providers.netease",

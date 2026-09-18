@@ -3,7 +3,44 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
-## 未发布 — 控件样式补齐（尤其是下拉框）
+## 未发布 — 文档与打包配置校正
+
+发版后做了一次「文档/配置 vs 磁盘实况」的核查：只改描述与打包配置，不涉及运行时行为。
+
+### README 与仓库实况对齐
+
+- **头行版本与产物**：仍写 `v1.0.0（定版）` 与 `dist\墨软工作台-Setup-0.3.0.exe` → 更正为 v1.0.2 与真实产物路径；
+- **合并历史段**：仍称「React 渲染进程作为内嵌前端、由 QtWebEngine 加载、经 QWebChannel 桥接」——
+  这些在 v1.0.0 已全部移除，改为历史归档说明；
+- **影视播放器**：「m3u8 或原生不支持的地址自动切到内嵌网页内核（hls.js）」不成立
+  （`boards/video/player.py` 自 v1.0.0 起只有原生解码）→ 改为 QtMultimedia + 本机流服务代理；
+- **影视格式转换**：列表里的 `gif` 不在 `core/video/models.VIDEO_TARGETS` 里 → 删掉
+  （gif 只属于转换板块的目标集）；
+- **转换简介**：写「六类」却只列了五项 → 补上「文本」；
+- **数据库**：「大模型配置存 `llm.db`」「书库 `library.db`、曲库 `music.db`」→ 统一为单库 `modu.db`；
+- **删除整节「重建内嵌前端」**（`build_webfront.ps1|sh`、`.webfront-build\`、`vite build` 均已不存在）；
+- **打包自检**：从「共 15 项（含 WebEngine 导入与渲染 / webfront 产物）」更正为 **14 项**，
+  与 `app/main.py` 的 `record(...)` 一一对应；
+- **目录结构树**：按磁盘实况整体重生成（旧树还是 v1.0.0 之前的平铺布局）；
+- **里程碑 M5**：标注为「前端与内联预览已移除（v1.0.0 起 Qt 单栈），NSIS 安装包保留」。
+
+### 打包配置校正（macOS spec 已不可用）
+
+`workbench_mac.spec` 仍在打包已删除的 `src/modu_workbench/webfront`（macOS 打包会直接报错），
+隐藏导入里还留着已删的 `boards.convert.web`，`CFBundleShortVersionString` 停在 `0.3.0`：
+
+- 去掉 webfront 数据条目与 `convert.web`；
+- 隐藏导入与 Windows spec 对齐（补齐乐库音源层/播放器、视频源层子模块、大模型、
+  各分板块设置页、`pypdf` 与 markdown/pygments 扩展），并排除 QtWebEngine 相关打包；
+- `CFBundleShortVersionString` 同步为 `1.0.2`。
+
+### 新增测试
+
+`tests/architecture/test_spec_integrity.py`：静态解析两个 spec 的 `Analysis(...)`，
+断言 `datas` 路径存在、`modu_workbench.*` 隐藏导入可解析、两个 spec 的自研模块清单一致
+——macOS spec 的那处漂移正是被它抓出来的（写测试时它当场还抓出 Windows/mac 清单不一致）。
+
+## v1.0.2 — 控件样式补齐（尤其是下拉框）
 
 反馈："前端页面的样式有点丑，尤其下拉框的样式是真丑" + "点击下拉框会卡死一会"。
 
@@ -41,7 +78,7 @@ QSS 以 `image: url(...)` 引用；并补齐 数字框 / 勾选与单选 / 右�
 另有 `test_qss_covers_popup_controls`、`test_runtime_icons_are_generated`、
 `test_settings_pages_fit_default_width`。`docs/UI_GUIDE.md` 增加"下拉列表的选择器坑"专节。
 
-## 未发布 — 在线曲目质量过滤（酷我试听/片段）
+## v1.0.2 — 在线曲目质量过滤（酷我试听/片段）
 
 针对「酷我源头有很多试听、下载还提示只能在手机端播放」的反馈。
 
@@ -81,6 +118,21 @@ svip_preview / payInfo 字段在片段与完整曲目上**完全一致**，只�
 新增测试 `tests/board_music/test_music_quality.py`（18 项）：判定规则、阈值可配置、
 稳定排序、酷我字段解析与受限文案透传、跨音源排序、片段拒绝下载不发网络请求、
 换源拿完整版、搜索页隐藏/显示与偏好持久化。
+
+### 发布产物（v1.0.2，本机构建）
+
+| 产物 | 大小 | SHA256 |
+|---|---|---|
+| `dist/墨软工作台-Setup-1.0.2.exe`（NSIS 安装包） | 151.0 MB | `96455B5A4C93324B8DB5DE2689AAB690B71F6C3C97DB9E31BCBAA4BBD22401E7` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `AD5974175EB3532C5A16DF18B9E763CABF1477D0E83D1218BB6B58C6E047F2D2` |
+
+- onedir 目录合计约 382.5 MB（随包 ffmpeg/ffprobe 约 196 MB）；
+- 构建三道自检**全部通过**：源码自检 **14/14**、exe 关键字模块 **15/15**、
+  打包产物自检全部为 `true`（含 `video_core` / `gallery_core` / `llm_core`）——
+  本次产物未被「智能应用控制」拦截，与 v1.0.1 时不同；
+- 版本号 1.0.1 → **1.0.2**（`__init__.py` / `pyproject.toml` 单一来源，安装包版本由
+  `packaging/build_installer.ps1` 从包内读取后传给 makensis）；
+- 未签名 exe/安装包在开启「智能应用控制」的机器上仍可能被系统拦截：需关闭该功能或签名后验证安装包。
 
 ## v1.0.1 — 使用反馈修复
 

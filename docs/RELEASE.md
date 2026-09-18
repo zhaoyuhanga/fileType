@@ -1,4 +1,4 @@
-# 发布规范（RELEASE，v1.0.0）
+# 发布规范（RELEASE，v1.0.2）
 
 > 版本单一来源：`src/modu_workbench/__init__.py` 的 `__version__`
 > （`pyproject.toml` 必须与之一致，见 `tests/architecture/test_version.py`）。
@@ -10,7 +10,7 @@
 # 1) 全量测试（含架构闸门）
 .venv\Scripts\python.exe -m pytest tests -q
 
-# 2) 源码自检（13 项：转换/文档/音视频/四个板块核心/单栈/ffmpeg/品牌）
+# 2) 源码自检（14 项：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/四个板块核心/ffmpeg/品牌）
 $env:MODU_CHECK_DEPS="$env:TEMP\check.json"
 .venv\Scripts\python.exe -m modu_workbench; type $env:TEMP\check.json
 
@@ -30,7 +30,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 
 产物：
 - `dist\ModuWorkbench\ModuWorkbench.exe`（onedir，随包 ffmpeg 约 196MB，目录合计约 371MB）
-- `dist\墨软工作台-Setup-<版本>.exe`（NSIS 安装包，v1.0.0 约 150MB）
+- `dist\墨软工作台-Setup-<版本>.exe`（NSIS 安装包，v1.0.2 约 151MB）
 
 打包脚本内置三道自检，任一处 `Fail` 都会直接中断：
 1. 源码自检（`MODU_CHECK_DEPS`）；
@@ -43,6 +43,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 |---|---|---|---|
 | v0.3.x | 731 MB | — | 含 QtWebEngine + 内嵌 React 前端 |
 | v1.0.0 | **371 MB** | 150 MB | 移除 QtWebEngine（约 340MB）与 Qml/Quick/Pdf/虚拟键盘（约 18MB） |
+| v1.0.2 | 382.5 MB | 151 MB | 控件样式补齐 + 在线曲目质量过滤；打包环境 Python 3.12.10 / PySide6 6.11.2 / PyInstaller 6.22.3 |
 
 精简原则：只删除**已用二进制导入表核实无依赖**的 Qt 模块；
 每次精简后必须重跑打包产物自检（`multimedia_playback` 会真实播放一段音频，是最有效的回归）。
