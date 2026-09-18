@@ -205,6 +205,8 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="src/modu_workbench/assets/app.ico",
+    # Windows 版本资源（文件属性里可见 ProductName/FileVersion）
+    version="packaging/version_info.txt",
 )
 coll = COLLECT(
     exe,

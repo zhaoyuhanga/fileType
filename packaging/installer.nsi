@@ -34,6 +34,16 @@ RequestExecutionLevel user
 SetCompressor zlib
 BrandingText "墨软·工作台"
 
+; 安装包自身的版本资源（资源管理器「属性 → 详细信息」里可见）
+; VIProductVersion 必须是四段式 x.y.z.w；版本号仍由 /DAPP_VERSION 传入（单一来源）
+VIProductVersion "${APP_VERSION}.0"
+VIAddVersionKey "ProductName" "墨软·工作台"
+VIAddVersionKey "CompanyName" "ModuWorkbench"
+VIAddVersionKey "FileDescription" "墨软·工作台 安装程序"
+VIAddVersionKey "FileVersion" "${APP_VERSION}"
+VIAddVersionKey "ProductVersion" "${APP_VERSION}"
+VIAddVersionKey "LegalCopyright" "MIT License"
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES

@@ -30,3 +30,34 @@ def test_installer_version_comes_from_package() -> None:
     ps1 = (REPO_ROOT / "packaging" / "build_installer.ps1").read_text(encoding="utf-8-sig")
     assert "/DAPP_VERSION" in ps1, "打包脚本应把版本通过 /DAPP_VERSION 传给 NSIS"
     assert "__version__" in ps1, "打包脚本应从包内 __version__ 取版本（单一来源）"
+
+
+def _version_tuple() -> tuple[int, ...]:
+    return tuple(int(part) for part in __version__.split(".")) + (0,) * (4 - len(__version__.split(".")))
+
+
+def test_installer_declares_version_resource() -> None:
+    """安装包 exe 必须带版本资源，且版本取自 ${APP_VERSION}（不能写死）。"""
+    nsi = (REPO_ROOT / "packaging" / "installer.nsi").read_text(encoding="utf-8-sig")
+    assert 'VIProductVersion "${APP_VERSION}.0"' in nsi, "缺少四段式 VIProductVersion"
+    assert 'VIAddVersionKey "FileVersion" "${APP_VERSION}"' in nsi
+    assert 'VIAddVersionKey "ProductVersion" "${APP_VERSION}"' in nsi
+    # 版本资源里不应出现写死的三段式版本号
+    assert not re.search(r'VIAddVersionKey\s+"\w+"\s+"\d+\.\d+\.\d+"', nsi)
+
+
+def test_exe_version_resource_matches_package() -> None:
+    """PyInstaller 版本资源（packaging/version_info.txt）必须与包版本一致。"""
+    spec = (REPO_ROOT / "workbench.spec").read_text(encoding="utf-8")
+    assert 'version="packaging/version_info.txt"' in spec, "workbench.spec 未挂载版本资源"
+
+    text = (REPO_ROOT / "packaging" / "version_info.txt").read_text(encoding="utf-8")
+    wanted = _version_tuple()
+    for key in ("filevers", "prodvers"):
+        found = re.search(rf"{key}=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)", text)
+        assert found, f"version_info.txt 缺少 {key}"
+        assert tuple(int(g) for g in found.groups()) == wanted, f"{key} 与 __version__ 不一致"
+    for key in ("FileVersion", "ProductVersion"):
+        found = re.search(rf'StringStruct\("{key}",\s*"([^"]+)"\)', text)
+        assert found, f"version_info.txt 缺少 {key}"
+        assert found.group(1) == __version__, f"{key} 与 __version__ 不一致"

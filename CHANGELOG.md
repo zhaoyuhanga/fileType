@@ -40,6 +40,21 @@
 断言 `datas` 路径存在、`modu_workbench.*` 隐藏导入可解析、两个 spec 的自研模块清单一致
 ——macOS spec 的那处漂移正是被它抓出来的（写测试时它当场还抓出 Windows/mac 清单不一致）。
 
+### 版本资源（exe 与安装包在属性里能看出版本了）
+
+此前 `ModuWorkbench.exe` 与安装包都**没有版本资源**——资源管理器「属性 → 详细信息」里
+产品名/版本号一片空白，只看文件名分不出装的是哪一版：
+
+- 新增 `packaging/version_info.txt`（PyInstaller 的 `VSVersionInfo`），
+  `workbench.spec` 的 `EXE(...)` 挂上 `version="packaging/version_info.txt"`，
+  启动器 exe 现在带 `ProductName 墨软·工作台` / `FileVersion 1.0.2` / `OriginalFilename` 等；
+- `packaging/installer.nsi` 增加 `VIProductVersion "${APP_VERSION}.0"`（NSIS 要求四段式）
+  与 `VIAddVersionKey`（ProductName / CompanyName / FileDescription / FileVersion /
+  ProductVersion / LegalCopyright），安装包同样可见；
+- **版本仍是单一来源**：安装包来自 `build_installer.ps1` 的 `/DAPP_VERSION`，
+  exe 版本资源与 `__version__` 的一致性由 `tests/architecture/test_version.py` 新增的两项测试守住
+  （`filevers`/`prodvers`/`FileVersion`/`ProductVersion` 全部比对，且禁止 NSIS 里写死版本号）。
+
 ### 仓库清理与重新打包
 
 v1.0.2 首次发版后做了一次彻底清理（全部是 `.gitignore` 覆盖、可再生的构建产物，未触碰任何源文件）：
@@ -139,11 +154,12 @@ svip_preview / payInfo 字段在片段与完整曲目上**完全一致**，只�
 
 | 产物 | 大小 | SHA256 |
 |---|---|---|
-| `dist/墨软工作台-Setup-1.0.2.exe`（NSIS 安装包） | 151.0 MB | `D8DEAF230D9754C2E0BA6AE63EB621698CF08740480C992BDD1BB4EBFF9A88B3` |
-| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `A04DB049398BE1035B852724C6F90599861FC0806FD3EB1BD2B824C33F7724C8` |
+| `dist/墨软工作台-Setup-1.0.2.exe`（NSIS 安装包） | 151.0 MB | `B64FFF6247C8A6008FC227A99C1436A200AE35D75BE08A8C8BC4A8636B811BFD` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `8C547096782353E19010C58AB2546E7EA7BF3B661BA80192FEAB0A7C7001784A` |
 
 - onedir 目录合计约 382.5 MB（随包 ffmpeg/ffprobe 约 196 MB）；
-- 以上为**清理旧产物后重新打包**的最终校验值（首次发版产物已随 `dist\` 清理一并删除）；
+- 以上为**清理旧产物并加上版本资源后重新打包**的最终校验值（首次发版产物已随 `dist\` 清理一并删除）；
+- 两个产物的文件属性里均可见 `FileVersion` / `ProductVersion` = **1.0.2**、`ProductName` = 墨软·工作台（见上一节）；
 - 构建三道自检**全部通过**：源码自检 **14/14**、exe 关键字模块 **15/15**、
   打包产物自检全部为 `true`（含 `video_core` / `gallery_core` / `llm_core`）——
   本次产物未被「智能应用控制」拦截，与 v1.0.1 时不同；

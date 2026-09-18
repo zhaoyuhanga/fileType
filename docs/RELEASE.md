@@ -29,8 +29,11 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 ```
 
 产物：
-- `dist\ModuWorkbench\ModuWorkbench.exe`（onedir，随包 ffmpeg 约 196MB，目录合计约 371MB）
+- `dist\ModuWorkbench\ModuWorkbench.exe`（onedir，随包 ffmpeg 约 196MB，v1.0.2 目录合计约 382.5MB）
 - `dist\墨软工作台-Setup-<版本>.exe`（NSIS 安装包，v1.0.2 约 151MB）
+- 两个产物都带 Windows 版本资源：启动器由 `workbench.spec` 挂载 `packaging/version_info.txt`
+  （PyInstaller `VSVersionInfo`），安装包由 `installer.nsi` 的 `VIProductVersion` + `VIAddVersionKey`
+  注入；版本号仍来自 `__version__`（`tests/architecture/test_version.py` 守住一致性）。
 
 打包脚本内置三道自检，任一处 `Fail` 都会直接中断：
 1. 源码自检（`MODU_CHECK_DEPS`）；

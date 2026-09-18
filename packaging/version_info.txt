@@ -1,0 +1,36 @@
+# PyInstaller 的 Windows 版本资源（EXE(version="packaging/version_info.txt")）。
+#
+# 单一来源约定：这里的版本号必须与 src/modu_workbench/__init__.py 的 __version__ 一致，
+# 由 tests/architecture/test_version.py 守着（改版本时同步改这里，测试会拦住漏改）。
+VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers=(1, 0, 2, 0),
+        prodvers=(1, 0, 2, 0),
+        mask=0x3F,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0),
+    ),
+    kids=[
+        StringFileInfo(
+            [
+                StringTable(
+                    "080404B0",
+                    [
+                        StringStruct("CompanyName", "ModuWorkbench"),
+                        StringStruct("FileDescription", "墨软·工作台"),
+                        StringStruct("FileVersion", "1.0.2"),
+                        StringStruct("InternalName", "ModuWorkbench"),
+                        StringStruct("LegalCopyright", "MIT License"),
+                        StringStruct("OriginalFilename", "ModuWorkbench.exe"),
+                        StringStruct("ProductName", "墨软·工作台"),
+                        StringStruct("ProductVersion", "1.0.2"),
+                    ],
+                )
+            ]
+        ),
+        VarFileInfo([VarStruct("Translation", [2052, 1200])]),
+    ],
+)
