@@ -85,6 +85,31 @@ def test_settings_pages_scroll_and_keep_buttons_visible(qapp: QApplication) -> N
         dialog.close()
 
 
+def test_settings_pages_fit_default_width(qapp: QApplication) -> None:
+    """每个设置页在默认窗口宽度下都不该出现横向滚动条。
+
+    之前 `music` / `video` / `llm` 三页的最小宽度被内容顶到 1000px 以上
+    （长文件路径的 QLabel、写满状态的长复选框），打开设置就横着滚 —— 观感很差。
+    """
+    dialog = SettingsDialog()
+    dialog.resize(980, 700)          # 默认尺寸
+    dialog.show()
+    qapp.processEvents()
+    try:
+        from modu_workbench.ui_kit.settings import PAGE_FACTORIES
+
+        for key, _title, _icon, _factory in PAGE_FACTORIES:
+            dialog._select(key)                                  # noqa: SLF001
+            qapp.processEvents()
+            scroll = dialog._scrolls[key]                        # noqa: SLF001
+            bar = scroll.horizontalScrollBar()
+            assert bar.maximum() == 0, (
+                f"{key} 页需要横向滚动（最大 {bar.maximum()}px）："
+                "把长文本换成只读输入框 / 缩短标签 / 收窄固定宽度")
+    finally:
+        dialog.close()
+
+
 def test_settings_dialog_survives_broken_page(qapp: QApplication, monkeypatch) -> None:
     """某个板块设置页构造失败时，不应把整个设置窗口带崩。"""
     import modu_workbench.ui_kit.settings as settings_pkg

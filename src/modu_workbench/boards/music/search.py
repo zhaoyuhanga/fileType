@@ -326,6 +326,7 @@ class MusicSearchPage(QWidget):
 
         annotate_many(tracks or [])
         hidden = [track for track in (tracks or []) if should_hide(track)]
+        previews = [track for track in (tracks or []) if getattr(track, "preview", False)]
         self._hidden_previews = hidden
         hiding = self._hide_preview.isChecked()
         visible = [track for track in (tracks or [])
@@ -337,11 +338,10 @@ class MusicSearchPage(QWidget):
             fill_remote_row(self._table, row, remote)
         select_all(self._table, False)
         message = f"共 {len(self._results)} 条结果"
-        if hidden:
-            if hiding:
-                message += f"（{describe_hidden(hidden)}）"
-            else:
-                message += f"（其中 {len(hidden)} 条为试听/片段，已标黄）"
+        if hiding and hidden:
+            message += f"（{describe_hidden(hidden)}）"
+        elif previews:
+            message += f"（其中 {len(previews)} 条为试听/片段，已标黄）"
         if errors:
             message += "；" + "；".join(errors)
         self._empty.setVisible(not self._results)

@@ -10,6 +10,10 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QObject
+
 from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
     CARD_PADDING,
     DARK,
@@ -24,7 +28,117 @@ from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
 )
 
 
+# ---------------------------------------------------------------- 运行时小图标
+#
+# 为什么需要：QSS 里的箭头/勾选标记都只能靠 `image:` 指定图片，
+# 用 border 拼三角形在 Qt 里不可靠（实测渲染成一个小方块 —— 下拉框显丑的主因之一）。
+# 这里用 QPainter 现画几个小 PNG 缓存到数据目录，颜色随主题变化，
+# 不引入二进制资源、也不用改打包配置。
+
+_ICON_DIR: "Path | None" = None
+_ICON_CACHE: dict[str, str] = {}
+
+
+def _icon_dir():  # noqa: ANN202
+    global _ICON_DIR
+    if _ICON_DIR is None:
+        try:
+            from modu_workbench.core.platform.paths import app_data_dir
+
+            _ICON_DIR = app_data_dir() / "cache" / "ui"
+        except Exception:  # noqa: BLE001  取不到目录就退化到临时目录
+            import tempfile
+            from pathlib import Path as _Path
+
+            _ICON_DIR = _Path(tempfile.gettempdir()) / "modu-ui-icons"
+        _ICON_DIR.mkdir(parents=True, exist_ok=True)
+    return _ICON_DIR
+
+
+def _draw_icon(name: str, color: str, size: int, painter_fn) -> str:  # noqa: ANN001
+    """生成（或复用）一枚小图标，返回 QSS 可用的 posix 路径。"""
+    key = f"{name}-{color.lstrip('#')}-{size}"
+    cached = _ICON_CACHE.get(key)
+    if cached:
+        return cached
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+
+    scale = 2                                   # 画 2 倍图再按 1 倍尺寸用，边缘更干净
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(scale, scale)
+    painter.setPen(QPen(QColor(color), 1.6, Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    painter_fn(painter)
+    painter.end()
+    path = _icon_dir() / f"{key}.png"
+    if not path.is_file() or path.stat().st_size == 0:
+        pixmap.save(str(path), "PNG")
+    _ICON_CACHE[key] = path.as_posix()
+    return _ICON_CACHE[key]
+
+
+def _icon_urls(t: ThemeTokens) -> dict[str, str]:
+    """按主题色生成箭头/勾选图标；没有 GUI 应用时返回空（QSS 退化为不画图）。"""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.instance() is None:      # 纯文本环境（如单元测试）不生成图片
+        return {}
+
+    def chevron_down(painter):  # noqa: ANN001
+        _polyline(painter, QPointF(2.6, 4.2), QPointF(7, 8.6), QPointF(11.4, 4.2))
+
+    def chevron_up(painter):  # noqa: ANN001
+        _polyline(painter, QPointF(2.6, 8.0), QPointF(7, 3.6), QPointF(11.4, 8.0))
+
+    def chevron_right(painter):  # noqa: ANN001
+        _polyline(painter, QPointF(4.0, 2.4), QPointF(8.6, 7), QPointF(4.0, 11.6))
+
+    def check(painter):  # noqa: ANN001
+        _polyline(painter, QPointF(2.4, 7.4), QPointF(5.6, 10.6), QPointF(11.6, 3.6))
+
+    def dot(painter):  # noqa: ANN001
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QBrush, QColor
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(t.accent)))
+        painter.drawEllipse(QPointF(7, 7), 2.8, 2.8)
+
+    return {
+        "chevron_down": _draw_icon("chevron-down", t.text_dim, 14, chevron_down),
+        "chevron_up": _draw_icon("chevron-up", t.text_dim, 14, chevron_up),
+        "chevron_right": _draw_icon("chevron-right", t.text_dim, 14, chevron_right),
+        "check": _draw_icon("check", "#ffffff", 14, check),
+        "dot": _draw_icon("radio-dot", t.accent, 14, dot),
+    }
+
+
+def _polyline(painter, *points) -> None:  # noqa: ANN001
+    for start, end in zip(points, points[1:]):
+        painter.drawLine(start, end)
+
+
+def _image_rule(icons: dict, key: str, *, width: int = 12, height: int = 12) -> str:
+    """生成一条 `image: url(...); width: …; height: …` 规则（图标缺失时留空）。"""
+    path = icons.get(key)
+    if not path:
+        return ""
+    return f'image: url("{path}"); width: {width}px; height: {height}px;'
+
+
 def app_qss(t: ThemeTokens) -> str:
+    control = t.control_height
+    icons = _icon_urls(t)
+    arrow_down = _image_rule(icons, "chevron_down", width=12, height=12)
+    arrow_up = _image_rule(icons, "chevron_up", width=12, height=12)
+    arrow_right = _image_rule(icons, "chevron_right", width=12, height=12)
+    check_icon = _image_rule(icons, "check", width=12, height=12)
+    dot_icon = _image_rule(icons, "dot", width=12, height=12)
     return f"""
 /* ---------- 基础 ---------- */
 QMainWindow, QWidget#rootPage, QDialog {{
@@ -236,31 +350,191 @@ QLineEdit#searchBox {{
     padding: 6px 14px;
 }}
 
+/* ---------- 下拉框 ----------
+   要点（之前丑的根源）：
+   1) 右侧必须预留箭头的位置，否则长文本会压到箭头上；
+   2) ::drop-down 必须显式去掉边框/底色，否则 Fusion 会在右侧画一个灰色按钮 + 竖分隔线；
+   3) 箭头只能用 image（用 border 拼三角形在 Qt 里会渲染成小方块）；
+   4) 弹出列表是**独立顶层窗口**，容器自带的灰框要单独处理（见 polish_popups）。 */
 QComboBox {{
     background: {t.surface};
     border: 1px solid {t.border_strong};
-    border-radius: 7px;
-    padding: 5px 10px;
+    border-radius: {t.radius_sm}px;
+    padding: 4px 30px 4px 12px;
+    min-height: {control - 12}px;
     color: {t.text};
 }}
-QComboBox:hover {{ border-color: {t.accent}; }}
-QComboBox:disabled {{ color: {t.text_faint}; background: {t.surface_2}; }}
+QComboBox:hover:!disabled {{ border-color: {t.accent}; }}
+QComboBox:focus, QComboBox:on {{ border-color: {t.accent}; }}
+QComboBox:disabled {{
+    color: {t.text_faint};
+    background: {t.surface_2};
+    border-color: {t.border};
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 26px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{ {arrow_down} }}
 QComboBox QAbstractItemView {{
     background: {t.surface};
     color: {t.text};
     border: 1px solid {t.border_strong};
-    selection-background-color: {t.accent_soft};
-    selection-color: {t.text_hi};
+    border-radius: {t.radius_sm}px;
+    padding: 6px;
     outline: none;
-    padding: 4px;
+    selection-background-color: transparent;
 }}
-QComboBox::down-arrow {{
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {t.text_dim};
-    margin-right: 6px;
+QComboBox QAbstractItemView::item {{
+    min-height: 30px;
+    padding: 4px 10px;
+    border-radius: 7px;
+    color: {t.text};
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background: {t.surface_hover};
+    color: {t.text_hi};
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {t.accent_soft};
+    color: {t.accent_strong};
+}}
+
+/* ---------- 数字输入 ---------- */
+QSpinBox, QDoubleSpinBox {{
+    background: {t.surface};
+    border: 1px solid {t.border_strong};
+    border-radius: {t.radius_sm}px;
+    padding: 4px 10px;
+    min-height: {control - 12}px;
+    color: {t.text};
+}}
+QSpinBox:hover:!disabled, QDoubleSpinBox:hover:!disabled {{ border-color: {t.accent}; }}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {t.accent}; }}
+QSpinBox:disabled, QDoubleSpinBox:disabled {{
+    color: {t.text_faint}; background: {t.surface_2}; border-color: {t.border};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    width: 22px;
+    border: none;
+    background: transparent;
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-position: top right;
+    border-top-right-radius: {t.radius_sm}px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: {t.radius_sm}px;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {t.accent_soft};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ {arrow_up} }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ {arrow_down} }}
+
+/* ---------- 勾选 / 单选 ---------- */
+QCheckBox, QRadioButton {{ spacing: 8px; color: {t.text}; }}
+QCheckBox:disabled, QRadioButton:disabled {{ color: {t.text_faint}; }}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: 18px; height: 18px;
+    background: {t.surface};
+    border: 1px solid {t.border_strong};
+    border-radius: 7px;
+}}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {t.accent}; }}
+QCheckBox::indicator:checked {{
+    background: {t.accent};
+    border-color: {t.accent};
+    {check_icon}
+}}
+QCheckBox::indicator:indeterminate {{
+    background: {t.accent_soft};
+    border-color: {t.accent};
+}}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+    background: {t.surface_2};
+    border-color: {t.border};
+}}
+QRadioButton::indicator {{ border-radius: 9px; }}   /* 18px 方格的一半＝正圆 */
+QRadioButton::indicator:checked {{ border-color: {t.accent}; {dot_icon} }}
+
+/* ---------- 右键菜单（弹出层，同样需要去灰框） ---------- */
+QMenu {{
+    background: {t.surface};
+    border: 1px solid {t.border_strong};
+    border-radius: {t.radius_sm}px;
+    padding: 6px;
+    color: {t.text};
+}}
+QMenu::item {{
+    min-height: 24px;
+    padding: 6px 22px 6px 12px;
+    border-radius: 7px;
+    color: {t.text};
+}}
+QMenu::item:selected {{ background: {t.accent_soft}; color: {t.accent_strong}; }}
+QMenu::item:disabled {{ color: {t.text_faint}; }}
+QMenu::separator {{ height: 1px; background: {t.border}; margin: 5px 10px; }}
+QMenu::icon {{ padding-left: 6px; }}
+
+/* ---------- 树（图库左侧分类导航等） ---------- */
+QTreeView, QTreeWidget {{
+    background: {t.surface};
+    border: 1px solid {t.border};
+    border-radius: {t.radius_sm}px;
+    padding: 6px;
+    outline: none;
+    color: {t.text};
+    show-decoration-selected: 1;
+}}
+QTreeView::item, QTreeWidget::item {{
+    min-height: 30px;
+    padding: 3px 8px;
+    border-radius: 7px;
+    color: {t.text};
+}}
+QTreeView::item:hover, QTreeWidget::item:hover {{
+    background: {t.surface_hover};
+}}
+QTreeView::item:selected, QTreeWidget::item:selected {{
+    background: {t.accent_soft};
+    color: {t.accent_strong};
+}}
+QTreeView::branch, QTreeWidget::branch {{ background: transparent; }}
+QTreeView::branch:closed:has-children, QTreeWidget::branch:closed:has-children {{
+    {arrow_right}
+}}
+QTreeView::branch:open:has-children, QTreeWidget::branch:open:has-children {{
+    {arrow_down}
+}}
+
+/* ---------- 选项卡 ---------- */
+QTabWidget::pane {{
+    border: 1px solid {t.border};
+    border-radius: {t.radius_sm}px;
+    background: {t.surface};
+    top: -1px;
+}}
+QTabBar::tab {{
+    background: transparent;
+    color: {t.text_dim};
+    border: 1px solid transparent;
+    border-radius: {t.radius_sm}px;
+    padding: 6px 14px;
+    margin-right: 4px;
+}}
+QTabBar::tab:hover {{ color: {t.accent_hover}; background: {t.surface_hover}; }}
+QTabBar::tab:selected {{
+    background: {t.accent_soft};
+    color: {t.accent_strong};
+    font-weight: 600;
 }}
 
 /* ---------- 表格 ---------- */
@@ -560,6 +834,7 @@ def apply_theme(app) -> None:
     app.setStyle("Fusion")
     app.setStyleSheet(app_qss(TOKENS))
     _apply_app_icon(app)
+    install_popup_polisher(app)
     # 兜底：原生控件（勾选框、单选框箭头等）用相近的浅色调色板
     from PySide6.QtGui import QColor, QPalette
 
@@ -591,3 +866,48 @@ def _apply_app_icon(app) -> None:
             app.setWindowIcon(QIcon(str(path)))
     except Exception:  # noqa: BLE001
         return
+
+
+# ---------------------------------------------------------------- 弹出层去灰框
+#
+# 下拉框的列表和右键菜单都是**独立顶层窗口**：
+# `QComboBox QAbstractItemView` 只能画到里面的列表控件，容器（QComboBoxPrivateContainer）
+# 仍旧按 Fusion 画一圈灰色面板 —— 这就是"下拉框边界灰扑扑、圆角对不上"的原因。
+# 这里在它们显示时统一改成无边框 + 半透明，QSS 的圆角与描边才能真正生效。
+
+_POPUP_CLASSES = ("QComboBoxPrivateContainer", "QComboBoxListView", "QMenu")
+
+
+class _PopupPolisher(QObject):
+    """应用级事件过滤器：弹出层一显示就套上无边框/半透明（只做一次）。"""
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: ANN001, N802
+        if event.type() == QEvent.Type.Show:
+            name = obj.metaObject().className()
+            if name in _POPUP_CLASSES:
+                polish_popup(obj)
+        return False
+
+
+_polisher: "_PopupPolisher | None" = None
+
+
+def polish_popup(widget) -> None:  # noqa: ANN001
+    """把弹出层改成无边框 + 半透明，让 QSS 的圆角/描边生效（失败静默）。"""
+    try:
+        from PySide6.QtCore import Qt
+
+        widget.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        widget.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+        widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    except Exception:  # noqa: BLE001
+        return
+
+
+def install_popup_polisher(app) -> None:
+    """安装弹出层处理器（幂等；重复调用只装一次）。"""
+    global _polisher
+    if _polisher is not None:
+        return
+    _polisher = _PopupPolisher()
+    app.installEventFilter(_polisher)

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QApplication, QGridLayout, QLabel
@@ -41,6 +42,46 @@ def test_qss_has_no_zero_radius() -> None:
     radii = {int(value) for value in re.findall(r"border-radius:\s*(\d+)px", qss)}
     assert radii, "QSS 里应当有圆角定义"
     assert min(radii) >= 10 or min(radii) in (2, 7), "只允许滑块/进度条这类装饰件用更小圆角"
+
+
+def test_qss_covers_popup_controls() -> None:
+    """弹出类控件必须逐个写规则 —— 漏掉的子控件会退回 Fusion 默认外观（丑的根源）。
+
+    QSS 只影响"写到的控件 + 子控件"：下拉框的箭头/弹出列表、数字框的上下按钮、
+    勾选指示器、菜单项、树的分支箭头、选项卡，少一个就会出现两种视觉混搭。
+    """
+    qss = app_qss(TOKENS)
+    for selector in (
+        "QComboBox::drop-down",                 # 右侧箭头区（不写会画灰按钮+竖线）
+        "QComboBox::down-arrow",                # 箭头本身
+        "QComboBox QAbstractItemView",          # 弹出列表
+        "QComboBox QAbstractItemView::item",    # 列表项（内边距/行高）
+        "QComboBox QAbstractItemView::item:hover",
+        "QComboBox QAbstractItemView::item:selected",
+        "QSpinBox::up-button",
+        "QSpinBox::down-button",
+        "QSpinBox::up-arrow",
+        "QCheckBox::indicator:checked",
+        "QRadioButton::indicator:checked",
+        "QMenu::item:selected",
+        "QTreeView::branch:closed:has-children",
+        "QTabBar::tab:selected",
+    ):
+        assert selector in qss, f"QSS 缺少弹出控件规则：{selector}"
+
+
+def test_runtime_icons_are_generated(qapp: QApplication) -> None:  # noqa: ARG001
+    """箭头/勾选图标是运行时画出来的 PNG（QSS 的 image: 只认文件路径）。"""
+    from modu_workbench.ui_kit.theme import _icon_urls
+
+    icons = _icon_urls(TOKENS)
+    assert {"chevron_down", "chevron_up", "chevron_right", "check", "dot"} <= set(icons)
+    for name, path in icons.items():
+        assert path.endswith(".png") and "/" in path, f"{name} 不是可用的 QSS 路径：{path}"
+        assert Path(path).is_file() and Path(path).stat().st_size > 0, f"{name} 图标没生成"
+    qss = app_qss(TOKENS)
+    assert icons["chevron_down"] in qss            # 图标真的被写进 QSS
+    assert "border-top: 5px solid" not in qss      # 不再用 border 拼三角形（会变方块）
 
 
 def test_spacing_and_font_scales_are_ordered() -> None:

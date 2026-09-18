@@ -3,7 +3,7 @@
 > 令牌唯一来源：`src/modu_workbench/ui_kit/tokens.py`
 > QSS 生成：`src/modu_workbench/ui_kit/theme.py`
 > 组件库：`src/modu_workbench/ui_kit/components/`
-> 规范由测试锁定：`tests/test_ui_design_system.py`（改令牌/组件会被测试拦住）
+> 规范由测试锁定：`tests/architecture/test_ui_design_system.py`（改令牌/QSS 会被测试拦住）
 
 ## 1. 三条硬性规则
 
@@ -62,11 +62,46 @@ class XxxPage(QWidget):
 列表页的刷新逻辑：有数据 → 显示表格/网格；无数据 → 用 `EmptyState` 换掉列表控件
 （不要在表格里留空白行）。
 
-## 5. 验收流程
+## 5. 控件必须逐类覆盖（"为什么我的界面有点丑"）
+
+Qt Widgets 的默认外观来自 **QStyle（我们用 Fusion）**，QSS 只会改写**你写到的那部分**：
+漏掉的控件或子控件会继续用 Fusion 绘制，于是同一屏里出现两套视觉 —— 这就是"样式有点丑"的根源。
+（QML/Qt Quick Controls 之所以看起来现代，是因为它自带 Material/Basic 样式表；
+换成 QML 等于把整套 Widgets UI 重写一遍，性价比不划算，QSS 补齐完全够用。）
+
+每个"弹出类 / 复合控件"都必须写全这几条，`tests/architecture/test_ui_design_system.py`
+里的 `test_qss_covers_popup_controls` 会逐条检查：
+
+| 控件 | 必须覆盖 | 不写的后果 |
+|---|---|---|
+| `QComboBox` | `::drop-down`（去边框/底色）、`::down-arrow`（**只能给 image**）、`padding-right` 预留箭头位 | 右侧多一个灰色按钮+竖分隔线；长文本压到箭头上；用 `border` 拼三角形会渲染成**小方块** |
+| `QComboBox QAbstractItemView` | `::item`（`min-height`/`padding`/`border-radius`）、`::item:hover`、`::item:selected` | 列表行又挤又方，悬停是高对比系统蓝，跟主题完全不搭 |
+| 弹出层窗口 | `theme.polish_popup()`：无边框 + `WA_TranslucentBackground`（`install_popup_polisher` 在 Show 时自动套） | 下拉列表/右键菜单外面套着 Fusion 的灰面板，圆角对不上 |
+| `QSpinBox` | `::up-button`/`::down-button`（去边框）、`::up-arrow`/`::down-arrow` | 右侧是 2010 风格的立体箭头按钮 |
+| `QCheckBox` / `QRadioButton` | `::indicator` 尺寸/圆角/边框 + `:checked` 的勾图/圆点 | 默认指示器又小又灰，勾选态是系统蓝 |
+| `QMenu` | `::item`（内边距/圆角）、`::item:selected`、`::separator` | 右键菜单项贴边、选中是一整条系统蓝 |
+| `QTreeView` | `::item`（行高/圆角/hover/selected）、`::branch`（箭头图标） | 树的分支是 ± 方框，行高不一致 |
+| `QTabWidget` | `::pane` + `QTabBar::tab` / `:selected` | 选项卡是立体凸起的老样式 |
+
+箭头/勾选/圆点这类小图标不引二进制资源，而是在 `theme._icon_urls()` 里
+**用 QPainter 现画成 PNG** 缓存到 `<数据目录>/cache/ui/`（颜色随主题，深浅色各自一份），
+再以 `image: url(...)` 写进 QSS。`app_qss()` 在没有 GUI 应用时（纯单元测试）会跳过生成，
+此时相关 `image:` 规则为空 —— 但控件几何（内边距/行高/圆角）依然生效。
+
+### 布局硬约束
+
+- **不要用 QLabel 直接显示长路径**：QLabel 的 `minimumSizeHint` 会按整段文本算宽度，
+  一条 `C:\Users\...\AppData\Roaming\ModuWorkbench\music` 能把设置页最小宽度顶到 900px+，
+  于是设置窗口出现横向滚动条（`music` / `video` / `llm` 三页都踩过）。
+  改用**只读 `QLineEdit`**（可横向滚动、最小宽度很小），完整路径放 tooltip。
+- **复选框标签别写成长句子**：状态、接口地址这类细节放 tooltip，标签只留"名称（能力）"。
+- 结果：`test_settings_pages_fit_default_width` 保证七个设置页在 980×700 下都没有横向滚动条。
+
+## 6. 验收流程
 
 ```powershell
 # 1) 跑规范测试
-.venv\Scripts\python.exe -m pytest tests/test_ui_design_system.py -q
+.venv\Scripts\python.exe -m pytest tests/architecture tests/smoke -q
 
 # 2) 渲染截图（docs/ui/board-<key>.png），人眼过一遍排版
 .venv\Scripts\python.exe packaging\ui_snapshot.py            # 全部板块
@@ -74,7 +109,9 @@ class XxxPage(QWidget):
 ```
 
 截图检查清单：
-- 有没有直角？卡片/输入框/按钮是否统一圆角；
+- 有没有直角？卡片/输入框/按钮/下拉是否统一圆角；
+- **下拉框**：箭头是干净的 V 形？长文本有没有压到箭头？展开后的列表行高、hover、选中是否跟主题一致？
 - 有没有某一块留白明显过大（例如一行只有一张卡、右侧空一半）；
 - 空列表页是否给出了下一步操作；
-- 同屏控件高度/间距是否一致（按钮、输入框、下拉是否齐平）。
+- 同屏控件高度/间距是否一致（按钮、输入框、下拉是否齐平）；
+- 设置窗口在默认尺寸下有没有横向滚动条。

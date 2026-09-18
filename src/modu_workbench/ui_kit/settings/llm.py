@@ -55,8 +55,8 @@ class LlmSettingsPage(SettingsPage):
         self._loading = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
 
         title = QLabel("大模型配置")
         title.setObjectName("sectionTitle")
@@ -73,14 +73,14 @@ class LlmSettingsPage(SettingsPage):
         layout.addWidget(note)
 
         body = QHBoxLayout()
-        body.setSpacing(12)
+        body.setSpacing(10)
 
         # ---------------- 左：类型 ----------------
         kinds_box = QVBoxLayout()
         kinds_box.setSpacing(6)
         kinds_box.addWidget(QLabel("模型类型"))
         self._kinds = QListWidget()
-        self._kinds.setFixedWidth(170)
+        self._kinds.setFixedWidth(148)
         for key, label in KIND_LABELS.items():
             entry = QListWidgetItem(label)
             entry.setData(KIND_ROLE, key)
@@ -103,7 +103,7 @@ class LlmSettingsPage(SettingsPage):
         list_box.addLayout(header)
 
         self._profiles = QListWidget()
-        self._profiles.setMinimumWidth(300)
+        self._profiles.setMinimumWidth(200)
         self._profiles.currentItemChanged.connect(lambda *_: self._on_profile_changed())
         self._profiles.itemChanged.connect(self._on_item_toggled)
         list_box.addWidget(self._profiles, 1)
@@ -176,7 +176,7 @@ class LlmSettingsPage(SettingsPage):
         self._timeout.setSuffix(" 秒")
         self._form.addRow("超时", self._timeout)
 
-        self._enabled = QCheckBox("启用（只有启用的配置会参与调用与降级）")
+        self._enabled = QCheckBox("启用（参与调用与降级）")
         self._form.addRow("状态", self._enabled)
 
         self._note = QLineEdit()
@@ -209,7 +209,7 @@ class LlmSettingsPage(SettingsPage):
 
         holder = QWidget()
         holder.setLayout(form_box)
-        holder.setMinimumWidth(340)
+        holder.setMinimumWidth(262)
         body.addWidget(holder, 1)
 
         layout.addLayout(body, 1)

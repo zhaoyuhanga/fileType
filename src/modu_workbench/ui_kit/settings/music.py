@@ -75,18 +75,20 @@ class MusicSettingsPage(SettingsPage):
         )
         form.addRow("完整曲目最短时长", self._min_full)
 
-        library_dir = QLabel(str(config.music_dir()))
-        library_dir.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        form.addRow("乐库目录", library_dir)
+        # 路径用只读输入框而不是 QLabel：长路径会把整页最小宽度顶到 900px 以上，
+        # 设置窗口不够宽时就会横向滚动（gallery 页就是这个做法）。
+        self._library_dir = QLineEdit(str(config.music_dir()))
+        self._library_dir.setReadOnly(True)
+        self._library_dir.setToolTip(str(config.music_dir()))
+        form.addRow("乐库目录", self._library_dir)
         layout.addLayout(form)
 
         layout.addWidget(QLabel("音源（停用后不参与搜索与自动换源）"))
         self._source_checks: dict[str, QCheckBox] = {}
         for info in self._registry.infos():
-            check = QCheckBox(
-                f"{info.label} · {info.kind_label} — 当前：{self._registry.status_text(info.key)}"
-            )
-            check.setToolTip(info.note)
+            # 标签保持短（长文本会把整页顶宽、出现横向滚动条），细节放 tooltip
+            check = QCheckBox(f"{info.label}（{info.kind_label}）")
+            check.setToolTip(f"{info.note}\n状态：{self._registry.status_text(info.key)}")
             self._source_checks[info.key] = check
             layout.addWidget(check)
 

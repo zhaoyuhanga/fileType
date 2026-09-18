@@ -3,6 +3,39 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## 未发布 — 控件样式补齐（尤其是下拉框）
+
+反馈："前端页面的样式有点丑，尤其下拉框的样式是真丑"。
+
+**根因**：界面是 Qt Widgets，默认外观由 **QStyle（Fusion）** 绘制，QSS 只改写"写到的控件 + 子控件"。
+之前的 QSS 只覆盖了按钮/输入框/表格/滚动条，**弹出类控件一个都没写**，于是它们继续按 Fusion 画：
+灰底立体箭头按钮、系统蓝高亮、± 方框树分支 —— 与靛蓝扁平主题混在一起就是"丑"。下拉框最明显，因为：
+
+1. `::drop-down` 没写 → 右侧画出 Fusion 的灰色按钮 + 竖分隔线；
+2. `padding` 没给右侧留位 → 长文本压到箭头上；
+3. `::down-arrow` 用 `border` 拼三角形 → Qt 渲染成**一个小方块**（这就是最刺眼的那处）；
+4. 弹出列表是**独立顶层窗口**（`QComboBoxPrivateContainer`），`QComboBox QAbstractItemView`
+   只能画到里面的列表，容器自带的灰面板还在，圆角对不上；
+5. `::item` 没写 → 列表行又挤又方，悬停是系统蓝，选中是一整条高对比色带。
+
+**改法**：
+
+- 箭头/勾选/圆点不再用 QSS 拼形状，而是在 `theme._icon_urls()` 里**用 QPainter 现画小 PNG**
+  （圆头折线、2 倍图缩放、颜色随主题）缓存到 `<数据目录>/cache/ui/`，QSS 用 `image: url(...)` 引用；
+- 补齐 **下拉框 / 数字框 / 勾选与单选 / 右键菜单 / 树 / 选项卡** 的完整规则：
+  箭头区去边框、右侧预留 26px、列表项 `min-height: 30px` + 圆角 + hover/选中态、菜单项圆角与内边距、
+  树分支换成 V 形箭头、选项卡改胶囊选中态；
+- `theme.install_popup_polisher()`：应用级事件过滤器，在**弹出层显示时**统一设
+  `FramelessWindowHint + WA_TranslucentBackground`，让 QSS 的圆角/描边真正生效（下拉列表与右键菜单都受益）；
+- 顺带修掉设置页的横向滚动：`music` / `video` 页用 QLabel 直接显示长路径，
+  把整页最小宽度顶到 1000px+（`llm` 页也超了 8px）。路径改成**只读 QLineEdit**、
+  音源复选项标签缩短（细节进 tooltip）、收窄固定宽度 → 七个页面在 980×700 下都不再横向滚动。
+
+**测试**：新增 `test_qss_covers_popup_controls`（逐条检查 14 个弹出控件选择器）、
+`test_runtime_icons_are_generated`（图标真生成且写进 QSS，并断言不再用 border 拼三角形）、
+`test_settings_pages_fit_default_width`（七个设置页无横向滚动条）。
+`docs/UI_GUIDE.md` 增加"控件必须逐类覆盖"清单与"别用 QLabel 显示长路径"的布局硬约束。
+
 ## 未发布 — 在线曲目质量过滤（酷我试听/片段）
 
 针对「酷我源头有很多试听、下载还提示只能在手机端播放」的反馈。
