@@ -29,6 +29,54 @@ def sample_txt(tmp_path: Path) -> Path:
     return path
 
 
+def test_conversion_reports_failure_when_no_output_is_produced(
+    monkeypatch: pytest.MonkeyPatch, sample_txt: Path, tmp_path: Path
+) -> None:
+    """回归：转换没产出文件时必须报「失败」，不能显示成功。
+
+    用户反馈「转换成功但输出目录没有数据」：以前只要转换函数不抛异常就算成功，
+    产物缺失/空文件也会被当成成功。现在统一校验产物是否真的存在且非空。
+    """
+    from modu_workbench.core.convert import engine
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    action = next(a for a in common_actions(["txt"]) if a.target_format == "html")
+
+    # 正常路径：产物存在 → 成功
+    ok = run_conversion(action, sample_txt, out_dir)
+    assert ok.status == "succeeded" and Path(ok.output_path).is_file()
+
+    # 转换函数什么都没写 → 必须失败，并说明原因
+    monkeypatch.setattr(engine, "_run_text", lambda *args, **kwargs: None)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = run_conversion(action, sample_txt, empty)
+    assert result.status == "failed", "没有产物却报成功会让用户找不到数据"
+    assert "没有产出" in result.message
+
+
+def test_conversion_reports_failure_for_empty_output_file(
+    monkeypatch: pytest.MonkeyPatch, sample_txt: Path, tmp_path: Path
+) -> None:
+    """产出 0 字节文件同样算失败（比"成功但打不开"更容易排查）。"""
+    from modu_workbench.core.convert import engine
+
+    out_dir = tmp_path / "out-empty-file"
+    out_dir.mkdir()
+    action = next(a for a in common_actions(["txt"]) if a.target_format == "html")
+
+    def _write_nothing(path, content):  # noqa: ANN001
+        Path(path).write_text("", encoding="utf-8")
+
+    from modu_workbench.core.convert import text_io as text_io_module
+
+    monkeypatch.setattr(text_io_module, "write_text", _write_nothing)
+    result = run_conversion(action, sample_txt, out_dir)
+    assert result.status == "failed"
+    assert "空文件" in result.message
+
+
 @pytest.fixture()
 def sample_md(tmp_path: Path) -> Path:
     path = tmp_path / "readme.md"

@@ -80,7 +80,7 @@ Qt Widgets 的默认外观来自 **QStyle（我们用 Fusion）**，QSS 只会�
 | `QSpinBox` | `::up-button`/`::down-button`（去边框）、`::up-arrow`/`::down-arrow` | 右侧是 2010 风格的立体箭头按钮 |
 | `QCheckBox` / `QRadioButton` | `::indicator` 尺寸/圆角/边框 + `:checked` 的勾图/圆点 | 默认指示器又小又灰，勾选态是系统蓝 |
 | `QMenu` | `::item`（内边距/圆角）、`::item:selected`、`::separator` | 右键菜单项贴边、选中是一整条系统蓝 |
-| `QTreeView` | `::item`（行高/圆角/hover/selected）、`::branch`（箭头图标） | 树的分支是 ± 方框，行高不一致 |
+| `QTreeView` | `show-decoration-selected: 0`、`::item`（行高/圆角/hover/selected）、`::branch`（箭头图标） | 分支列出现一块系统蓝方块（见下节） |
 | `QTabWidget` | `::pane` + `QTabBar::tab` / `:selected` | 选项卡是立体凸起的老样式 |
 
 ### 下拉列表的选择器坑（Qt 6.11 实测，务必照抄）
@@ -112,6 +112,35 @@ QComboBox::item:selected { background: …; color: …; }
 再以 `image: url(...)` 写进 QSS。`app_qss()` 在没有 GUI 应用时（纯单元测试）会跳过生成，
 此时相关 `image:` 规则为空 —— 但控件几何（内边距/行高/圆角）依然生效。
 
+### 分类树的坑（Qt 6.11 实测，图库左侧导航）
+
+用户反馈过：「分类树空白有点大有点丑，且点击会有蓝色标记」。原因是三件事叠在一起，
+逐像素对比离屏渲染后得到下面几条结论，`test_ui_design_system.py` 里的
+`test_tree_rules_are_token_driven_and_kill_system_blue` /
+`test_tree_selection_is_tinted_not_system_blue` 已把它们钉死：
+
+1. ❌ **蓝色方块**来自「分支（缩进）列」：`show-decoration-selected: 1` 时 Fusion 会按
+   系统高亮色把整列画成一个**方块**，而内容列由 QSS 画成圆角块 —— 拼起来就是
+   「左边一块宝蓝、右边一块浅紫」的接缝（抓到的像素是 Fusion 的 `#308cc6`）。
+2. ❌ `QTreeView::branch:selected { background: transparent; }` **不生效**：QSS 把
+   `transparent` 当成"没写过这条规则"，继续退回系统高亮色（给具体颜色才生效，
+   但分支列仍是方块、仍有接缝）。正解是 `show-decoration-selected: 0`，让控件
+   根本不给分支列上色，整行底色改由控件自绘一个**通栏圆角块**
+   （`boards/gallery/nav_tree.py` 的 `CategoryNavTree.drawRow()`）。
+   自绘时要把 `State_Selected` / `State_MouseOver` 从 option 里清掉，
+   否则 QSS 的 `::item:selected` 会在同一行再叠一层色块。
+3. ❌ QSS 里**没有** `indentation` 属性：写了会报 `Unknown property indentation`，
+   缩进只能代码设置（`setIndentation(SPACE["lg"])`）。默认缩进 20px + 默认行高
+   36px（`min-height: 30` + `padding: 3px`）会让十来个节点散在面板里，很空。
+4. ❌ 不要指望 `QTreeWidgetItem` 的默认 `sizeHint`：**没有样式表时它只有 13px**
+   （实测），行会塌成一条线。导航树在 `CategoryNavDelegate.sizeHint()` 里
+   自己兜了行高下限（26px），QSS 的 `min-height: 22 + padding: 2×2 = 26` 与它对齐。
+5. ✅ 计数不要拼在标题里（`标签（6）`，右侧空一片、数字对不齐）：存到
+   `BADGE_ROLE`，由委托画成右侧胶囊；标题超长就省略 + tooltip，这样也不需要
+   横向滚动条（`ScrollBarAlwaysOff`）。
+6. ✅ 键盘焦点仍然要可见：清掉 `State_HasFocus`（去掉 Fusion 虚线框）后，
+   由控件自己画 1px 强调色圆角描边。
+
 ### 布局硬约束
 
 - **不要用 QLabel 直接显示长路径**：QLabel 的 `minimumSizeHint` 会按整段文本算宽度，
@@ -135,6 +164,8 @@ QComboBox::item:selected { background: …; color: …; }
 截图检查清单：
 - 有没有直角？卡片/输入框/按钮/下拉是否统一圆角；
 - **下拉框**：箭头是干净的 V 形？长文本有没有压到箭头？展开后的列表行高、hover、选中是否跟主题一致？
+- **分类树**（图库左侧）：选中是整行一块主题浅紫胶囊（**不能有系统蓝方块**）？行高够紧凑、缩进不散？
+  计数在右侧对齐成一列？折叠过的分组有没有被重建强行展开？
 - 有没有某一块留白明显过大（例如一行只有一张卡、右侧空一半）；
 - 空列表页是否给出了下一步操作；
 - 同屏控件高度/间距是否一致（按钮、输入框、下拉是否齐平）；

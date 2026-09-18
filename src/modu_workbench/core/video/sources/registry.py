@@ -28,7 +28,7 @@ SETTING_VERSION = "sources/version"       # 源清单版本（升级时迁移用
 # 源清单版本：改动内置源（下线失效源、新增可用源）时递增。
 # 递增后，旧的「启用集合/排序」不再直接套用 —— 否则新加的源会默认处于停用状态，
 # 用户会以为「源没了」。用户自己填的接口地址（sources/urls）始终保留。
-SOURCES_VERSION = 2
+SOURCES_VERSION = 3
 
 # 熔断参数：连续失败 3 次 → 降级 120 秒（视频源抖动比音乐源更常见）
 DEGRADE_AFTER = 3

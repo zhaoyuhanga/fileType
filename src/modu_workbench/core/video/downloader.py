@@ -361,7 +361,7 @@ def _download_hls(
     """m3u8 → 本地文件。优先 ffmpeg 封装；不可用时拼接分片为 .ts。"""
     from .sources import SourceError
 
-    url = resolved.url
+    url = _prefer_best_variant(resolved.url, headers)
     ffmpeg = find_ffmpeg()
     if ffmpeg:
         target = unique_path(dest, build_filename(video, resolved.episode, ".mp4"))
@@ -391,6 +391,22 @@ def _download_hls(
                               cancel=cancel, timeout=timeout)
 
 
+def _prefer_best_variant(url: str, headers: dict) -> str:
+    """下载前把主清单锁定到最高清晰度的子清单（探测失败就原样返回）。
+
+    否则 ffmpeg 自己挑变体，实测不可控：有的站点主清单里低码率排前面，
+    结果用户明明有 1080P 却下载出一份 540P。
+    """
+    try:
+        from .hls import best_variant_url
+        from .sources.http import HttpClient
+
+        client = HttpClient(headers=dict(headers or {}), timeout=15.0, attempts=1)
+        return best_variant_url(url, http=client)
+    except Exception:  # noqa: BLE001  探测失败不影响下载本身
+        return url
+
+
 def _ffmpeg_download(ffmpeg: str, url: str, target: Path, *, headers: dict,
                      on_progress: ProgressFn | None, cancel: threading.Event | None,
                      bitstream_filter: str = "aac_adtstoasc",
@@ -402,7 +418,7 @@ def _ffmpeg_download(ffmpeg: str, url: str, target: Path, *, headers: dict,
     改为：清单与分片一律走本机流服务的代理（服务端补 Referer/UA），
     ffmpeg 只需要读取一个本地 m3u8 文件即可，跨版本都稳。
     """
-    args = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+    args = ["-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats"]
     input_arg = url
     temp_playlist: Path | None = None
     if url.lower().split("?")[0].endswith(".m3u8"):
@@ -506,7 +522,12 @@ def _run_ffmpeg_download(ffmpeg: str, args: list[str], target: Path, *,
 
     from .sources import SourceError
 
-    progress_args = [ffmpeg, *args, "-progress", "pipe:1", "-nostats"]
+    progress_args = [ffmpeg, *args]
+    # 注意：`args` 里**不能**再包含 ffmpeg 路径 —— 曾经写成 `[ffmpeg, *args]`，
+    # 而 args 本身以 ffmpeg 开头，于是命令行里 ffmpeg 路径出现两次：
+    # ffmpeg 把多出来的那个当成**输出文件**，直接报
+    # 「Error initializing the muxer for ...\ffmpeg.exe: Invalid argument」，
+    # 导致所有走 ffmpeg 的 HLS 下载必然失败（回归测试见 tests/board_video/test_video_download.py）。
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     # 必须显式指定 utf-8：Windows 下 text=True 默认用 GBK 解码，
     # 而 ffmpeg 的路径/错误信息是 UTF-8，会让读取线程抛 UnicodeDecodeError

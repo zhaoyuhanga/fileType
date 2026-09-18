@@ -551,6 +551,61 @@ def test_board_episode_step_switches_episode(qapp: QApplication, library: VideoL
         page.shutdown()
 
 
+def test_detail_dialog_switches_to_a_sharper_source(qapp: QApplication) -> None:
+    """「🔍 换源找高清」：找到更清晰的源后就地切换，之后播放/下载都走新源。
+
+    背景：实测 cms_360 的《流浪地球》主清单只有 1280×538/706 kbps，
+    用户端就是"只有 540P、很模糊"。这个按钮是那条反馈的出口。
+    """
+    from modu_workbench.core.video.hls import HlsVariant
+    from modu_workbench.core.video.library import HdCandidate
+
+    remote = make_remote("cms_360", "1", "流浪地球", episodes=1)
+    better = make_remote("cms_lziapi", "2", "流浪地球", episodes=1)
+
+    class _Library:
+        def find_higher_quality(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return HdCandidate(
+                remote=better, episode=better.episodes[0],
+                variant=HlsVariant(url="https://hd/1080/index.m3u8", height=1080, bandwidth=5_000_000),
+                source_key="cms_lziapi", source_label="量子资源",
+            )
+
+    dialog = VideoDetailDialog(remote, library=_Library())
+    try:
+        assert dialog._remote.source == "cms_360"  # noqa: SLF001
+        dialog._hq_button.click()  # noqa: SLF001
+        _wait_for(dialog._hd_worker)  # noqa: SLF001
+
+        assert dialog._remote.source == "cms_lziapi", "应当切到更清晰的那个源"  # noqa: SLF001
+        assert "量子资源" in dialog._quality_hint.text()  # noqa: SLF001
+        assert "1080P" in dialog._quality_hint.text()  # noqa: SLF001
+    finally:
+        dialog.shutdown()
+        dialog.close()
+
+
+def test_detail_dialog_reports_when_nothing_is_sharper(qapp: QApplication) -> None:
+    """其他源也没有更清晰的线路时，要说清楚，而不是悄悄什么都不做。"""
+
+    class _Library:
+        def find_higher_quality(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return None
+
+    remote = make_remote("cms_360", "1", "流浪地球", episodes=1)
+    dialog = VideoDetailDialog(remote, library=_Library())
+    try:
+        dialog._hq_button.click()  # noqa: SLF001
+        _wait_for(dialog._hd_worker)  # noqa: SLF001
+
+        assert dialog._remote.source == "cms_360", "找不到更清晰的就不该换源"  # noqa: SLF001
+        assert "没有更清晰" in dialog._quality_hint.text()  # noqa: SLF001
+        assert dialog._hq_button.isEnabled()  # noqa: SLF001
+    finally:
+        dialog.shutdown()
+        dialog.close()
+
+
 def test_board_download_request_without_episodes_is_safe(qapp: QApplication, library: VideoLibrary,
                                                          storage: VideoStorage) -> None:
     """在线条目没有剧集信息时，应当先去补详情而不是崩溃（这里用离线桩源）。"""

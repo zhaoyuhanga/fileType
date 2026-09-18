@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -98,6 +99,9 @@ class ConvertBoardPage(QWidget):
         self._out_input.editingFinished.connect(self._commit_output_dir)
         browse_out = QPushButton("输出目录")
         browse_out.clicked.connect(self._pick_output_dir)
+        open_out = QPushButton("打开输出目录")
+        open_out.setToolTip("在资源管理器里打开当前输出目录（转换完找不到文件时先点这里）")
+        open_out.clicked.connect(lambda: self._reveal_output(""))
         toolbar.addWidget(add_files)
         toolbar.addWidget(add_folder)
         toolbar.addWidget(clear)
@@ -105,6 +109,7 @@ class ConvertBoardPage(QWidget):
         toolbar.addWidget(QLabel("输出："))
         toolbar.addWidget(self._out_input, 1)
         toolbar.addWidget(browse_out)
+        toolbar.addWidget(open_out)
 
         board_settings = QPushButton("⚙ 板块设置")
         board_settings.setToolTip("打开「设置 → 转换」：默认输出目录、输出防覆盖、外部工具状态")
@@ -115,13 +120,25 @@ class ConvertBoardPage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._table = QTableWidget(0, 6)
-        self._table.setHorizontalHeaderLabels(["选中", "文件名", "格式", "状态", "详情/输出", "查看"])
-        self._table.horizontalHeader().setStretchLastSection(False)
+        self._table.setHorizontalHeaderLabels(["选中", "文件名", "格式", "状态", "输出", "查看"])
+        # 列宽策略：文件名吃掉剩余宽度（反馈里"文件名和详情挤在一起看不清"就是第 0/1 列
+        # 都按默认宽度画、而富余宽度给了别处导致的），固定列按内容自适应，
+        # 「输出」只显示文件名，完整路径进 tooltip。
+        header = self._table.horizontalHeader()
+        header.setMinimumSectionSize(56)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(0, 52)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._table.setColumnWidth(2, 90)
-        self._table.setColumnWidth(3, 130)
-        self._table.setColumnWidth(4, 240)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        self._table.setColumnWidth(4, 220)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self._table.setWordWrap(False)
+        self._table.verticalHeader().setDefaultSectionSize(30)
+        self._table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
         left = QWidget()
         left.setObjectName("filePanel")
@@ -284,10 +301,14 @@ class ConvertBoardPage(QWidget):
             box.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
             box.setCheckState(Qt.CheckState.Checked if row["checked"] else Qt.CheckState.Unchecked)
             self._table.setItem(row_index, 0, box)
-            self._table.setItem(row_index, 1, QTableWidgetItem(row["name"]))
+            name_item = QTableWidgetItem(row["name"])
+            name_item.setToolTip(row["path"])
+            self._table.setItem(row_index, 1, name_item)
             self._table.setItem(row_index, 2, QTableWidgetItem(format_label(row["format"]) if row["format"] != "unknown" else "未知"))
             self._table.setItem(row_index, 3, QTableWidgetItem(row["status"]))
-            self._table.setItem(row_index, 4, QTableWidgetItem(row.get("detail", "")))
+            detail_item = QTableWidgetItem(self._short_detail(row.get("detail", "")))
+            detail_item.setToolTip(row.get("detail", ""))
+            self._table.setItem(row_index, 4, detail_item)
             viewable = row["ext"] in VIEWABLE_DOC_EXTENSIONS
             action = QTableWidgetItem("查看/编辑" if viewable else "—")
             action.setForeground(Qt.GlobalColor.darkBlue if viewable else Qt.GlobalColor.gray)
@@ -302,10 +323,14 @@ class ConvertBoardPage(QWidget):
         self._rows[item.row()]["checked"] = item.checkState() == Qt.CheckState.Checked
         self._rebuild_action_list()
 
-    def _on_double_click(self, row: int, _column: int) -> None:
+    def _on_double_click(self, row: int, column: int) -> None:
         if row >= len(self._rows):
             return
         entry = self._rows[row]
+        if column == 4:
+            # 双击「输出」= 在资源管理器里定位产物/打开输出目录
+            self._reveal_output(entry.get("detail", ""))
+            return
         if entry["ext"] not in VIEWABLE_DOC_EXTENSIONS:
             return
         from .doc_viewer import DocViewerDialog
@@ -428,11 +453,38 @@ class ConvertBoardPage(QWidget):
             row["detail"] = message
         self._update_row_ui(path)
 
+    def _short_detail(self, value: str) -> str:
+        """「输出」列只显示文件名，完整路径进 tooltip（长路径挤在窄列里看不清）。"""
+        text = (value or "").strip()
+        if not text:
+            return ""
+        if "\\" in text or "/" in text:
+            return Path(text).name or text
+        return text
+
+    def _reveal_output(self, value: str = "") -> None:
+        """在资源管理器里定位输出文件；传空或文件不存在时打开输出目录。"""
+        import subprocess
+
+        text = (value or "").strip()
+        candidate = Path(text) if text else None
+        if candidate is not None and candidate.exists():
+            subprocess.Popen(["explorer", "/select,", str(candidate)])
+            return
+        folder = Path(self._output_dir)
+        if folder.is_dir():
+            subprocess.Popen(["explorer", str(folder)])
+        else:
+            self._toaster.info(f"输出目录还不存在：{folder}")
+
     def _update_row_ui(self, path: str) -> None:
         for index, row in enumerate(self._rows):
             if row["path"] == path:
                 self._table.item(index, 3).setText(row["status"])
-                self._table.item(index, 4).setText(row.get("detail", ""))
+                detail = row.get("detail", "")
+                item = self._table.item(index, 4)
+                item.setText(self._short_detail(detail))
+                item.setToolTip(detail)
                 return
 
     def _cancel(self) -> None:
@@ -445,7 +497,9 @@ class ConvertBoardPage(QWidget):
         failed = len([row for row in self._rows if row["status"] == "失败"])
         skipped = len([row for row in self._rows if row["status"] == "跳过"])
         summary = f"转换完成：成功 {ok}，失败 {failed}" + (f"，跳过 {skipped}" if skipped else "")
-        self._task_bar.idle(summary)
+        # 明确写出输出目录：反馈里有"显示成功但输出目录没数据"，
+        # 一大原因是默认输出目录在系统「文档」下（可能被 OneDrive 重定向），用户没找到
+        self._task_bar.idle(f"{summary} · 输出目录：{self._output_dir}")
         if ok:
             self._toaster.success(summary)
         elif failed:
@@ -480,6 +534,15 @@ class ConvertBoardPage(QWidget):
 
 
 def default_output_dir() -> Path:
-    base = Path.home() / "Documents" / "墨软转换输出"
+    """默认输出目录：优先系统「文档」位置，退回 ~/Documents。
+
+    必须走 `QStandardPaths`：中文 Windows 上「文档」常被 OneDrive 重定向到
+    `%USERPROFILE%\\OneDrive\\文档`，而 `Path.home()/"Documents"` 会新建一个
+    用户根本不会去看的目录 —— 这正是「转换成功但输出目录没数据」的头号原因。
+    """
+    from PySide6.QtCore import QStandardPaths
+
+    location = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+    base = Path(location) / "墨软转换输出" if location else Path.home() / "Documents" / "墨软转换输出"
     base.mkdir(parents=True, exist_ok=True)
     return base

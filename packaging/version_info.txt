@@ -4,8 +4,8 @@
 # 由 tests/architecture/test_version.py 守着（改版本时同步改这里，测试会拦住漏改）。
 VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(1, 0, 2, 0),
-        prodvers=(1, 0, 2, 0),
+        filevers=(1, 0, 3, 0),
+        prodvers=(1, 0, 3, 0),
         mask=0x3F,
         flags=0x0,
         OS=0x40004,
@@ -21,12 +21,12 @@ VSVersionInfo(
                     [
                         StringStruct("CompanyName", "ModuWorkbench"),
                         StringStruct("FileDescription", "墨软·工作台"),
-                        StringStruct("FileVersion", "1.0.2"),
+                        StringStruct("FileVersion", "1.0.3"),
                         StringStruct("InternalName", "ModuWorkbench"),
                         StringStruct("LegalCopyright", "MIT License"),
                         StringStruct("OriginalFilename", "ModuWorkbench.exe"),
                         StringStruct("ProductName", "墨软·工作台"),
-                        StringStruct("ProductVersion", "1.0.2"),
+                        StringStruct("ProductVersion", "1.0.3"),
                     ],
                 )
             ]

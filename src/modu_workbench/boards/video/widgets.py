@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -83,7 +84,17 @@ def configure_table(table: QTableWidget, headers: list[str]) -> QTableWidget:
     table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
     table.setAlternatingRowColors(False)
     table.setShowGrid(False)
-    table.horizontalHeader().setStretchLastSection(True)
+    # 片名（第 0 列）吃掉剩余宽度：反馈里「左侧片名太窄」就是因为以前第 0 列用默认宽度，
+    # 而富余宽度全给了最后一列。其余列按内容自适应，最小宽度兜住片名不被挤没。
+    header = table.horizontalHeader()
+    header.setMinimumSectionSize(96)
+    if len(headers) > 1:
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for index in range(1, len(headers)):
+            header.setSectionResizeMode(index, QHeaderView.ResizeMode.ResizeToContents)
+    else:
+        header.setStretchLastSection(True)
     return table
 
 
@@ -448,6 +459,38 @@ class QualityWorker(QThread):
             self.failed.emit(str(error))
 
 
+class HdSearchWorker(QThread):
+    """跨源找更高清晰度（后台线程）。
+
+    采集站常常只给单条线路，画质由站点决定；同一个片名在别的源上可能是 1080P。
+    这里逐个源搜索 + 探测 m3u8 主清单，返回分辨率最高的候选。
+    """
+
+    progressed = Signal(str)
+    found = Signal(object)        # HdCandidate | None
+    failed = Signal(str)
+
+    def __init__(self, remote, episode=None, *, current_height: int = 0,
+                 library=None, parent=None):  # noqa: ANN001
+        super().__init__(parent)
+        self._remote = remote
+        self._episode = episode
+        self._current_height = current_height
+        self._library = library
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            library = self._library or app_context.video_library()
+            candidate = library.find_higher_quality(
+                self._remote, self._episode,
+                current_height=self._current_height,
+                on_progress=lambda message: self.progressed.emit(message),
+            )
+            self.found.emit(candidate)
+        except Exception as error:  # noqa: BLE001
+            self.failed.emit(str(error))
+
+
 class DownloadWorker(QThread):
     """批量下载（可选跨源兜底与取消）。"""
 
@@ -528,6 +571,7 @@ __all__ = [
     "ConvertWorker",
     "DetailWorker",
     "DownloadWorker",
+    "HdSearchWorker",
     "QualityWorker",
     "REMOTE_ROLE",
     "ResolveWorker",

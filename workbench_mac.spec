@@ -205,6 +205,6 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDisplayName": "墨软·工作台",
-        "CFBundleShortVersionString": "1.0.2",
+        "CFBundleShortVersionString": "1.0.3",
     },
 )

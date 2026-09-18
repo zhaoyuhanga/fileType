@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTextBrowser,
-    QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -56,6 +55,7 @@ from modu_workbench.ui_kit.components import EmptyState, TaskBar
 from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
+from .nav_tree import CategoryNavTree
 from .widgets import (
     ITEM_ROLE,
     AlbumPicker,
@@ -130,6 +130,9 @@ class GalleryBoardPage(QWidget):
         self._duplicates: list[list[ImageItem]] = []
         # 「最近 N 天导入」筛选（由左侧树设置；改动其它筛选时重置）
         self._recent_days = 0
+        # 当前生效的左侧分类节点条件：树每次重建后据此恢复高亮，
+        # 否则点一下节点树就被重建，选中态立刻消失（看不出自己在看哪一类）
+        self._active_filter: dict | None = {"all": True}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -302,9 +305,9 @@ class GalleryBoardPage(QWidget):
         # 左侧：按「图库 / 相册 / 时间 / 标签 / 来源」分组的可折叠导航树。
         # 用户希望"左侧显示有哪些图片、并能按时间或搜索条件分类查看"，
         # 因此这里做成树形：点任意节点即把右侧网格筛成对应集合。
-        self._side = QTreeWidget()
-        self._side.setObjectName("gallerySide")
-        self._side.setHeaderHidden(True)
+        # 外观由 CategoryNavTree 接管（通栏圆角选中态 + 计数徽章 + 紧凑行高），
+        # 不再沿用 QTreeWidget 的默认蓝色方块选中框。
+        self._side = CategoryNavTree()
         self._side.setMinimumWidth(190)
         self._side.itemClicked.connect(self._on_side_clicked)
         self._splitter.addWidget(self._side)
@@ -752,57 +755,74 @@ class GalleryBoardPage(QWidget):
         """重建左侧导航树：图库概览 / 相册 / 时间 / 标签 / 来源。
 
         每个节点携带筛选条件（payload），点击即筛选右侧网格。
+        计数走右侧徽章（节点的可见标题里不再拼「（16）」，数字才能对齐成一列）；
+        重建后把**当前生效的分类**重新选中 —— 否则每次点完节点树就被重建，
+        高亮立刻消失，用户看不出自己正在看哪一类。
         """
-        self._side.clear()
+        active = self._active_filter
+        selected: QTreeWidgetItem | None = None
 
-        def add(parent, text: str, payload: dict | None, *, bold: bool = False):  # noqa: ANN001
-            entry = QTreeWidgetItem([text])
-            if payload is not None:
-                entry.setData(0, ITEM_ROLE, payload)
-            else:
-                entry.setFlags(Qt.ItemFlag.ItemIsEnabled)      # 纯分组标题不可点
-            if bold:
-                font = entry.font(0)
-                font.setBold(True)
-                entry.setFont(0, font)
-            if parent is None:
-                self._side.addTopLevelItem(entry)
-            else:
-                parent.addChild(entry)
+        def add(parent, label: str, payload: dict | None = None, *,  # noqa: ANN001
+                badge=None, group: bool = False, hint: str = "") -> QTreeWidgetItem:
+            nonlocal selected
+            entry = self._side.add_node(parent, label, badge=badge, payload=payload,
+                                        group=group, hint=hint)
+            if active is not None and payload is not None and payload == active:
+                selected = entry
             return entry
 
-        total = self._library.storage.count_images()
-        root = add(None, f"🖼 全部图片（{total}）", {"all": True}, bold=True)
-        add(root, f"★ 我的收藏（{self._favorite_count()}）", {"favorite": True})
-        add(root, "🆕 最近导入（7 天）", {"recent_days": 7})
+        # 重建前记下哪些分组是收起的：用户手动折起来的组不该被重新展开
+        collapsed: set[str] = set()
+        for index in range(self._side.topLevelItemCount()):
+            node = self._side.topLevelItem(index)
+            if node.childCount() and not node.isExpanded():
+                collapsed.add(node.text(0))
+        self._side.clear()
 
-        albums_node = add(None, "📁 相册", None, bold=True)
+        total = self._library.storage.count_images()
+        root = add(None, "🖼 全部图片", {"all": True}, badge=total)
+        add(root, "★ 我的收藏", {"favorite": True}, badge=self._favorite_count())
+        add(root, "🆕 最近导入", {"recent_days": 7}, badge="7 天")
+
+        albums_node = add(None, "📁 相册", group=True)
         albums = [a for a in self._library.list_albums() if not a.is_favorite]
         if albums:
             for album in albums:
-                add(albums_node, f"{album.name}（{album.image_count}）", {"album": album.id})
+                add(albums_node, album.name, {"album": album.id}, badge=album.image_count)
         else:
-            add(albums_node, "（还没有相册，右键图片可加入）", None)
+            add(albums_node, "还没有相册", hint="右键图片 →「加入相册…」即可新建")
 
-        time_node = add(None, "🗓 时间", None, bold=True)
-        for bucket, count in self._library.storage.timeline()[:48]:
-            add(time_node, f"{bucket}（{count}）", {"month": bucket})
+        time_node = add(None, "🗓 时间", group=True)
+        months = self._library.storage.timeline()[:48]
+        if months:
+            for bucket, count in months:
+                add(time_node, bucket, {"month": bucket}, badge=count)
+        else:
+            add(time_node, "还没有拍摄时间", hint="导入图片后会按 EXIF 拍摄月份自动分组")
 
-        tags_node = add(None, "🏷 标签", None, bold=True)
+        tags_node = add(None, "🏷 标签", group=True)
         tags = self._library.list_tags()
         if tags:
             for tag in tags[:40]:
-                add(tags_node, f"{tag.name}（{tag.use_count}）", {"tag": tag.name})
+                add(tags_node, tag.name, {"tag": tag.name}, badge=tag.use_count)
         else:
-            add(tags_node, "（还没有标签）", None)
+            add(tags_node, "还没有标签", hint="选中图片后点底栏「打标签…」")
 
-        source_node = add(None, "📥 来源", None, bold=True)
+        source_node = add(None, "📥 来源", group=True)
         counts = self._source_counts()
-        for key, label in SOURCE_LABELS.items():
-            if counts.get(key):
-                add(source_node, f"{label}（{counts[key]}）", {"source": key})
+        shown = [(key, label) for key, label in SOURCE_LABELS.items() if counts.get(key)]
+        if shown:
+            for key, label in shown:
+                add(source_node, label, {"source": key}, badge=counts[key])
+        else:
+            add(source_node, "还没有来源", hint="导入图片后会按来源自动分组")
 
-        self._side.expandAll()
+        # 恢复展开状态：首次构建时默认全展开
+        for index in range(self._side.topLevelItemCount()):
+            node = self._side.topLevelItem(index)
+            node.setExpanded(node.text(0) not in collapsed)
+        if selected is not None:
+            self._side.setCurrentItem(selected)
 
     def _favorite_count(self) -> int:
         return len(self._library.storage.list_images(favorite_only=True, limit=100000))
@@ -817,6 +837,8 @@ class GalleryBoardPage(QWidget):
         payload = entry.data(0, ITEM_ROLE)
         if not payload:
             return
+        # 记住当前分类：树重建后用它把高亮恢复到对应节点上
+        self._active_filter = dict(payload)
         self.show_page(BROWSE_KEY)
         # 清空其它筛选，避免叠加后结果为空让用户困惑
         self._search.blockSignals(True)

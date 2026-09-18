@@ -62,10 +62,14 @@ def run_conversion(
         elif action.kind == "pdf":
             output_path = _run_pdf(action, source, output_dir_path)
         elif action.kind == "archive":
-            return _run_archive(action, source, output_dir_path, cancel)
+            result = _run_archive(action, source, output_dir_path, cancel)
+            if result.ok and result.output_path:
+                _ensure_output_exists(Path(result.output_path))
+            return result
         else:
             return _fail(result_base, f"未知转换族：{action.kind}")
 
+        _ensure_output_exists(output_path)
         return ConversionResult(
             action.id, str(source), "succeeded",
             output_path=str(output_path), target_format=action.target_format,
@@ -78,6 +82,28 @@ def run_conversion(
 
 def _fail(base: ConversionResult, message: str) -> ConversionResult:
     return ConversionResult(base.action_id, base.source, "failed", message=message)
+
+
+def _ensure_output_exists(path: Path) -> None:
+    """确认转换**真的**产出了文件。
+
+    反馈里有「转换显示成功、但输出目录里没有数据」：以前只要转换函数不抛异常就报成功，
+    产物缺失/空文件也会被当成成功，用户只能自己去猜文件去哪了。
+    这里统一把关：目录要求非空，文件要求存在且非空，否则报出明确原因。
+    """
+    target = Path(path)
+    if target.is_dir():
+        if not any(target.iterdir()):
+            raise ValueError(f"转换没有产出任何文件（目录为空：{target}）")
+        return
+    if not target.exists():
+        raise ValueError(f"转换没有产出文件（{target} 不存在）")
+    try:
+        size = target.stat().st_size
+    except OSError as error:
+        raise ValueError(f"无法读取转换结果（{target}）：{error}") from error
+    if size <= 0:
+        raise ValueError(f"转换产出的是空文件（{target}）")
 
 
 # ---------- 输出防覆盖 ----------

@@ -44,6 +44,17 @@
 - 状态与进度：板块底部 `TaskBar`（空闲自动收起进度与取消）；页面用 `_report` / `_busy` / `_idle`；
 - 留白/圆角/字号一律取 `ui_kit/tokens.py` 的令牌（见 `docs/UI_GUIDE.md`）。
 
+### 输出目录与产物（v1.0.3 起）
+
+- **默认输出目录必须走 `QStandardPaths.DocumentsLocation`**（`default_output_dir()`），
+  不能写死 `Path.home()/"Documents"`：中文 Windows 上「文档」常被 OneDrive 重定向，
+  写死会新建一个用户不会去看的目录，表现就是"转换成功但输出目录没数据"；
+- **产物必须校验**：`core/convert/engine.py` 的 `_ensure_output_exists` 要求文件存在且非空、
+  解压目录非空 —— 否则一律报失败并说明原因，绝不允许"没产出也算成功"；
+- **界面要让输出可见**：任务条完成后写明「输出目录：<完整路径>」，工具栏有「打开输出目录」，
+  双击表格「输出」列可在资源管理器里定位产物。「输出」列只显示文件名，完整路径进 tooltip
+  （长路径会把窄列撑得看不清，见 v1.0.3 反馈）。
+
 ## 4. 测试
 
 | 文件 | 说明 |

@@ -483,20 +483,31 @@ QMenu::item:disabled {{ color: {t.text_faint}; }}
 QMenu::separator {{ height: 1px; background: {t.border}; margin: 5px 10px; }}
 QMenu::icon {{ padding-left: 6px; }}
 
-/* ---------- 树（图库左侧分类导航等） ---------- */
+/* ---------- 树（图库左侧分类导航） ----------
+   三条实测结论（逐像素对比离屏渲染得出，改之前先读 docs/UI_GUIDE.md「树的坑」）：
+   1) `show-decoration-selected` 必须是 0。设成 1 时分支（缩进）列会被 Fusion 按
+      系统高亮色画成**方块**，而内容列是 QSS 的圆角块，拼起来就是「左蓝右紫」的接缝
+      —— 用户反馈的「点击会有蓝色标记」就是它。整行底色改由 CategoryNavTree.drawRow()
+      画一个通栏圆角块，选中/悬停都是完整一块。
+   2) `QTreeView::branch:selected {{ background: transparent; }}` **不生效**：
+      QSS 把 transparent 当成"没写这条规则"，继续退回系统蓝（给具体颜色才生效，
+      但分支列仍是方块、仍有接缝）。所以只能靠 1) 从根上不画。
+   3) QSS 里**没有** `indentation` 属性（写了会报 "Unknown property indentation"），
+      缩进只能由控件按 SPACE 令牌代码设置。
+   行高 = min-height 22 + 上下 padding 2×2 = 26px（原来 30+3×2=36，明显偏空）。 */
 QTreeView, QTreeWidget {{
     background: {t.surface};
     border: 1px solid {t.border};
     border-radius: {t.radius_sm}px;
-    padding: 6px;
+    padding: {SPACE['xs']}px;
     outline: none;
     color: {t.text};
-    show-decoration-selected: 1;
+    show-decoration-selected: 0;
 }}
 QTreeView::item, QTreeWidget::item {{
-    min-height: 30px;
-    padding: 3px 8px;
-    border-radius: 7px;
+    min-height: 22px;
+    padding: 2px 8px;
+    border-radius: {t.radius_sm}px;
     color: {t.text};
 }}
 QTreeView::item:hover, QTreeWidget::item:hover {{

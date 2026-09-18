@@ -3,7 +3,136 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
-## 未发布 — 文档与打包配置校正
+## v1.0.3 — 使用反馈修复（影视下载/清晰度 · 转换输出 · 图库导航 · 更多片源）
+
+针对第二轮五条使用反馈的修复。图 1 的报错（`Error initializing the muxer for …\ffmpeg.exe`）
+正是下面第一条。
+
+### 墨软影视：所有走 ffmpeg 的下载必然失败（图 1 的根因）
+
+`_ffmpeg_download` 组出来的参数表本身就以 ffmpeg 路径开头，而 `_run_ffmpeg_download`
+又拼了一次（`[ffmpeg, *args, …]`）—— 命令行里 ffmpeg 路径出现两次，ffmpeg 把多出来的那个
+当成**输出文件**，于是报「Error initializing the muxer for …\_internal\tools\ffmpeg\ffmpeg.exe:
+Invalid argument」，用户看到「下载完成：成功 0，失败 1」。
+
+因为这是唯一的 ffmpeg 调用点，**采集站的 HLS 剧集 100% 下载失败**，
+只有直链 mp4（走 requests 流式下载，不经过 ffmpeg）能成功 —— 这与反馈"archive 能下、360 不能下"完全吻合。
+
+- 修法：参数表不再包含程序名，`-progress/-nostats` 挪到全局参数区（输出文件之前）；
+- 回归测试 `test_ffmpeg_download_command_passes_binary_exactly_once`：断言 ffmpeg 路径只出现一次、
+  输出文件是最后一个参数（已验证"把 bug 改回去测试立刻失败"）；
+- 新增**真实端到端测试** `tests/board_video/test_video_download_e2e.py`：用 ffmpeg 造一段真 HLS、
+  本地 HTTP 提供，跑生产下载路径并断言产出可识别的 MP4 —— 只替身 `Popen` 的单测看不出真 ffmpeg 的反应，
+  这次就是漏在这里（ffmpeg 缺失时该测试自动跳过）。
+
+### 墨软影视：只有 540P、很模糊、像"没有清晰度可选"
+
+本机直连实测：cms_360 搜《流浪地球》返回的 m3u8 **主清单只有 1 个变体 1280×538 / 706 kbps**
+—— 不是选择器坏了，是那个源本身只有这个画质。围绕"看不清又没办法"做了四件事：
+
+- **默认锁最高清晰度**：解析播放地址时，若源自己声明了多个带地址的清晰度就直接取最高的；
+  否则探测 m3u8 主清单并锁定**最高变体**（短超时，失败即原样返回，绝不让"锦上添花"拖慢或搞坏播放）。
+  以前把主清单直接交给播放器/ffmpeg，"选哪一路"不可控，还会在播放中切换码率造成抖动；
+- **把话说清楚**：清晰度下拉下方新增提示行，该源最高只有 X（Y kbps）时明确写出来；
+  下拉按清晰度倒序，第 0 项就是最高；
+- **新增「🔍 换源找高清」**：一键去其他数据源找同一部片、同一集，逐个探测主清单，
+  挑分辨率最高的候选后就地切换（剧集/清晰度全部重建，之后播放与下载都走新源）。
+  核心逻辑 `VideoLibrary.find_higher_quality` 可离线测试；`current_height` 保证"没有更清晰的就不乱切"；
+- **下载同样先锁最高变体**（`_prefer_best_variant`），避免"明明有 1080P 却下出 540P"。
+
+### 墨软影视：左侧片名列加宽
+
+`configure_table` 以前把富余宽度全给最后一列，片名列用默认宽度（长片名被截）
+现在第 0 列（片名）拿剩余宽度、其余列按内容自适应、最小列宽兜底，
+搜索 / 我的视频 / 播放历史 / 源设置四处一起生效。
+
+### 墨软转换：转换成功但输出目录没有数据
+
+- **默认输出目录改走系统「文档」**（`QStandardPaths.DocumentsLocation`）：中文 Windows 上
+  「文档」常被 OneDrive 重定向到 `%USERPROFILE%\OneDrive\文档`，而以前写死
+  `Path.home()/"Documents"`，会新建一个用户根本不会去看的目录 —— 这是头号原因；
+- **强制校验产物**：转换函数不抛异常但没产出文件 / 产出 0 字节文件时，以前一律显示"成功"。
+  现在统一把关（文件存在且非空、解压目录非空），失败时直接说明原因；
+- **输出位置可见可及**：任务条完成后写明「输出目录：<完整路径>」，工具栏新增「打开输出目录」，
+  双击「输出」单元格即可在资源管理器里定位产物。
+
+### 墨软转换：文件名与「详情/输出」挤在一起看不清
+
+- 表格列宽重排：文件名列拿剩余宽度，格式/状态/查看按内容自适应，最小列宽兜底；
+- 「详情/输出」改名「输出」并**只显示文件名**，完整路径进 tooltip（长路径不再撑爆窄列）；
+- 行高统一 30px、超长文本中间省略。
+
+## v1.0.3 — 更多可用片源（候选逐条实测后才进清单）
+
+反馈：「可以去 GitHub 找一些开源的更好的视频源加进来」。
+
+### 内置采集源：新增 4 个（全部本机实测）、下线 1 个
+
+| 源 | 实测证据 |
+|---|---|
+| ✅ **爱坤资源** `ikunzyapi.com` | 200 JSON；《庆余年》36 集；主清单 declared **1920×1080**，子清单 `5000kb`（实测 ≈1742 kbps），分片 200 `video/mp2t` |
+| ✅ **最大资源** `zuidazy.me` | 子清单 **`2000k_1080`**；第三方监控 100% uptime / 122,136 条 |
+| ✅ **光速资源** `api.guangsuapi.com` | declared 1920×1080、2 线路、监控 speed=fast（实测 ≈893 kbps，标签偏乐观，已写进注释） |
+| ✅ **魔都资源** `mdzyapi.com` | 主清单含 3840×1608 条目；监控 50% uptime、响应 15s，故排在最后 |
+| ❌ **量子资源 `cms_lziapi` 已下线** | 搜索仍返回 JSON，但 **0/5 集可播**：`/share/` 页与直链 m3u8 在 lzcdn2/lzcdn28/lzcdn10/lz-cdn **全部 404**（直连与代理结果一致，已排除代理误判） |
+
+- **顺序改按实测码率排**（爱坤 5000kb > 电影天堂 3000k > 非凡/最大/如意/U酷 2000k > 光速 ≈900k >
+  360 706kb）：聚合搜索按「标题+年份」去重、保留先出现的源，所以码率最低的 360 从第 1 位降到第 8 位，
+  不再抢占同名结果 —— 这是"只有 540P"的另一半解药；
+- **去重纪律**（写进 `docs/BOARDS/video.md` §4.1）：红牛 / 豪华×2 / 虎牙 / 速播 / 金鹰 / 飘零
+  与已内置源**分片逐字节相同**（同一上游换域名），一律不加；极速(451 kbps)、猫眼(410 kbps) 因画质低拒绝；
+  爱奇艺资源因"首个分片返回 image/jpeg"拒绝；暴风/heimuer 播放全挂；Cloudflare 挑战页 / SSL 校验失败 /
+  XML-RSS / 成人内容站一律排除（共 19 类候选，逐条留证）；
+- **`SOURCES_VERSION` 2 → 3**：老用户磁盘配置里没有新 key，不递增版本号新源会被默认关掉
+  ——用户看到的就是"源根本没加进去"；
+- 新增离线测试 `tests/board_video/test_video_sources.py`：key 唯一且符合 `cms_[a-z0-9]+`、四个字段齐全、
+  禁止重复接口地址、`CMS_SITES` 与 `DEFAULT_PROVIDER_ORDER` 一一对应且顺序一致、
+  `CMS_SITE_BY_KEY` 覆盖，以及**把 `requests` 换成"一调用就炸"后 `build_default_providers()`
+  仍能构造全部源**（锁死"构造期零网络请求"）。
+
+### 公共版权源：archive 不再只给"解说类"
+
+- 根因：`mediatype:movies AND (<关键词>)` **没有馆藏限制**，把 tvarchive / opensource_movies 的
+  解说类短视频一起搜了进来；
+- 改为优先 `collection:(feature_films OR silent_films OR classic_cartoons)`，
+  无结果时退回宽检索（收紧但不会变废）；
+- 实测：搜 "sherlock holmes" 现在返回的是《Sherlock Holmes and the Secret Weapon (1943)》
+  《A Study In Scarlet (1933)》《House of Dracula (1945)》等**整部长片**。
+
+## v1.0.3 — 图库分类导航树重做（空白大 / 丑 / 点击有蓝色标记）
+
+反馈：「图库的树状图空白有点大有点丑，点击会有蓝色标记」。逐像素实测后确认这不是"调个颜色"的事：
+
+### 根因
+
+- **蓝色标记**：`show-decoration-selected` 为 1 时，Fusion 把**分支（缩进）列**按系统高亮色画成方块
+  （抓到像素 `#308cc6`），而内容列由 QSS 画成圆角块 → 「左蓝右紫」中间一条接缝；
+- 顺带踩实三条坑并写进注释：`QTreeView::branch:selected { background: transparent }` **不生效**；
+  QSS **没有** `indentation` 属性（只能代码里设）；`QTreeWidgetItem` 默认 `sizeHint` 只有 13px
+  （没有样式表时行会塌）；
+- **空白大**：行高 36px + 每级缩进 20px，计数内联在标题里（`标签（6）`）导致右侧空一片、数字不对齐；
+- 附带发现：每次点节点都重建整棵树 → 选中态立刻消失，用户看不出自己在看哪一类。
+
+### 改法
+
+- 新增 `boards/gallery/nav_tree.py`：`CategoryNavTree` 用 `drawRow()` 自绘**通栏圆角胶囊**
+  （覆盖分支列，一整块无接缝），并在交给样式的 option 里清掉 `Selected/MouseOver/HasFocus` 避免二次上色；
+  键盘焦点改画 1px `accent` 圆角描边（焦点仍可见、不再有虚线框）；
+- 选中 = `accent_soft` 底 + `accent_strong` 字，悬停 = `surface_hover`，计数改为右侧胶囊徽章
+  （`BADGE_ROLE`），**颜色全部取自 `ui_kit/tokens.py`，没有新增色值**；
+- 行高 26（委托兜底，不依赖样式表）、缩进 `SPACE["lg"]=16`、分组标题上方多 `SPACE["sm"]`；
+- `_refresh_side()` 重建后**恢复当前分类高亮**并保留折叠状态；空分组给「下一步」提示；
+- 行为不变：点节点照样筛选、计数与库一致、展开/折叠可用。
+
+### 测试
+
+`tests/architecture/test_ui_design_system.py` 新增 3 条，其中一条**抓像素**断言
+（缩进列不得是 palette highlight、胶囊必须覆盖缩进列、焦点描边可见）。
+已反证：把 `show-decoration-selected` 改回 1，测试立刻报
+「缩进列出现了系统高亮蓝：#308cc6」。另有 `tests/board_gallery/test_gallery_nav_tree.py`（15 条）
+覆盖徽章计数、分组标题不可点、空库四组的下一步提示、点击筛选、重建后高亮保持、折叠状态保留等。
+
+## v1.0.3 — 文档与打包配置校正
 
 发版后做了一次「文档/配置 vs 磁盘实况」的核查：只改描述与打包配置，不涉及运行时行为。
 
@@ -70,6 +199,18 @@ v1.0.2 首次发版后做了一次彻底清理（全部是 `.gitignore` 覆盖�
 合计释放 **2.18 GB**；随后全量重新打包（`packaging\build_app.ps1 -Installer -SkipDeps`），
 三道自检再次全部通过（源码 14/14、exe 关键字模块 15/15、打包产物自检全 `true`）。
 清理后 `dist\` 只剩本次产物，合计 533.5 MB。下表已更新为**重新打包后**的最终校验值。
+
+### 发布产物（v1.0.3，本机构建）
+
+| 产物 | 大小 | SHA256 |
+|---|---|---|
+| `dist/墨软工作台-Setup-1.0.3.exe`（NSIS 安装包） | 151.0 MB | `F722ED7EF39537C465F8395564D49829485BCC09283346244C6A6470B5480362` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `9C4F3538FB8D3F7DFE5DAE7B33AA1E94A63CABC6101EF3633E8EFD73D17B769C` |
+
+- onedir 目录合计约 382.5 MB（随包 ffmpeg/ffprobe 约 196 MB）；
+- 构建三道自检全部通过：源码自检 **14/14**、exe 关键字模块 **15/15**、打包产物自检全 `true`；
+- 两个产物的文件属性里可见 `FileVersion` / `ProductVersion` = **1.0.3**、`ProductName` = 墨软·工作台；
+- 打包前已清掉 `dist/` 里的旧版本安装包，目录里只保留当前版本产物。
 
 ## v1.0.2 — 控件样式补齐（尤其是下拉框）
 

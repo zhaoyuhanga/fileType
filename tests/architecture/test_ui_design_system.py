@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import pytest
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QGridLayout, QLabel
 
 from modu_workbench.boards.home.page import MAX_COLUMNS, MIN_COLUMNS, HomePage
@@ -112,6 +113,148 @@ def test_runtime_icons_are_generated(qapp: QApplication) -> None:  # noqa: ARG00
     qss = app_qss(TOKENS)
     assert icons["chevron_down"] in qss            # 图标真的被写进 QSS
     assert "border-top: 5px solid" not in qss      # 不再用 border 拼三角形（会变方块）
+
+
+# ---------------------------------------------------------------- 树（图库左侧分类导航）
+
+
+def _tree_section() -> str:
+    """取出 QSS 里「树」那一段（去掉注释，只看真正的规则）。"""
+    qss = app_qss(TOKENS)
+    section = qss.split("/* ---------- 树", 1)[1].split("/* ---------- 选项卡", 1)[0]
+    return re.sub(r"/\*.*?\*/", "", section, flags=re.S)
+
+
+def _nearest_distance(color: QColor, target: QColor) -> int:
+    """两个颜色的最大通道差（0 = 完全一致，255 = 差到天边）。"""
+    return max(abs(color.red() - target.red()),
+               abs(color.green() - target.green()),
+               abs(color.blue() - target.blue()))
+
+
+def test_tree_rules_are_token_driven_and_kill_system_blue() -> None:
+    """树的规则锁死（用户反馈「点击会有蓝色标记」）：
+
+    1. `show-decoration-selected` 必须是 0 —— 设成 1 时分支（缩进）列会被 Fusion
+       按系统高亮色画成方块，与内容列的圆角块拼成「左蓝右紫」的接缝；
+       （`QTreeView::branch:selected { background: transparent; }` 实测**不生效**，
+       QSS 把 transparent 当成没写，所以只能从根上不画）
+    2. 选中/悬停底色必须来自令牌，不能写死色值；
+    3. `outline: none` —— 不要 Fusion 的虚线焦点框（焦点由控件自己画描边）。
+    """
+    section = _tree_section()
+    panel = section.split("QTreeView, QTreeWidget {", 1)[1].split("}", 1)[0]
+    assert "show-decoration-selected: 0" in panel
+    assert "outline: none" in panel, "树的虚线焦点框必须关掉"
+    assert "border-radius" in panel, "无直角：面板也要圆角"
+
+    item = section.split("QTreeView::item, QTreeWidget::item {", 1)[1].split("}", 1)[0]
+    assert "min-height" in item and "border-radius" in item
+
+    hover = section.split("QTreeView::item:hover, QTreeWidget::item:hover {", 1)[1].split("}", 1)[0]
+    selected = section.split("QTreeView::item:selected, QTreeWidget::item:selected {", 1)[1]
+    selected = selected.split("}", 1)[0]
+    assert TOKENS.surface_hover in hover, "悬停底色必须用令牌"
+    assert TOKENS.accent_soft in selected and TOKENS.accent_strong in selected, \
+        "选中态必须是「主题浅紫底 + 强调色文字」，不是 Fusion 的系统蓝"
+
+    # 树这一段里除了令牌色值，不允许出现别的写死颜色
+    allowed = {
+        getattr(TOKENS, name).lower()
+        for name in TOKEN_FIELDS
+        if isinstance(getattr(TOKENS, name), str) and getattr(TOKENS, name).startswith("#")
+    }
+    literals = {value.lower() for value in re.findall(r"#[0-9a-fA-F]{6}", section)}
+    assert literals <= allowed, f"树规则里出现了非令牌色值：{sorted(literals - allowed)}"
+
+
+def test_nav_tree_is_compact_and_paints_its_own_rows(qapp: QApplication) -> None:
+    """分类树的行高/缩进必须收敛，且整行底由控件自己画。
+
+    缩进**只能代码设置**：QSS 里没有 `indentation` 属性（实测报
+    "Unknown property indentation"），写了等于没写 —— 所以这里直接量控件的值。
+    """
+    from modu_workbench.boards.gallery.nav_tree import (
+        BADGE_ROLE,
+        CategoryNavDelegate,
+        CategoryNavTree,
+    )
+
+    tree = CategoryNavTree()
+    tree.setStyleSheet(app_qss(TOKENS))
+    root = tree.add_node(None, "全部图片", badge=16, payload={"all": True})
+    tree.add_node(root, "我的收藏", badge=0, payload={"favorite": True})
+    tree.add_node(None, "相册", group=True)
+    tree.resize(240, 200)
+    tree.show()
+    qapp.processEvents()
+
+    assert tree.indentation() == SPACE["lg"], "缩进要按 SPACE 令牌收紧（默认 20 太散）"
+    assert isinstance(tree.itemDelegate(), CategoryNavDelegate)
+    # 默认（不写 QSS）行高 36：这里必须明显更紧凑，但不能挤到看不清
+    height = tree.visualItemRect(root).height()
+    assert 24 <= height <= 28, f"分类树行高应紧凑（实测 {height}px）"
+    assert root.text(0) == "全部图片", "标题里不再拼计数，计数走右侧徽章"
+    assert root.data(0, BADGE_ROLE) == "16"
+    # 整行底是自己画的：drawRow 被覆写，否则分支列会退回 Fusion 方块
+    from PySide6.QtWidgets import QTreeWidget
+
+    assert CategoryNavTree.drawRow is not QTreeWidget.drawRow
+    tree.close()
+
+
+def test_tree_selection_is_tinted_not_system_blue(qapp: QApplication) -> None:
+    """抓像素验证（QSS 字符串锁不住这条：`branch:selected{transparent}` 看着对、实测无效）。
+
+    选中行的**分支/缩进列**在修好之前是一整块系统高亮色方块：
+    这里要求它是「面板底色 + 主题浅紫胶囊」，胶囊还必须盖住缩进列（没有接缝）。
+    """
+    from PySide6.QtCore import QPoint
+
+    from modu_workbench.boards.gallery.nav_tree import ROW_INSET, CategoryNavTree
+
+    tree = CategoryNavTree()
+    tree.setStyleSheet(app_qss(TOKENS))
+    root = tree.add_node(None, "全部图片", badge=16, payload={"all": True})
+    child = tree.add_node(root, "我的收藏", badge=0, payload={"favorite": True})
+    tree.resize(240, 180)
+    tree.show()
+    qapp.processEvents()
+    tree.setCurrentItem(child)
+    qapp.processEvents()
+
+    offset = tree.viewport().mapTo(tree, QPoint(0, 0))
+    row = tree.visualItemRect(child)
+    middle = offset.y() + row.center().y()
+    image = tree.grab().toImage()
+
+    def sample(viewport_x: int) -> QColor:
+        return image.pixelColor(offset.x() + viewport_x, middle)
+
+    system_blue = qapp.palette().highlight().color()
+    accent_soft = QColor(TOKENS.accent_soft)
+    accent = QColor(TOKENS.accent)
+
+    # 缩进列的最左边（胶囊之外）是面板底色，绝不能是系统高亮蓝
+    assert _nearest_distance(sample(1), system_blue) > 60, \
+        f"缩进列出现了系统高亮蓝：{sample(1).name()}"
+    # 胶囊必须盖住缩进列（content rect 从 indentation 处才开始）—— 整行一块，没有接缝
+    assert _nearest_distance(sample(ROW_INSET + 4), accent_soft) <= 12, \
+        f"选中行在缩进列不是主题浅紫：{sample(ROW_INSET + 4).name()}"
+
+    # 键盘焦点：仍然可见，但换成自己画的强调色描边（不是 Fusion 虚线框）
+    tree.setFocus()
+    qapp.processEvents()
+    assert tree.hasFocus()
+    image = tree.grab().toImage()
+    border = QColor(TOKENS.surface)
+    for x in range(offset.x() + ROW_INSET + 8, offset.x() + row.right() - 8):
+        color = image.pixelColor(x, offset.y() + row.top() + 1)
+        if _nearest_distance(color, accent) < _nearest_distance(border, accent):
+            border = color
+    assert _nearest_distance(border, accent) < 110, "焦点可见性丢了（描边没画出来）"
+    tree.close()
+
 
 
 def test_spacing_and_font_scales_are_ordered() -> None:

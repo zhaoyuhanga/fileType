@@ -1,6 +1,7 @@
 """墨软影视核心测试：模型 / m3u8 / 数据源 / 注册表（多源·熔断·换源）/ 存储 / 下载。"""
 from __future__ import annotations
 
+import io
 import json
 import threading
 from pathlib import Path
@@ -650,16 +651,16 @@ def test_registry_migrates_source_settings_on_version_bump(storage: VideoStorage
 
     registry = VideoRegistry()
     registry.load_settings(storage)
-    assert registry.is_enabled("cms_lziapi") is True       # 新增源默认启用
+    assert registry.is_enabled("cms_ikunzy") is True       # 新增源默认启用
     assert registry.order[:3] == list(DEFAULT_PROVIDER_ORDER)[:3]
     assert storage.get_setting(SETTING_VERSION, "") == str(SOURCES_VERSION)
 
     # 用户主动停用后要被尊重（版本一致时不再回退默认）
-    registry.set_enabled("cms_lziapi", False)
+    registry.set_enabled("cms_ikunzy", False)
     registry.save_settings(storage)
     restored = VideoRegistry()
     restored.load_settings(storage)
-    assert restored.is_enabled("cms_lziapi") is False
+    assert restored.is_enabled("cms_ikunzy") is False
 
 
 # --------------------------------------------------------------------------- 自由授权源
@@ -1229,6 +1230,197 @@ def test_download_hls_segments_without_ffmpeg(monkeypatch: pytest.MonkeyPatch, t
     path, _resolved = download_episode(remote, episode, tmp_path)
     assert path.suffix == ".ts"
     assert path.stat().st_size == 2 * len(segment)
+
+
+def test_ffmpeg_download_command_passes_binary_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """回归：ffmpeg 命令行里 ffmpeg 路径只能出现一次。
+
+    曾经 `args` 以 ffmpeg 路径开头，`_run_ffmpeg_download` 又拼了一次
+    （`[ffmpeg, *args, ...]`）→ ffmpeg 把多出来的那个当成**输出文件**，
+    报「Error initializing the muxer for ...\\ffmpeg.exe: Invalid argument」，
+    所有走 ffmpeg 的 HLS 下载必然失败（用户看到的"下载完成：成功 0，失败 1"）。
+    """
+    from modu_workbench.core.video import downloader as downloader_module
+
+    calls: list[list[str]] = []
+
+    class _FakeProcess:
+        def __init__(self, command, **_kwargs):  # noqa: ANN001
+            calls.append(list(command))
+            self.returncode = 0
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+
+        def poll(self):  # noqa: ANN201
+            return 0
+
+        def wait(self):  # noqa: ANN201
+            return 0
+
+        def kill(self):  # noqa: ANN201
+            return None
+
+    monkeypatch.setattr(downloader_module.subprocess, "Popen", _FakeProcess)
+
+    ffmpeg = r"C:\app\_internal\tools\ffmpeg\ffmpeg.exe"
+    target = tmp_path / "影片.mp4"
+    downloader_module._ffmpeg_download(
+        ffmpeg, "https://cdn/a.mp4", target, headers={}, on_progress=None, cancel=None
+    )
+
+    assert calls, "应当调用了一次 ffmpeg"
+    command = calls[0]
+    assert command[0] == ffmpeg
+    assert command.count(ffmpeg) == 1, "ffmpeg 路径重复出现会被 ffmpeg 当成输出文件"
+    assert command[-1] == str(target), "输出文件必须是最后一个参数"
+    assert command.index("-progress") < command.index("-i"), "全局进度参数应在输入之前"
+    assert not target.exists(), "这里只是记录命令，不应真的产出文件"
+
+
+def test_find_higher_quality_picks_the_sharpest_other_source(storage: VideoStorage, tmp_path: Path) -> None:
+    """换源找高清：去其他源找同一部片，挑分辨率最高的线路。
+
+    背景（实测）：cms_360 的《流浪地球》主清单只有 1280x538 / 706 kbps，
+    用户看到的就是「只有 540P、很模糊」。这里锁住「能自动找到更清晰的源」这条路径。
+    """
+    from modu_workbench.core.video.library import VideoLibrary
+    from modu_workbench.core.video.sources import SourceInfo, VideoRegistry, VideoSource
+
+    master_1080 = (
+        "#EXTM3U\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n"
+        "1080/index.m3u8\n"
+    )
+
+    class _ListHttp:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def get_text(self, url, **_kwargs):  # noqa: ANN001
+            return self.text
+
+    def _source(key: str, label: str, playlist: str, url: str):  # noqa: ANN202
+        class _Source(VideoSource):
+            info = SourceInfo(key=key, label=label, note="test")
+
+            def search(self, keyword, kind="all", limit=30, page=1):  # noqa: ANN001, ANN003
+                return [RemoteVideo(source=key, remote_id="1", title=keyword, year="2019",
+                                    episodes=[Episode(name="正片", url=url, index=0)])]
+
+            def play_url(self, video, episode, quality=None):  # noqa: ANN001, ANN003
+                return episode.url
+
+        return _Source(http=_ListHttp(playlist), key=key)
+
+    low = _source("low", "低画质源", "#EXTM3U\n", "https://low/540.m3u8")
+    hd = _source("hd", "高清源", master_1080, "https://hd/index.m3u8")
+    video = RemoteVideo(source="low", remote_id="1", title="流浪地球", year="2019",
+                        episodes=[Episode(name="正片", url="https://low/540.m3u8", index=0)])
+
+    library = VideoLibrary(storage, tmp_path / "videos", registry=VideoRegistry([low, hd]))
+    candidate = library.find_higher_quality(video, video.episodes[0], current_height=538)
+
+    assert candidate is not None, "应当能从另一个源找到 1080P"
+    assert candidate.source_key == "hd"
+    assert candidate.height == 1080
+    assert candidate.bandwidth == 5_000_000
+    assert candidate.episode.name == "正片"
+
+
+def test_find_higher_quality_returns_none_when_nothing_is_sharper(
+    storage: VideoStorage, tmp_path: Path
+) -> None:
+    """其他源都不比当前清晰时返回 None —— 不要为了「有反馈」切到更差的源。"""
+    from modu_workbench.core.video.library import VideoLibrary
+    from modu_workbench.core.video.sources import SourceInfo, VideoRegistry, VideoSource
+
+    master_720 = (
+        "#EXTM3U\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720\n"
+        "720/index.m3u8\n"
+    )
+
+    class _ListHttp:
+        def get_text(self, url, **_kwargs):  # noqa: ANN001
+            return master_720
+
+    class _Other(VideoSource):
+        info = SourceInfo(key="other", label="其他源", note="test")
+
+        def search(self, keyword, kind="all", limit=30, page=1):  # noqa: ANN001, ANN003
+            return [RemoteVideo(source="other", remote_id="2", title=keyword, year="2019",
+                                episodes=[Episode(name="正片", url="https://other/index.m3u8", index=0)])]
+
+        def play_url(self, video, episode, quality=None):  # noqa: ANN001, ANN003
+            return episode.url
+
+    video = RemoteVideo(source="low", remote_id="1", title="流浪地球", year="2019",
+                        episodes=[Episode(name="正片", url="https://low/540.m3u8", index=0)])
+    registry = VideoRegistry([_Other(http=_ListHttp(), key="other")])
+    library = VideoLibrary(storage, tmp_path / "videos", registry=registry)
+
+    assert library.find_higher_quality(video, video.episodes[0], current_height=1080) is None
+    assert library.find_higher_quality(video, video.episodes[0], current_height=400) is not None
+
+
+def test_best_variant_url_locks_the_sharpest_child_playlist() -> None:
+    """主清单 → 最高清晰度子清单：不让播放器/ffmpeg 自己挑（挑错就是"有高清却很糊"）。"""
+    from modu_workbench.core.video.hls import best_variant_url
+
+    master = (
+        "#EXTM3U\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=706000,RESOLUTION=1280x538\n540/index.m3u8\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n1080/index.m3u8\n"
+    )
+
+    class _Http:
+        def get_text(self, url, **_kwargs):  # noqa: ANN001
+            return master
+
+    assert best_variant_url("https://cdn/index.m3u8", http=_Http()) == "https://cdn/1080/index.m3u8"
+    # 单清晰度/探测不可用时原样返回，不能让"锦上添花"影响播放
+    assert best_variant_url("https://cdn/a.mp4") == "https://cdn/a.mp4"
+
+
+def test_resolve_playback_upgrades_master_playlist_to_best_variant(
+    monkeypatch: pytest.MonkeyPatch, storage: VideoStorage, tmp_path: Path
+) -> None:
+    """播放解析：源给的是主清单时，锁定到最高清晰度并标出画质标签。"""
+    from modu_workbench.core.video import library as library_module
+    from modu_workbench.core.video.library import VideoLibrary
+    from modu_workbench.core.video.sources import SourceInfo, VideoRegistry, VideoSource
+
+    master = (
+        "#EXTM3U\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=706000,RESOLUTION=1280x538\n540/index.m3u8\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n1080/index.m3u8\n"
+    )
+
+    class _Http:
+        def get_text(self, url, **_kwargs):  # noqa: ANN001
+            return master
+
+    class _Source(VideoSource):
+        info = SourceInfo(key="one", label="单源", note="test")
+
+        def search(self, keyword, kind="all", limit=30, page=1):  # noqa: ANN001, ANN003
+            return []
+
+        def play_url(self, video, episode, quality=None):  # noqa: ANN001, ANN003
+            return episode.url
+
+    monkeypatch.setattr(library_module, "_probe_client", lambda provider: _Http())
+
+    remote = RemoteVideo(source="one", remote_id="1", title="片", year="2024",
+                         episodes=[Episode(name="正片", url="https://cdn/index.m3u8", index=0)])
+    registry = VideoRegistry([_Source(key="one")])
+    library = VideoLibrary(storage, tmp_path / "videos", registry=registry)
+
+    resolved, _video = library.resolve_playback(remote, remote.episodes[0])
+    assert resolved.url == "https://cdn/1080/index.m3u8"
+    assert resolved.quality is not None and resolved.quality.label == "1080P"
 
 
 def test_download_hls_rejects_unsupported_encryption(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

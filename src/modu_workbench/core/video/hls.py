@@ -257,3 +257,17 @@ def list_qualities(m3u8_url: str, *, http=None, referer: str = "") -> list[HlsVa
         return []
     playlist = parse_m3u8(text, m3u8_url)
     return playlist.variants
+
+
+def best_variant_url(m3u8_url: str, *, http=None, referer: str = "") -> str:  # noqa: ANN001
+    """主清单 → 最高清晰度的子清单地址；不是主清单或探测失败时原样返回。
+
+    为什么不把主清单直接交给播放器/ffmpeg：**选哪一路由它们自己决定**，
+    不同实现的行为并不一致（实测有的站点只给一条 538P，有的主清单里高清排在后面），
+    用户看到的就是「明明有高清却很糊」；锁定最高变体还能避免播放中的码率切换抖动。
+    """
+    variants = list_qualities(m3u8_url, http=http, referer=referer)
+    if len(variants) < 2:
+        return m3u8_url
+    best = max(variants, key=lambda item: item.rank)
+    return best.url or m3u8_url

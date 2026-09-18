@@ -35,7 +35,7 @@ from modu_workbench.core.video import (
 from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 
-from .widgets import DetailWorker, QualityWorker
+from .widgets import DetailWorker, HdSearchWorker, QualityWorker
 
 
 class VideoDetailDialog(QDialog):
@@ -54,8 +54,10 @@ class VideoDetailDialog(QDialog):
         self._remote = remote
         self._detail_worker: DetailWorker | None = None
         self._quality_worker: QualityWorker | None = None
+        self._hd_worker: HdSearchWorker | None = None
         self._qualities: list[Quality] = []
         self._variants_loaded = False
+        self._last_variants: list = []
 
         self._build_ui()
         self._fill_info(remote)
@@ -105,7 +107,19 @@ class VideoDetailDialog(QDialog):
         self._quality_box.setToolTip("优先展示 m3u8 主清单里的真实分辨率；解析不到时用源给出的线路画质")
         self._quality_box.currentIndexChanged.connect(self._on_quality_index_changed)
         info_row.addWidget(self._quality_box, 1)
+        # 采集站常常只给一条低码率线路（实测有的源《流浪地球》只有 538P/706kbps），
+        # 这时"清晰度下拉"天然只有一个选项、看着像"没有选择清晰度的功能"，
+        # 所以给一个明确的出口：去别的源找同一部片里更清晰的线路。
+        self._hq_button = QPushButton("🔍 换源找高清")
+        self._hq_button.setToolTip("当前源清晰度偏低时，去其他数据源找同一部片，挑分辨率最高的线路")
+        self._hq_button.clicked.connect(self._find_higher_quality)
+        info_row.addWidget(self._hq_button)
         right_layout.addLayout(info_row)
+
+        self._quality_hint = QLabel("")
+        self._quality_hint.setObjectName("readerStatus")
+        self._quality_hint.setWordWrap(True)
+        right_layout.addWidget(self._quality_hint)
 
         self._meta = QLabel("")
         self._meta.setObjectName("readerStatus")
@@ -210,6 +224,7 @@ class VideoDetailDialog(QDialog):
         """把 m3u8 主清单的清晰度并入下拉（不覆盖源标签，去重后按清晰度排序）。"""
         if not variants:
             return
+        self._last_variants = list(variants)
         existing = {quality.label for quality in self._qualities}
         for variant in variants:
             label = variant.display
@@ -225,12 +240,108 @@ class VideoDetailDialog(QDialog):
         if not self._qualities:
             self._quality_box.addItem("自动（源默认）")
         else:
+            # 按清晰度倒序 → 第 0 项就是该源最高画质，默认选中它（不要默认最低）
             ordered = sorted(self._qualities, key=lambda item: item.rank, reverse=True)
             for quality in ordered:
                 suffix = "（主清单）" if quality.url and quality.url.startswith("http") else ""
                 self._quality_box.addItem(f"{quality.label}{suffix}", quality.label)
         self._quality_box.blockSignals(False)
         self._quality_box.setEnabled(self._quality_box.count() > 1)
+        self._update_quality_hint()
+
+    def best_variant(self):
+        """当前已知的最高清晰度变体（没有探测到时返回 None）。"""
+        if not self._last_variants:
+            return None
+        return max(self._last_variants, key=lambda item: item.rank)
+
+    def _update_quality_hint(self) -> None:
+        """把「这个源到底能给到什么画质」直接写出来，别让用户猜。"""
+        best = self.best_variant()
+        if best is None:
+            if len(self._qualities) <= 1:
+                self._quality_hint.setText(
+                    "该源只给出一个线路，清晰度由站点决定；点「🔍 换源找高清」可去其他源找同一部片更清晰的线路"
+                )
+            else:
+                self._quality_hint.setText("")
+            return
+        height = int(getattr(best, "height", 0) or 0)
+        kbps = int(getattr(best, "bandwidth", 0) or 0) // 1000
+        detail = f"{best.display}" + (f"（{kbps} kbps）" if kbps else "")
+        if height and height <= 576:
+            self._quality_hint.setText(
+                f"⚠ 该源最高只有 {detail}，画面会偏糊；点「🔍 换源找高清」会自动挑其他源里更清晰的线路"
+            )
+        else:
+            self._quality_hint.setText(f"已选中该源最高清晰度：{detail}")
+
+    # ------------------------------------------------------------------ 换源找高清
+
+    def _find_higher_quality(self) -> None:
+        """去其他源找同一部片更清晰的线路；找到就把本对话框切到那个源。"""
+        if self._hd_worker is not None and self._hd_worker.isRunning():
+            return
+        best = self.best_variant()
+        current_height = int(getattr(best, "height", 0) or 0)
+        self._hq_button.setEnabled(False)
+        self._quality_hint.setText(f"正在其他源里查找更清晰的线路…（当前 {best.display if best else '未知'}）")
+        worker = HdSearchWorker(self._remote, self.current_episode(),
+                                current_height=current_height, library=self._library, parent=self)
+        worker.progressed.connect(lambda message: self._quality_hint.setText(message))
+        worker.found.connect(self._on_hd_found)
+        worker.failed.connect(self._on_hd_failed)
+        worker.finished.connect(lambda w=worker: self._forget_hd_worker(w))
+        self._hd_worker = worker
+        worker.start()
+
+    def _forget_hd_worker(self, worker) -> None:  # noqa: ANN001
+        if self._hd_worker is worker:
+            self._hd_worker = None
+        self._hq_button.setEnabled(True)
+
+    def _on_hd_failed(self, message: str) -> None:
+        self._hq_button.setEnabled(True)
+        self._quality_hint.setText(f"换源找高清失败：{message}")
+
+    def _on_hd_found(self, candidate) -> None:  # noqa: ANN001
+        self._hq_button.setEnabled(True)
+        before = self.best_variant()
+        before_text = before.display if before is not None else (self._quality_box.currentText() or "未知")
+        if candidate is None:
+            self._quality_hint.setText(
+                f"其他源里也没有更清晰的线路（当前源 {before_text}，可能这部片在所有源上画质都差不多）"
+            )
+            return
+        quality_text = candidate.label + (f"（{candidate.bandwidth // 1000} kbps）" if candidate.bandwidth else "")
+        # 就地切到更清晰的那个源：剧集/清晰度下拉全部重建，之后播放与下载都走新源
+        self._remote = candidate.remote
+        self.setWindowTitle(f"{candidate.remote.title} · 详情")
+        self._qualities = []
+        self._variants_loaded = False
+        self._last_variants = []
+        self._fill_info(candidate.remote)
+        self._load_episodes(candidate.remote)
+        self._select_episode(candidate.episode)
+        self._quality_hint.setText(
+            f"✅ 已切到「{candidate.source_label}」，最高 {quality_text}（原源只有 {before_text}）"
+        )
+        if hasattr(self, "_status"):
+            self._status.setText(f"源：{candidate.source_label}")
+        self._toaster.success(f"已换到「{candidate.source_label}」：{quality_text}")
+
+    def _select_episode(self, episode) -> None:  # noqa: ANN001
+        """把剧集列表选中项切到指定集（换源后保持同一集）。"""
+        if episode is None:
+            return
+        for row in range(self._episode_list.count()):
+            item = self._episode_list.item(row)
+            if int(item.data(Qt.ItemDataRole.UserRole)) == episode.index:
+                self._episode_list.setCurrentItem(item)
+                return
+        if self._episode_list.count():
+            self._episode_list.setCurrentRow(0)
+
 
     def _on_quality_index_changed(self, _index: int) -> None:
         pass   # 选择在读取时解析，不需要即时动作
@@ -307,7 +418,7 @@ class VideoDetailDialog(QDialog):
         Qt 会以「QThread: Destroyed while thread is still running」终止整个进程。
         所以这里先耐心等待，实在等不到就强杀，绝不留下运行中的线程。
         """
-        for attr in ("_detail_worker", "_quality_worker"):
+        for attr in ("_detail_worker", "_quality_worker", "_hd_worker"):
             worker = getattr(self, attr, None)
             if worker is None:
                 continue

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
 
@@ -30,6 +31,67 @@ from .sources import ResolvedPlay, SourceError, VideoRegistry, registry as defau
 from .storage import VideoStorage, remote_to_video
 
 ProgressFn = Callable[[int, int, str], None]
+
+
+@dataclass
+class HdCandidate:
+    """跨源找到的「更清晰」候选：某个源上同一部片、同一集的最高分辨率线路。"""
+
+    remote: RemoteVideo
+    episode: Episode
+    variant: object            # core.video.hls.HlsVariant
+    source_key: str
+    source_label: str
+
+    @property
+    def height(self) -> int:
+        return int(getattr(self.variant, "height", 0) or 0)
+
+    @property
+    def label(self) -> str:
+        return str(getattr(self.variant, "display", "") or "")
+
+    @property
+    def bandwidth(self) -> int:
+        return int(getattr(self.variant, "bandwidth", 0) or 0)
+
+
+def _probe_client(provider):  # noqa: ANN001
+    """清晰度探测专用客户端：短超时 + 继承源的默认请求头（采集站基本都校验 Referer/UA）。
+
+    单独抽出来是为了可注入：单测里替换掉它就能离线验证"锁定最高清晰度"这条链路。
+    """
+    from .sources.http import HttpClient
+
+    headers: dict = {}
+    if provider is not None:
+        try:
+            headers = dict(provider.default_headers())
+        except Exception:  # noqa: BLE001
+            headers = {}
+    return HttpClient(headers=headers, timeout=4.0, attempts=1)
+
+
+def _same_episode(remote: RemoteVideo, name: str, index: int) -> Episode | None:
+    """在另一个源的剧集列表里找「同一集」（先按序号，再按集名，最后退第一集）。"""
+    episodes = list(remote.episodes or [])
+    if not episodes:
+        return None
+    for episode in episodes:
+        if index and episode.index == index:
+            return episode
+    if name:
+        for episode in episodes:
+            if episode.name == name:
+                return episode
+        # 线路前缀不同（「量子 · 第01集」vs「第01集」）时按尾段比
+        tail = name.split("·")[-1].strip()
+        if tail:
+            for episode in episodes:
+                if episode.name.split("·")[-1].strip() == tail:
+                    return episode
+    return episodes[0]
+
 
 
 def is_video_file(path: str | Path) -> bool:
@@ -205,6 +267,7 @@ class VideoLibrary:
         resolved = self.registry.resolve(remote, target, quality,
                                          allow_cross_source=allow_cross_source,
                                          exclude=exclude)
+        resolved = self._lock_best_variant(resolved)
         video = self.ensure_video(resolved.video, resolved.episode)
         # 解析结果的直链是「本次可用」的，重新解析过就不再沿用旧清晰度
         video.remote_url = resolved.url
@@ -223,6 +286,122 @@ class VideoLibrary:
         """取上次播放用的直链（可能已过期，调用方需容忍失败并重新解析）。"""
         record = self.storage.get_play_record(video_id, episode_label)
         return record.url if record else ""
+
+    def _lock_best_variant(self, resolved: ResolvedPlay) -> ResolvedPlay:
+        """用户没指定画质时，尽量把地址锁定到最高清晰度。
+
+        主清单直接交给播放器时「选哪一路」由播放器/ffmpeg 决定，行为不可控；
+        锁定最高变体既能保证画质，也避免播放过程中的码率切换抖动。
+
+        两条路径，先便宜后昂贵：
+        1. 源自己声明了多个带地址的清晰度 → 直接用最高的（零网络开销）；
+        2. 否则探测 m3u8 主清单 —— 用**短超时**客户端（拿源的默认头，避免被 403）。
+        任何失败都保持原样：绝不因为"锦上添花"让播放失败或变慢。
+        """
+        if resolved.quality is not None or not resolved.url:
+            return resolved
+
+        episode = resolved.episode
+        declared = [item for item in ((episode.qualities if episode is not None else []) or [])
+                    if getattr(item, "url", "")]
+        if len(declared) >= 2:
+            best = max(declared, key=lambda item: item.rank)
+            if best.url and best.url != resolved.url:
+                resolved.url = best.url
+            resolved.quality = best
+            return resolved
+
+        if not resolved.is_hls:
+            return resolved
+        try:
+            from .hls import list_qualities
+            from .sources.http import HttpClient
+
+            provider = self.registry.get(resolved.source)
+            client = _probe_client(provider)
+            variants = list_qualities(resolved.url, http=client, referer=resolved.referer)
+        except Exception:  # noqa: BLE001
+            return resolved
+        if len(variants) < 2:
+            return resolved
+        best_variant = max(variants, key=lambda item: item.rank)
+        if not best_variant.url:
+            return resolved
+        resolved.url = best_variant.url
+        resolved.quality = Quality(label=best_variant.display, url=best_variant.url)
+        return resolved
+
+    def find_higher_quality(
+        self,
+        remote: RemoteVideo,
+        episode: Episode | None = None,
+        *,
+        current_height: int = 0,
+        exclude: Iterable[str] = (),
+        on_progress: Callable[[str], None] | None = None,
+        cancel: threading.Event | None = None,
+    ) -> HdCandidate | None:
+        """去**其他源**找同一部片、同一集里分辨率最高的线路。
+
+        为什么需要它：采集站常常只给一条线路，画质完全由站点决定
+        （实测 cms_360 的《流浪地球》主清单只有 1280x538 / 706 kbps，
+        用户端表现为"只有 540P、很模糊"）。同一条片子在别的源上往往有 1080P，
+        因此这里逐个源「搜索 → 匹配同一集 → 探测 m3u8 主清单」，
+        返回比当前 `current_height` 更高的最佳候选；找不到就返回 None。
+
+        只读探测：不改注册表健康度、不写库、不下载。
+        """
+        from .hls import list_qualities
+        from .sources import best_match
+
+        target_name = episode.name if episode is not None else ""
+        target_index = episode.index if episode is not None else 0
+        skipped = {remote.source, *exclude}
+        best: HdCandidate | None = None
+
+        for key in self.registry.order:
+            if cancel is not None and cancel.is_set():
+                return best
+            if key in skipped or not self.registry.is_enabled(key):
+                continue
+            provider = self.registry.get(key)
+            if provider is None or not provider.available():
+                continue
+            label = str(getattr(provider.info, "label", "") or key)
+            if on_progress is not None:
+                on_progress(f"正在检查「{label}」…")
+            try:
+                candidates = provider.search(remote.title, kind="all", limit=10)
+            except Exception:  # noqa: BLE001  单个源失败不影响其它源
+                continue
+            matched = best_match(remote, candidates, threshold=0.62)
+            if matched is None:
+                continue
+            if not matched.episodes:
+                try:
+                    matched = provider.detail(matched) or matched
+                except Exception:  # noqa: BLE001
+                    continue
+            target = _same_episode(matched, target_name, target_index)
+            if target is None:
+                continue
+            try:
+                url = provider.play_url(matched, target)
+            except Exception:  # noqa: BLE001
+                continue
+            if not url:
+                continue
+            referer = str(provider.default_headers().get("Referer", "") or "")
+            variants = list_qualities(url, http=provider.http, referer=referer)
+            if not variants:
+                continue
+            top = max(variants, key=lambda item: item.rank)
+            floor = max(current_height, best.height if best is not None else 0)
+            if top.height and top.height > floor:
+                best = HdCandidate(remote=matched, episode=target, variant=top,
+                                   source_key=key, source_label=label)
+        return best
+
 
     def record_play(self, video: Video, *, quality: str = "", source: str = "") -> None:
         """记录一次播放：播放次数 + 历史 + 最后播放时间。"""

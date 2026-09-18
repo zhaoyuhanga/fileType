@@ -41,18 +41,17 @@ class ArchiveOrgVideoSource(VideoSource):
                page: int = 1) -> List[RemoteVideo]:
         if not (keyword or "").strip():
             raise SourceError("请输入搜索关键词")
-        # 只取影视类馆藏：mediatype:movies
-        query = f'mediatype:movies AND ({keyword})'
-        params = [
-            ("q", query),
-            ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"),
-            ("fl[]", "description"), ("fl[]", "creator"), ("fl[]", "downloads"),
-            ("rows", str(max(1, min(limit, 50)))),
-            ("page", str(max(1, page))),
-            ("output", "json"),
-        ]
-        payload = self.http.get_json(f"{self.SEARCH_URL}?{urlencode(params)}")
-        docs = ((payload or {}).get("response") or {}).get("docs") or []
+        # 「完整长片」优先：feature_films / silent_films / classic_cartoons 才是长片馆藏。
+        # 裸 mediatype:movies 会把 tvarchive、opensource_movies 里的**解说类短视频**一起搜出来
+        # —— 用户反馈"archive 里都是解说"就是这个原因（实测：限定馆藏后 Sherlock 前 8 条有 7 条 ≥40 分钟）。
+        # 精确检索无结果时退回宽检索，避免这个源因为收紧而变得不可用。
+        docs = self._search_docs(
+            f'mediatype:movies AND collection:(feature_films OR silent_films OR classic_cartoons)'
+            f' AND ({keyword})',
+            limit=limit, page=page,
+        )
+        if not docs:
+            docs = self._search_docs(f'mediatype:movies AND ({keyword})', limit=limit, page=page)
         results: List[RemoteVideo] = []
         for doc in docs:
             identifier = str(doc.get("identifier") or "").strip()
@@ -76,6 +75,19 @@ class ArchiveOrgVideoSource(VideoSource):
                 series_key=f"{self.key}:{identifier}",
             ))
         return results
+
+    def _search_docs(self, query: str, *, limit: int, page: int) -> list:
+        """跑一次 advancedsearch，返回 docs 列表（失败按空处理，由调用方决定是否退回宽检索）。"""
+        params = [
+            ("q", query),
+            ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"),
+            ("fl[]", "description"), ("fl[]", "creator"), ("fl[]", "downloads"),
+            ("rows", str(max(1, min(limit, 50)))),
+            ("page", str(max(1, page))),
+            ("output", "json"),
+        ]
+        payload = self.http.get_json(f"{self.SEARCH_URL}?{urlencode(params)}")
+        return ((payload or {}).get("response") or {}).get("docs") or []
 
     def detail(self, video: RemoteVideo) -> RemoteVideo:
         """拉取文件清单，挑选可播放的视频文件作为分集。"""
