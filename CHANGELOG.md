@@ -40,6 +40,22 @@
 断言 `datas` 路径存在、`modu_workbench.*` 隐藏导入可解析、两个 spec 的自研模块清单一致
 ——macOS spec 的那处漂移正是被它抓出来的（写测试时它当场还抓出 Windows/mac 清单不一致）。
 
+### 仓库清理与重新打包
+
+v1.0.2 首次发版后做了一次彻底清理（全部是 `.gitignore` 覆盖、可再生的构建产物，未触碰任何源文件）：
+
+| 清理项 | 体积 | 说明 |
+|---|---|---|
+| `node_modules/` | 953.7 MB | 旧 Electron 工程的依赖，仓库根已无 `package.json`（仅 `archive/electron-formatflow/` 有），与当前 Python 单栈无关 |
+| `release/` | 329.1 MB | electron-builder 遗留（`win-unpacked/`、`latest.yml`、`万能格式转换器 Setup 0.1.9.exe`） |
+| `dist/` 旧产物 | 834.9 MB | `墨软工作台-Setup-1.0.0.exe` / `-1.0.1.exe`（301 MB）与 `dist\main`、`dist\renderer`、`dist\shared` 旧 Electron 目录 |
+| `build/` | 37.6 MB | PyInstaller 中转缓存（打包脚本本就带 `--clean`） |
+| `.pytest_cache/`、各 `__pycache__/` | — | 可再生缓存 |
+
+合计释放 **2.18 GB**；随后全量重新打包（`packaging\build_app.ps1 -Installer -SkipDeps`），
+三道自检再次全部通过（源码 14/14、exe 关键字模块 15/15、打包产物自检全 `true`）。
+清理后 `dist\` 只剩本次产物，合计 533.5 MB。下表已更新为**重新打包后**的最终校验值。
+
 ## v1.0.2 — 控件样式补齐（尤其是下拉框）
 
 反馈："前端页面的样式有点丑，尤其下拉框的样式是真丑" + "点击下拉框会卡死一会"。
@@ -123,10 +139,11 @@ svip_preview / payInfo 字段在片段与完整曲目上**完全一致**，只�
 
 | 产物 | 大小 | SHA256 |
 |---|---|---|
-| `dist/墨软工作台-Setup-1.0.2.exe`（NSIS 安装包） | 151.0 MB | `96455B5A4C93324B8DB5DE2689AAB690B71F6C3C97DB9E31BCBAA4BBD22401E7` |
-| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `AD5974175EB3532C5A16DF18B9E763CABF1477D0E83D1218BB6B58C6E047F2D2` |
+| `dist/墨软工作台-Setup-1.0.2.exe`（NSIS 安装包） | 151.0 MB | `D8DEAF230D9754C2E0BA6AE63EB621698CF08740480C992BDD1BB4EBFF9A88B3` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.3 MB | `A04DB049398BE1035B852724C6F90599861FC0806FD3EB1BD2B824C33F7724C8` |
 
 - onedir 目录合计约 382.5 MB（随包 ffmpeg/ffprobe 约 196 MB）；
+- 以上为**清理旧产物后重新打包**的最终校验值（首次发版产物已随 `dist\` 清理一并删除）；
 - 构建三道自检**全部通过**：源码自检 **14/14**、exe 关键字模块 **15/15**、
   打包产物自检全部为 `true`（含 `video_core` / `gallery_core` / `llm_core`）——
   本次产物未被「智能应用控制」拦截，与 v1.0.1 时不同；
