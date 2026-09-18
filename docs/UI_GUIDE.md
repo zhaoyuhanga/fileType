@@ -70,18 +70,42 @@ Qt Widgets 的默认外观来自 **QStyle（我们用 Fusion）**，QSS 只会�
 换成 QML 等于把整套 Widgets UI 重写一遍，性价比不划算，QSS 补齐完全够用。）
 
 每个"弹出类 / 复合控件"都必须写全这几条，`tests/architecture/test_ui_design_system.py`
-里的 `test_qss_covers_popup_controls` 会逐条检查：
+里的 `test_qss_covers_popup_controls` / `test_combo_popup_uses_working_selectors` 会逐条检查：
 
 | 控件 | 必须覆盖 | 不写的后果 |
 |---|---|---|
 | `QComboBox` | `::drop-down`（去边框/底色）、`::down-arrow`（**只能给 image**）、`padding-right` 预留箭头位 | 右侧多一个灰色按钮+竖分隔线；长文本压到箭头上；用 `border` 拼三角形会渲染成**小方块** |
-| `QComboBox QAbstractItemView` | `::item`（`min-height`/`padding`/`border-radius`）、`::item:hover`、`::item:selected` | 列表行又挤又方，悬停是高对比系统蓝，跟主题完全不搭 |
-| 弹出层窗口 | `theme.polish_popup()`：无边框 + `WA_TranslucentBackground`（`install_popup_polisher` 在 Show 时自动套） | 下拉列表/右键菜单外面套着 Fusion 的灰面板，圆角对不上 |
+| `QComboBox QAbstractItemView` | 背景、`border: none`（容器已有原生边框）、`padding`、`outline: 0` | 出现双层边 + 当前项一圈虚线框 |
+| `QComboBox::item` / `:hover` / `:selected` | 文字色、hover 底色、选中底色 | 列表项沿用系统蓝高亮，与主题不搭 |
 | `QSpinBox` | `::up-button`/`::down-button`（去边框）、`::up-arrow`/`::down-arrow` | 右侧是 2010 风格的立体箭头按钮 |
 | `QCheckBox` / `QRadioButton` | `::indicator` 尺寸/圆角/边框 + `:checked` 的勾图/圆点 | 默认指示器又小又灰，勾选态是系统蓝 |
 | `QMenu` | `::item`（内边距/圆角）、`::item:selected`、`::separator` | 右键菜单项贴边、选中是一整条系统蓝 |
 | `QTreeView` | `::item`（行高/圆角/hover/selected）、`::branch`（箭头图标） | 树的分支是 ± 方框，行高不一致 |
 | `QTabWidget` | `::pane` + `QTabBar::tab` / `:selected` | 选项卡是立体凸起的老样式 |
+
+### 下拉列表的选择器坑（Qt 6.11 实测，务必照抄）
+
+这三条是踩出来的，写错会**又丑又卡**，测试已把它们钉死：
+
+1. ❌ `QComboBox QAbstractItemView::item { … }`（后代选择器 + 子控件）**不匹配**，写了等于没写，
+   列表项继续用 Fusion 默认外观；
+2. ❌ `QComboBox::item { padding: … }` / `min-height` —— 会触发几何爆炸：
+   实测行高算成 **1900px**、弹出层从 130px 涨到 **792px**（点一下就像卡死）；
+3. ❌ `QComboBox QAbstractItemView { selection-background-color: … }` 对弹窗**无效**，
+   选中态只能写在 `QComboBox::item:selected`。
+
+✅ 正确写法（现在的主题就是这样）：
+
+```css
+QComboBox QAbstractItemView { background: …; border: none; padding: 4px; outline: 0; }
+QComboBox::item { color: …; }
+QComboBox::item:hover { background: …; }
+QComboBox::item:selected { background: …; color: …; }
+```
+
+**也不要用**"弹出时改 window flags + `WA_TranslucentBackground`"那套去凑圆角：
+在已创建的弹出窗口上改标志会**重建原生窗口**（Windows 上就是"点一下卡一下"），
+全局事件过滤器还会让每个事件都回调进 Python。弹出层保留系统原生边框即可 —— 与 `QMenu` 一致。
 
 箭头/勾选/圆点这类小图标不引二进制资源，而是在 `theme._icon_urls()` 里
 **用 QPainter 现画成 PNG** 缓存到 `<数据目录>/cache/ui/`（颜色随主题，深浅色各自一份），

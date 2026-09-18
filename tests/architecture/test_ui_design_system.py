@@ -47,17 +47,17 @@ def test_qss_has_no_zero_radius() -> None:
 def test_qss_covers_popup_controls() -> None:
     """弹出类控件必须逐个写规则 —— 漏掉的子控件会退回 Fusion 默认外观（丑的根源）。
 
-    QSS 只影响"写到的控件 + 子控件"：下拉框的箭头/弹出列表、数字框的上下按钮、
+    QSS 只影响"写到的控件 + 子控件"：下拉框的箭头、数字框的上下按钮、
     勾选指示器、菜单项、树的分支箭头、选项卡，少一个就会出现两种视觉混搭。
+    选择器写法按 Qt 6.11 实测结果锁定（见下一条测试）。
     """
     qss = app_qss(TOKENS)
     for selector in (
         "QComboBox::drop-down",                 # 右侧箭头区（不写会画灰按钮+竖线）
         "QComboBox::down-arrow",                # 箭头本身
-        "QComboBox QAbstractItemView",          # 弹出列表
-        "QComboBox QAbstractItemView::item",    # 列表项（内边距/行高）
-        "QComboBox QAbstractItemView::item:hover",
-        "QComboBox QAbstractItemView::item:selected",
+        "QComboBox QAbstractItemView",          # 弹出列表（背景/边距/去虚线框）
+        "QComboBox::item:selected",             # 列表选中态（6.11 只有这种写法生效）
+        "QComboBox::item:hover",
         "QSpinBox::up-button",
         "QSpinBox::down-button",
         "QSpinBox::up-arrow",
@@ -68,6 +68,36 @@ def test_qss_covers_popup_controls() -> None:
         "QTabBar::tab:selected",
     ):
         assert selector in qss, f"QSS 缺少弹出控件规则：{selector}"
+
+
+def test_combo_popup_uses_working_selectors() -> None:
+    """下拉列表的写法有坑，这里把实测结论钉死（改错会又丑又卡）：
+
+    1. `QComboBox QAbstractItemView::item`（后代 + 子控件）在 Qt 6.11 **不匹配** ——
+       写了等于没写，列表项会退回 Fusion 默认外观；
+    2. `QComboBox::item` 上**不能加 padding** —— 实测触发行高 1900px、
+       弹出层暴涨到 792px 的几何爆炸（点一下就像卡死）；
+    3. view 上的 `selection-background-color` 不生效，选中态必须靠 `QComboBox::item:selected`；
+    4. 也不该再用"显示时改 window flags/半透明"那套：会重建原生弹出窗口（点一下卡一下），
+       而且全局事件过滤器会给每个事件加一层 Python 回调。
+    """
+    from modu_workbench.ui_kit import theme
+
+    qss = app_qss(TOKENS)
+    rules = re.sub(r"/\*.*?\*/", "", qss, flags=re.S)     # 只看真正的规则，不看注释
+    assert "QComboBox QAbstractItemView::item" not in rules, "该写法在 Qt 6.11 不匹配，别再写"
+    view_rule = rules.split("QComboBox QAbstractItemView {", 1)[1].split("}", 1)[0]
+    assert "selection-background-color" not in view_rule, \
+        "view 级 selection-background-color 对下拉列表无效"
+    combo_rule = rules.split("QComboBox::item {", 1)[1].split("}", 1)[0]
+    assert "padding" not in combo_rule and "min-height" not in combo_rule, \
+        "给 QComboBox::item 加 padding/min-height 会触发几何爆炸"
+
+    assert not hasattr(theme, "install_popup_polisher"), "弹出层处理器已移除，别再加回来"
+    assert not hasattr(theme, "polish_popup")
+    source = Path(theme.__file__).read_text(encoding="utf-8")
+    assert "setWindowFlag" not in source, "主题不该去改窗口标志（会重建原生弹出窗口、点一下卡一下）"
+    assert "installEventFilter" not in source, "主题不该装全局事件过滤器（每个事件都回调进 Python）"
 
 
 def test_runtime_icons_are_generated(qapp: QApplication) -> None:  # noqa: ARG001

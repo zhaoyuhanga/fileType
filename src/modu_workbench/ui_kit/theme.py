@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject
-
 from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
     CARD_PADDING,
     DARK,
@@ -351,11 +349,20 @@ QLineEdit#searchBox {{
 }}
 
 /* ---------- 下拉框 ----------
-   要点（之前丑的根源）：
+   要点（"下拉框丑/卡"的根源，都在这里踩过）：
    1) 右侧必须预留箭头的位置，否则长文本会压到箭头上；
    2) ::drop-down 必须显式去掉边框/底色，否则 Fusion 会在右侧画一个灰色按钮 + 竖分隔线；
    3) 箭头只能用 image（用 border 拼三角形在 Qt 里会渲染成小方块）；
-   4) 弹出列表是**独立顶层窗口**，容器自带的灰框要单独处理（见 polish_popups）。 */
+   4) 弹出列表是**独立顶层窗口**，容器自带一层原生边框：
+      我们自己再描一圈就会变双层边，所以 view 用 border: none，只留容器的边框；
+   5) **Qt 6.11 实测的选择器坑**：
+      - "后代选择器 + 子控件"（QComboBox QAbstractItemView::item）**不匹配**，写了等于没写；
+      - 列表项只能用 QComboBox::item / :hover / :selected，且**不能加 padding**
+        （会触发行高 1900px、弹出层暴涨到 792px 的几何爆炸，表现就是"点一下卡死"）；
+      - view 上的 selection-background-color 无效，选中态必须写在 QComboBox::item:selected；
+      - 也不要用"显示时改 window flags + 半透明"那套：会重建原生弹出窗口（点一下卡一下），
+        全局事件过滤器还会给每个事件加一层 Python 回调。
+      改这里务必先跑 tests/architecture/test_ui_design_system.py 与 packaging/ui_snapshot.py。 */
 QComboBox {{
     background: {t.surface};
     border: 1px solid {t.border_strong};
@@ -379,29 +386,21 @@ QComboBox::drop-down {{
     background: transparent;
 }}
 QComboBox::down-arrow {{ {arrow_down} }}
+/* 弹出列表：view 级只管背景/边距；**列表项只能用 `QComboBox::item*`**（6.11 实测：
+   `QComboBox QAbstractItemView::item` 这种"后代 + 子控件"写法不匹配，
+   `selection-background-color` 在 view 上也不生效）。
+   另外千万别给 `QComboBox::item` 加 padding —— 会触发行高 1900px 的几何爆炸。 */
 QComboBox QAbstractItemView {{
     background: {t.surface};
     color: {t.text};
-    border: 1px solid {t.border_strong};
-    border-radius: {t.radius_sm}px;
-    padding: 6px;
-    outline: none;
-    selection-background-color: transparent;
+    border: none;              /* 容器已有原生边框，再描一圈就是双层边 */
+    padding: 4px;
+    outline: 0;                /* 去掉当前项的虚线/细框 */
 }}
-QComboBox QAbstractItemView::item {{
-    min-height: 30px;
-    padding: 4px 10px;
-    border-radius: 7px;
-    color: {t.text};
-}}
-QComboBox QAbstractItemView::item:hover {{
-    background: {t.surface_hover};
-    color: {t.text_hi};
-}}
-QComboBox QAbstractItemView::item:selected {{
-    background: {t.accent_soft};
-    color: {t.accent_strong};
-}}
+QComboBox::item {{ color: {t.text}; }}
+QComboBox::item:hover {{ background: {t.surface_hover}; color: {t.text_hi}; }}
+QComboBox::item:selected {{ background: {t.accent_soft}; color: {t.accent_strong}; }}
+QComboBox::item:disabled {{ color: {t.text_faint}; }}
 
 /* ---------- 数字输入 ---------- */
 QSpinBox, QDoubleSpinBox {{
@@ -834,7 +833,6 @@ def apply_theme(app) -> None:
     app.setStyle("Fusion")
     app.setStyleSheet(app_qss(TOKENS))
     _apply_app_icon(app)
-    install_popup_polisher(app)
     # 兜底：原生控件（勾选框、单选框箭头等）用相近的浅色调色板
     from PySide6.QtGui import QColor, QPalette
 
@@ -868,46 +866,13 @@ def _apply_app_icon(app) -> None:
         return
 
 
-# ---------------------------------------------------------------- 弹出层去灰框
+# ---------------------------------------------------------------- 关于弹出层（重要教训）
 #
-# 下拉框的列表和右键菜单都是**独立顶层窗口**：
-# `QComboBox QAbstractItemView` 只能画到里面的列表控件，容器（QComboBoxPrivateContainer）
-# 仍旧按 Fusion 画一圈灰色面板 —— 这就是"下拉框边界灰扑扑、圆角对不上"的原因。
-# 这里在它们显示时统一改成无边框 + 半透明，QSS 的圆角与描边才能真正生效。
-
-_POPUP_CLASSES = ("QComboBoxPrivateContainer", "QComboBoxListView", "QMenu")
-
-
-class _PopupPolisher(QObject):
-    """应用级事件过滤器：弹出层一显示就套上无边框/半透明（只做一次）。"""
-
-    def eventFilter(self, obj, event) -> bool:  # noqa: ANN001, N802
-        if event.type() == QEvent.Type.Show:
-            name = obj.metaObject().className()
-            if name in _POPUP_CLASSES:
-                polish_popup(obj)
-        return False
-
-
-_polisher: "_PopupPolisher | None" = None
-
-
-def polish_popup(widget) -> None:  # noqa: ANN001
-    """把弹出层改成无边框 + 半透明，让 QSS 的圆角/描边生效（失败静默）。"""
-    try:
-        from PySide6.QtCore import Qt
-
-        widget.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        widget.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
-        widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-    except Exception:  # noqa: BLE001
-        return
-
-
-def install_popup_polisher(app) -> None:
-    """安装弹出层处理器（幂等；重复调用只装一次）。"""
-    global _polisher
-    if _polisher is not None:
-        return
-    _polisher = _PopupPolisher()
-    app.installEventFilter(_polisher)
+# 曾试过"应用级事件过滤器 + 显示时给弹出层设 FramelessWindowHint/WA_TranslucentBackground"
+# 来让 QSS 圆角生效。**已移除**，原因：
+#   1) 在已创建的弹出窗口上改 window flags 会触发原生窗口重建（Windows 上表现为点一下卡一下，
+#      半透明分层窗口还要额外合成），首次展开下拉框会有明显停顿；
+#   2) 全局事件过滤器对**每个控件、每个事件**都会回调进 Python，等于给整个界面加了一层税；
+#   3) 收益无法验证：离屏渲染不做 alpha 合成，圆角效果无法确认。
+# 现在的做法：弹出列表只设 view 级样式（`QComboBox QAbstractItemView`），
+# 边框交给系统原生弹出边框 —— 与 QMenu 一致，一层边、不闪烁、不卡顿。

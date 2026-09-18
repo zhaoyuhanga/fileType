@@ -5,36 +5,41 @@
 
 ## 未发布 — 控件样式补齐（尤其是下拉框）
 
-反馈："前端页面的样式有点丑，尤其下拉框的样式是真丑"。
+反馈："前端页面的样式有点丑，尤其下拉框的样式是真丑" + "点击下拉框会卡死一会"。
+
+### 第一轮：补齐控件规则（已修正，见下方"第二轮"）
 
 **根因**：界面是 Qt Widgets，默认外观由 **QStyle（Fusion）** 绘制，QSS 只改写"写到的控件 + 子控件"。
-之前的 QSS 只覆盖了按钮/输入框/表格/滚动条，**弹出类控件一个都没写**，于是它们继续按 Fusion 画：
-灰底立体箭头按钮、系统蓝高亮、± 方框树分支 —— 与靛蓝扁平主题混在一起就是"丑"。下拉框最明显，因为：
+旧 QSS 只覆盖了按钮/输入框/表格/滚动条，**弹出类控件一条规则都没写**，于是它们继续按 Fusion 画。
 
-1. `::drop-down` 没写 → 右侧画出 Fusion 的灰色按钮 + 竖分隔线；
-2. `padding` 没给右侧留位 → 长文本压到箭头上；
-3. `::down-arrow` 用 `border` 拼三角形 → Qt 渲染成**一个小方块**（这就是最刺眼的那处）；
-4. 弹出列表是**独立顶层窗口**（`QComboBoxPrivateContainer`），`QComboBox QAbstractItemView`
-   只能画到里面的列表，容器自带的灰面板还在，圆角对不上；
-5. `::item` 没写 → 列表行又挤又方，悬停是系统蓝，选中是一整条高对比色带。
+改法：箭头/勾选/圆点用 QPainter **现画成 PNG**（随主题色，缓存到 `<数据目录>/cache/ui`），
+QSS 以 `image: url(...)` 引用；并补齐 数字框 / 勾选与单选 / 右键菜单 / 树 / 选项卡 的规则。
 
-**改法**：
+### 第二轮：修正下拉框（选择器写错 + 去掉了会卡的弹出层 hack）
 
-- 箭头/勾选/圆点不再用 QSS 拼形状，而是在 `theme._icon_urls()` 里**用 QPainter 现画小 PNG**
-  （圆头折线、2 倍图缩放、颜色随主题）缓存到 `<数据目录>/cache/ui/`，QSS 用 `image: url(...)` 引用；
-- 补齐 **下拉框 / 数字框 / 勾选与单选 / 右键菜单 / 树 / 选项卡** 的完整规则：
-  箭头区去边框、右侧预留 26px、列表项 `min-height: 30px` + 圆角 + hover/选中态、菜单项圆角与内边距、
-  树分支换成 V 形箭头、选项卡改胶囊选中态；
-- `theme.install_popup_polisher()`：应用级事件过滤器，在**弹出层显示时**统一设
-  `FramelessWindowHint + WA_TranslucentBackground`，让 QSS 的圆角/描边真正生效（下拉列表与右键菜单都受益）；
-- 顺带修掉设置页的横向滚动：`music` / `video` 页用 QLabel 直接显示长路径，
-  把整页最小宽度顶到 1000px+（`llm` 页也超了 8px）。路径改成**只读 QLineEdit**、
-  音源复选项标签缩短（细节进 tooltip）、收窄固定宽度 → 七个页面在 980×700 下都不再横向滚动。
+用**真实中文字体 + 像素取色**逐个选择器做了对照实验（这是关键，之前只看截图看不出问题）：
 
-**测试**：新增 `test_qss_covers_popup_controls`（逐条检查 14 个弹出控件选择器）、
-`test_runtime_icons_are_generated`（图标真生成且写进 QSS，并断言不再用 border 拼三角形）、
-`test_settings_pages_fit_default_width`（七个设置页无横向滚动条）。
-`docs/UI_GUIDE.md` 增加"控件必须逐类覆盖"清单与"别用 QLabel 显示长路径"的布局硬约束。
+| 写法 | 实测结果 |
+|---|---|
+| `QComboBox QAbstractItemView::item {…}`（旧写法） | ❌ **不匹配** → 列表项一直是 Fusion 默认（第 1 轮"补齐"其实没生效，白改） |
+| `QComboBox QAbstractItemView { selection-background-color }` | ❌ 不生效 |
+| `QComboBox::item { padding / min-height }` | ⚠️ **几何爆炸**：行高算成 **1900px**、弹出层 130px→**792px** |
+| `QComboBox::item:selected { background }` | ✅ 生效 |
+| `QComboBox QAbstractItemView { border/padding/outline }` | ✅ 生效（view 级没问题） |
+
+- **下拉列表改成正确写法**：view 级只留背景/`border: none`/`padding: 4px`/`outline: 0`，
+  列表项用 `QComboBox::item` / `:hover` / `:selected`，**绝不给 `::item` 加 padding**；
+- **删掉"弹出时改 window flags + 半透明"的 hack**（上一轮加的）：在已创建的弹出窗口上改标志
+  会**重建原生窗口**——这正是"点一下卡一下"的原因；而且那个全局事件过滤器会让
+  **每个控件、每个事件**都回调进 Python，等于给整个界面加税。现在弹出层保留系统原生边框，
+  与 `QMenu` 一致：一层边、不闪烁、不卡顿。
+- 顺带修掉设置页横向滚动（`music` 1082→474、`video` 1012→418、`llm` 788→762）：
+  长文件路径改用只读 QLineEdit、音源复选项标签缩短（细节进 tooltip）。
+
+**测试**：`test_combo_popup_uses_working_selectors` 把上面四条实测结论钉死
+（禁止旧选择器、禁止给 `::item` 加 padding、禁止再装弹出层处理器/改 window flags）；
+另有 `test_qss_covers_popup_controls`、`test_runtime_icons_are_generated`、
+`test_settings_pages_fit_default_width`。`docs/UI_GUIDE.md` 增加"下拉列表的选择器坑"专节。
 
 ## 未发布 — 在线曲目质量过滤（酷我试听/片段）
 
