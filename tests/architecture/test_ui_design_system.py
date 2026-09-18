@@ -239,8 +239,20 @@ def test_tree_selection_is_tinted_not_system_blue(qapp: QApplication) -> None:
     assert _nearest_distance(sample(1), system_blue) > 60, \
         f"缩进列出现了系统高亮蓝：{sample(1).name()}"
     # 胶囊必须盖住缩进列（content rect 从 indentation 处才开始）—— 整行一块，没有接缝
-    assert _nearest_distance(sample(ROW_INSET + 4), accent_soft) <= 12, \
-        f"选中行在缩进列不是主题浅紫：{sample(ROW_INSET + 4).name()}"
+    # 采样点夹在「焦点描边」(x=ROW_INSET) 与「强调条」(x=ROW_INSET+SELECT_BAR_INSET) 之间
+    assert _nearest_distance(sample(ROW_INSET + 1), accent_soft) <= 12, \
+        f"选中行在缩进列不是主题浅紫：{sample(ROW_INSET + 1).name()}"
+
+    # 左侧强调条：必须画在**委托之后**。委托的 initStyleOption 会把 selected 状态找回来，
+    # QSS 的 ::item:selected 底色会盖住先画的竖条（实测只剩 1px）—— 这里量它确实够宽。
+    from modu_workbench.boards.gallery.nav_tree import SELECT_BAR_INSET, SELECT_BAR_WIDTH
+
+    bar_left = ROW_INSET + SELECT_BAR_INSET
+    bar_pixels = [sample(bar_left + step) for step in range(SELECT_BAR_WIDTH)]
+    assert all(_nearest_distance(color, accent) <= 12 for color in bar_pixels), (
+        "选中行左侧强调条缺失或被委托底色覆盖："
+        f"{[color.name() for color in bar_pixels]}（期望 {accent.name()}）"
+    )
 
     # 键盘焦点：仍然可见，但换成自己画的强调色描边（不是 Fusion 虚线框）
     tree.setFocus()

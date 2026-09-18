@@ -51,6 +51,9 @@ BADGE_HEIGHT = 20              # 胶囊高：比行高小 6px，上下各有 3px
 BADGE_PAD_X = SPACE["sm"]      # 8：胶囊左右内边距
 BADGE_MIN_WIDTH = 28           # 一位数计数也保持等宽，数字才能对齐成一列
 BADGE_GAP = SPACE["sm"]        # 8：胶囊与标题之间的最小间距
+SELECT_BAR_WIDTH = 3           # 选中行左侧强调条宽度
+SELECT_BAR_INSET = SPACE["xs"]  # 4：强调条距离胶囊左边缘
+SELECT_BAR_VMARGIN = 5         # 上下各留 5px，竖条不顶满行高
 
 
 class CategoryNavDelegate(QStyledItemDelegate):
@@ -103,7 +106,7 @@ class CategoryNavDelegate(QStyledItemDelegate):
             font.setBold(True)
         painter.setFont(font)
 
-        left = row.left() + SPACE["sm"]
+        left = row.left() + (SPACE["sm"] if group else SPACE["md"])
         right = row.right() - ROW_INSET - SPACE["xs"]
         badge = self._badge_rect(painter, row, right, index)
         if badge is not None:
@@ -229,6 +232,23 @@ class CategoryNavTree(QTreeWidget):
         opt.state &= ~QStyle.StateFlag.State_MouseOver
         opt.state &= ~QStyle.StateFlag.State_HasFocus
         super().drawRow(painter, opt, index)
+        # 强调条必须画在**委托之后**：委托的 initStyleOption 会把 selected 状态找回来，
+        # QSS 的 ::item:selected 底色于是盖在竖条上（实测只剩最左边 1px）。
+        # 这条 3px 竖条把「当前所在分类」与「鼠标划过」明确分开 ——
+        # accent_soft 与 surface_hover 都是浅色，只靠底色区分不够。
+        if not group and selected:
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            pill = QRectF(opt.rect).adjusted(ROW_INSET, 1, -ROW_INSET, -1)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.accent))
+            painter.drawRoundedRect(
+                QRectF(pill.left() + SELECT_BAR_INSET,
+                       pill.top() + SELECT_BAR_VMARGIN,
+                       SELECT_BAR_WIDTH,
+                       pill.height() - 2 * SELECT_BAR_VMARGIN),
+                SELECT_BAR_WIDTH / 2, SELECT_BAR_WIDTH / 2)
+            painter.restore()
         # 键盘焦点：1px 强调色描边取代默认虚线框（焦点可见，但不刺眼）
         if not group and self.hasFocus() and self.currentIndex() == index:
             painter.save()

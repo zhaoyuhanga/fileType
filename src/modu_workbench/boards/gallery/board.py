@@ -307,10 +307,21 @@ class GalleryBoardPage(QWidget):
         # 因此这里做成树形：点任意节点即把右侧网格筛成对应集合。
         # 外观由 CategoryNavTree 接管（通栏圆角选中态 + 计数徽章 + 紧凑行高），
         # 不再沿用 QTreeWidget 的默认蓝色方块选中框。
+        # 树下方挂一行常驻提示：既给"下一步做什么"，也让面板底部不再是一大片空白。
+        side_holder = QWidget()
+        side_layout = QVBoxLayout(side_holder)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(SPACE["xs"])
         self._side = CategoryNavTree()
         self._side.setMinimumWidth(190)
         self._side.itemClicked.connect(self._on_side_clicked)
-        self._splitter.addWidget(self._side)
+        side_layout.addWidget(self._side, 1)
+        self._side_hint = QLabel("")
+        self._side_hint.setObjectName("readerStatus")
+        self._side_hint.setWordWrap(True)
+        self._side_hint.setToolTip("节点右侧的数字是该分类下的图片数量")
+        side_layout.addWidget(self._side_hint)
+        self._splitter.addWidget(side_holder)
 
         self._grid = ThumbnailGrid(self._library)
         self._grid.setMinimumWidth(260)
@@ -751,6 +762,19 @@ class GalleryBoardPage(QWidget):
         # 延后重建：直接重建会在左侧树节点点击事件处理中销毁该节点（shiboken 崩溃）
         self._schedule_side_refresh()
 
+    def _update_side_hint(self, total: int) -> None:
+        """树下方那行常驻提示。
+
+        空库时给"下一步做什么"（符合本项目的空状态约定），有图时给操作提示；
+        顺带把面板底部的空白收住，不再是一片空荡荡的树。
+        """
+        if not hasattr(self, "_side_hint"):
+            return
+        if total <= 0:
+            self._side_hint.setText("导入图片后，这里会自动按「相册 / 时间 / 标签 / 来源」分组")
+        else:
+            self._side_hint.setText(f"共 {total} 张 · 点节点筛选，右键图片可加入相册/打标签")
+
     def _refresh_side(self) -> None:
         """重建左侧导航树：图库概览 / 相册 / 时间 / 标签 / 来源。
 
@@ -780,6 +804,7 @@ class GalleryBoardPage(QWidget):
         self._side.clear()
 
         total = self._library.storage.count_images()
+        self._update_side_hint(total)
         root = add(None, "🖼 全部图片", {"all": True}, badge=total)
         add(root, "★ 我的收藏", {"favorite": True}, badge=self._favorite_count())
         add(root, "🆕 最近导入", {"recent_days": 7}, badge="7 天")
