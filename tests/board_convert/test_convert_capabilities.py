@@ -97,6 +97,35 @@ def test_capability_summary_lists_all_four() -> None:
         assert item.label and item.hint
 
 
+def test_category_chip_filters_the_action_panel(qapp, tmp_path) -> None:
+    """分类芯片把面板收窄到某一族，点「全部」恢复（动作多了以后的主要找法）。"""
+    from modu_workbench.boards.convert.board import ConvertBoardPage
+
+    video = tmp_path / "演示.mp4"
+    video.write_bytes(b"\x00" * 64)
+
+    page = ConvertBoardPage(output_dir=str(tmp_path / "out"))
+    try:
+        page._append_paths([str(video)])
+        total = len(page._action_buttons)
+        assert total >= 10, f"单个 mp4 的动作应该很多，实际 {total}"
+
+        page._set_category_filter("archive")
+        assert page._action_buttons, "归档族应当有动作"
+        assert {action.category for action in page._current_actions} == {"archive"}
+        assert all(("压缩" in button.text() or "解压" in button.text())
+                   for button in page._action_buttons)
+
+        # 芯片上的计数与实际动作数一致
+        assert "归档" in page._chip_buttons["archive"].text()
+
+        page._set_category_filter("")
+        assert len(page._action_buttons) == total
+        assert page._chip_buttons[""].isChecked()
+    finally:
+        page.close()
+
+
 def test_ui_greys_out_blocked_actions_and_picks_an_available_one(
     qapp, no_extras: None, tmp_path
 ) -> None:

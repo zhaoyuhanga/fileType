@@ -197,6 +197,23 @@ class ConvertBoardPage(QWidget):
         actions_scroll.setWidget(actions_host)
         right_layout.addWidget(title_label)
         right_layout.addWidget(self._action_hint)
+        # 分类筛选：格式铺开后动作很多（单个 mp4 24 个、混选可到 50 个），先按族收窄。
+        # 芯片只建一次、只更新可用状态与计数 —— 若每次重建都在点击信号里销毁按钮，
+        # 会踩到 shiboken 的"点击处理中销毁发送者"崩溃（图库侧树节点踩过同样的坑）。
+        self._category_filter = ""
+        self._chip_buttons: dict[str, QPushButton] = {}
+        chip_row = QHBoxLayout()
+        chip_row.setSpacing(4)
+        for chip_key, chip_label in [("", "全部")] + [(key, _CATEGORY_LABELS[key]) for key in _CATEGORY_ORDER]:
+            chip = QPushButton(chip_label)
+            chip.setObjectName("actionChip")
+            chip.setCheckable(True)
+            chip.setChecked(chip_key == "")
+            chip.clicked.connect(lambda _=False, k=chip_key: self._set_category_filter(k))
+            chip_row.addWidget(chip)
+            self._chip_buttons[chip_key] = chip
+        chip_row.addStretch(1)
+        right_layout.addLayout(chip_row)
         right_layout.addWidget(actions_scroll, 1)
 
         run_row = QHBoxLayout()
@@ -370,6 +387,19 @@ class ConvertBoardPage(QWidget):
         # （截图验收时发现）。运行时不适用的文件会被跳过并写明原因，所以并集更符合直觉。
         actions = union_actions(formats) if formats else []
         actions = sorted(actions, key=_action_sort_key)
+        all_actions = list(actions)
+        # 芯片：只保留当前格式真正涉及的分类，并带上数量
+        counts: dict[str, int] = {}
+        for action in all_actions:
+            counts[action.category] = counts.get(action.category, 0) + 1
+        for chip_key, chip in getattr(self, "_chip_buttons", {}).items():
+            if not chip_key:
+                continue
+            total = counts.get(chip_key, 0)
+            chip.setEnabled(total > 0)
+            chip.setText(f"{_CATEGORY_LABELS[chip_key]} {total}" if total else _CATEGORY_LABELS[chip_key])
+        if self._category_filter:
+            actions = [a for a in actions if a.category == self._category_filter]
         self._mixed_mode = len({fmt for fmt in formats}) > 1
         self._current_actions: list[ConverterAction] = actions
         self._action_buttons: list[QPushButton] = []
@@ -421,6 +451,13 @@ class ConvertBoardPage(QWidget):
                 style.unpolish(button)
                 style.polish(button)
         self._run_button.setEnabled(bool(actions) and self._worker is None)
+
+    def _set_category_filter(self, key: str) -> None:
+        """切换分类筛选（空串 = 全部）。只重排动作按钮，不动芯片本身。"""
+        self._category_filter = key
+        for chip_key, chip in self._chip_buttons.items():
+            chip.setChecked(chip_key == key)
+        self._rebuild_action_list()
 
     def _select_action(self, action: ConverterAction) -> None:
         self._selected_action = action
