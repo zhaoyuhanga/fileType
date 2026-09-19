@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import archive_io, image_io
 from .formats import TARGET_EXTENSION, format_from_extension
-from .registry import ARCHIVE_EXTRACT_IDS, ConverterAction
+from .registry import ARCHIVE_EXTRACT_IDS, TAR_EXTRACT_IDS, ConverterAction
 
 
 class ConversionCancelled(Exception):
@@ -61,6 +61,12 @@ def run_conversion(
             media_io.convert_media(source, target, output_path, cancel)
         elif action.kind == "pdf":
             output_path = _run_pdf(action, source, output_dir_path)
+        elif action.kind == "data":
+            output_path = _run_data(action, source, output_dir_path)
+        elif action.kind == "subtitle":
+            output_path = _run_subtitle(action, source, output_dir_path)
+        elif action.kind == "ebook":
+            output_path = _run_ebook(action, source, output_dir_path)
         elif action.kind == "archive":
             result = _run_archive(action, source, output_dir_path, cancel)
             if result.ok and result.output_path:
@@ -239,6 +245,66 @@ def _run_json(source: Path, target: str, output: Path, title: str) -> None:
     raise ValueError(f"不支持的 JSON 目标：{target}")
 
 
+def _paragraph_html(text: str, title: str) -> str:
+    """纯文本 → 简单 HTML 文档（与 txt→html 转换保持同一套包装）。"""
+    import html as html_mod
+
+    escaped_title = html_mod.escape(title)
+    paragraphs = "".join(
+        f"<p>{html_mod.escape(line) or '&nbsp;'}</p>" for line in (text or "").splitlines()
+    )
+    return (
+        f"<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'>"
+        f"<title>{escaped_title}</title></head><body>{paragraphs}</body></html>"
+    )
+
+
+def _run_data(action, source: Path, output_dir: Path) -> Path:  # noqa: ANN001
+    """数据族：json / xml / ini / yaml 互转（另可输出 txt / markdown / html / pdf / csv）。"""
+    from . import data_io
+
+    extension = TARGET_EXTENSION.get(action.target_format, ".txt")
+    output = _unique_output(output_dir, source.stem, extension)
+    data_io.convert_data(source, format_from_extension(source.suffix), action.target_format,
+                         output, title=source.stem)
+    return output
+
+
+def _run_subtitle(action, source: Path, output_dir: Path) -> Path:  # noqa: ANN001
+    """字幕族：srt / vtt 互转，或转成不带时间轴的纯文本。"""
+    from . import subtitle_io
+
+    extension = TARGET_EXTENSION.get(action.target_format, ".txt")
+    output = _unique_output(output_dir, source.stem, extension)
+    subtitle_io.convert_subtitle(source, format_from_extension(source.suffix),
+                                 action.target_format, output)
+    return output
+
+
+def _run_ebook(action, source: Path, output_dir: Path) -> Path:  # noqa: ANN001
+    """电子书族：epub → txt/md/html/pdf，或 txt/md/html → epub。"""
+    from . import ebook_io
+    from . import text_io
+
+    source_format = format_from_extension(source.suffix)
+    if source_format != "epub":
+        output = _unique_output(output_dir, source.stem, TARGET_EXTENSION.get(action.target_format, ".epub"))
+        ebook_io.write_epub(text_io.read_text_smart(source), output, title=source.stem)
+        return output
+
+    text = ebook_io.epub_to_text(source)
+    output = _unique_output(output_dir, source.stem, TARGET_EXTENSION.get(action.target_format, ".txt"))
+    if action.target_format == "pdf":
+        from .pdf_out import render_text_pdf
+
+        render_text_pdf(text, output, title=source.stem)
+    elif action.target_format == "html":
+        text_io.write_text(output, _paragraph_html(text, source.stem))
+    else:
+        text_io.write_text(output, text)
+    return output
+
+
 def _run_pdf(action, source: Path, output_dir: Path) -> Path:  # noqa: ANN001
     """PDF → TXT / Markdown（pypdf 抽取文本）。"""
     try:
@@ -295,26 +361,39 @@ def _run_document_family(action: ConverterAction, source: Path, output_dir: Path
 def _run_archive(
     action: ConverterAction, source: Path, output_dir: Path, cancel: threading.Event | None
 ) -> ConversionResult:
-    if action.id == "compress-to-zip":
-        output = _unique_output(output_dir, source.stem, ".zip")
-        archive_io.compress_zip(source, output)
-        return ConversionResult(action.id, str(source), "succeeded", output_path=str(output), target_format="zip")
+    if action.id.startswith("compress-to-"):
+        target = action.id.removeprefix("compress-to-")
+        extension = TARGET_EXTENSION.get(target, f".{target}")
+        # 单文件压缩保留源文件全名（报告.txt → 报告.txt.gz）：
+        # bz2/xz 格式本身没有文件名字段，只有这样才能把原名带回去；
+        # tar 系列本来就记条目名，仍用 stem（报告.tar.gz）。
+        stem = source.name if target in ("gz", "bz2", "xz") else source.stem
+        output = _unique_output(output_dir, stem, extension)
+        if target == "zip":
+            archive_io.compress_zip(source, output)
+        elif target in ("tar", "targz", "tarbz2", "tarxz"):
+            archive_io.compress_tar(source, output, compression=target[3:])
+        elif target in ("gz", "bz2", "xz"):
+            archive_io.compress_single(source, output, algorithm=target)
+        else:
+            return _fail(ConversionResult(action.id, str(source), "failed"), f"未知压缩目标：{target}")
+        return ConversionResult(action.id, str(source), "succeeded",
+                                output_path=str(output), target_format=target)
 
-    if action.id == "compress-to-tar":
-        output = _unique_output(output_dir, source.stem, ".tar")
-        archive_io.compress_tar(source, output)
-        return ConversionResult(action.id, str(source), "succeeded", output_path=str(output), target_format="tar")
-
-    if action.id in ARCHIVE_EXTRACT_IDS:
+    if action.id in set(ARCHIVE_EXTRACT_IDS.values()):
         if cancel is not None and cancel.is_set():
             raise ConversionCancelled()
         target_dir = _unique_dir(output_dir, source.stem)
         if action.id == "zip-extract":
             archive_io.extract_zip(source, target_dir)
-        elif action.id == "tar-extract":
+        elif action.id == "rar-extract":
+            archive_io.extract_rar(source, target_dir)
+        elif action.id in TAR_EXTRACT_IDS:
+            # tar / tar.gz / tar.bz2 / tar.xz 共用（tarfile 按内容自动识别压缩）
             archive_io.extract_tar(source, target_dir)
         else:
-            archive_io.extract_rar(source, target_dir)
+            # gz / bz2 / xz 单文件：解出原始文件（放在同名目录里）
+            archive_io.extract_single(source, target_dir)
         return ConversionResult(
             action.id, str(source), "succeeded", output_path=str(target_dir), target_format=action.target_format
         )

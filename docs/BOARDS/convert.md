@@ -30,6 +30,34 @@
 依赖规则：本板块只能引用 `boards/convert/`、`core/convert/`、`core/platform`、`core/llm`、`ui_kit`、`services`；
 跨板块引用会被 `tests/architecture/test_architecture.py` 拦下。
 
+### 1.1 支持的格式（v1.0.4 起）
+
+格式与动作都是**数据**：`core/convert/formats.py` 定义"有哪些格式"，
+`core/convert/registry.py` 用 `_pair_actions(...)` 批量生成动作。新增格式只需改这两个文件，
+**不要在业务代码里写 if/else 判断后缀**。
+
+| 族 | 输入格式 | 可输出到 | 实现 |
+|---|---|---|---|
+| 文本 | txt / md / html | txt / md / html / pdf | `engine._run_text` |
+| 数据 | json / xml / ini / yaml | txt / md / html / pdf / json / xml / yaml / ini / csv | `data_io.py` |
+| 文档 | docx / doc / odt / rtf | txt / md / html / pdf（pdf 优先 LibreOffice 高保真） | `office_io.py` |
+| 表格 | xlsx / xls / ods / csv / tsv | csv / tsv / xlsx / md / html / txt / pdf | `sheet_io.py` |
+| 图片 | jpg / png / webp / bmp / gif / tiff / ico / tga / pcx / ppm（+ 只读 psd / dds / jp2） | 上述可写图片格式 + **pdf** | `image_io.py`（Pillow） |
+| 音视频 | mp4 / mov / avi / mkv / webm / flv / wmv / m4v / mpg / mpeg / ts / 3gp / ogv；m4a / mp3 / wav / flac / aac / ogg / opus / wma / m4b / aiff / amr / ac3 | 同族互转 + 视频提取音频 | `media_io.py`（ffmpeg） |
+| 字幕 | srt / vtt | srt / vtt / txt | `subtitle_io.py` |
+| 电子书 | epub | txt / md / html / pdf | `ebook_io.py`（ebooklib） |
+| 归档 | zip / tar / tar.gz / tar.bz2 / tar.xz / gz / bz2 / xz / rar | 压缩到 zip / tar / tar.* / gz / bz2 / xz；各自解压 | `archive_io.py`（标准库） |
+
+维护约定：
+
+- **登记即承诺**：进了 `*_FORMATS` 的格式必须有可用动作，`tests/board_convert/test_convert_format_coverage.py`
+  会检查（含动作 id 唯一、目标有扩展名映射、每个格式至少一个动作）；
+- **只读格式**（psd / dds / jp2）：只能作为源，不进 `TARGET_EXTENSION`；
+- **单文件压缩保留源文件全名**：`报告.txt` → `报告.txt.gz`（bz2/xz 没有文件名字段，
+  只有这样才能把原名带回去）；tar 系列仍是 `报告.tar.gz`（条目名即原名）；
+- **缺依赖给可操作提示**：ods 需要 LibreOffice、amr 需要 ffmpeg 带 amrnb 编码器，
+  引擎抛的是中文原因，不是英文堆栈。
+
 ## 2. 数据
 
 数据库：单库 `modu.db`（详见 `docs/DATABASE.md`）。

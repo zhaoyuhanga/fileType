@@ -1,6 +1,19 @@
 """转换动作注册表与能力判定（对齐旧版 ConverterRegistry 语义）。
 
-家族：text / word / sheet / image / media / archive。
+家族（`kind` → 由谁实现）：
+- `text`     → `engine._run_text`（txt/md/html/json 互转）
+- `word`     → `engine._run_document_family`（doc/docx/odt/rtf）
+- `sheet`    → `engine._run_document_family`（xlsx/xls/ods/csv/tsv）
+- `image`    → `core/convert/image_io.py`（Pillow，含图片转 PDF）
+- `media`    → `core/convert/media_io.py`（ffmpeg）
+- `pdf`      → `engine._run_pdf`（pypdf 抽取文本）
+- `data`     → `core/convert/data_io.py`（json/xml/ini/yaml 互转）
+- `subtitle` → `core/convert/subtitle_io.py`（srt/vtt）
+- `ebook`    → `core/convert/ebook_io.py`（epub）
+- `archive`  → `core/convert/archive_io.py`（zip/tar/gz/bz2/xz/rar）
+
+动作是**数据**：新增格式只需改 `formats.py` 的元组与这里的 targets，
+不要在各处写 if/else。
 """
 from __future__ import annotations
 
@@ -9,24 +22,74 @@ from dataclasses import dataclass
 from .formats import (
     ARCHIVE_FORMATS,
     AUDIO_FORMATS,
+    DATA_FORMATS,
+    EBOOK_FORMATS,
     IMAGE_FORMATS,
+    IMAGE_READONLY_FORMATS,
     SHEET_FORMATS,
+    SUBTITLE_FORMATS,
     TEXT_FORMATS,
     VIDEO_FORMATS,
     WORD_FORMATS,
+    format_label,
 )
 
 TEXT_TARGETS = ("txt", "markdown", "html", "pdf")
 WORD_TARGETS = ("txt", "markdown", "html", "pdf")
-SHEET_TARGETS = ("csv", "html", "txt", "pdf")
-ARCHIVE_EXTRACT_IDS = {"zip-extract", "tar-extract", "rar-extract"}
+SHEET_TARGETS = ("csv", "tsv", "xlsx", "markdown", "html", "txt", "pdf")
+# 图片目标：全部可写图片格式 + PDF（反馈里最常见的"图片转 PDF"）
+IMAGE_TARGETS = tuple(IMAGE_FORMATS) + ("pdf",)
+DATA_TARGETS = ("txt", "markdown", "html", "pdf", "json", "xml", "yaml", "ini", "csv")
+SUBTITLE_TARGETS = ("srt", "vtt", "txt")
+# 解压动作：格式 → 动作 id。**每个格式必须有独立 id** ——
+# 共用 id 时 `union_actions` 会按 id 去重，多选 tar 与 tar.gz 就只剩一个动作，
+# 另一个文件会被判成"不适用"而跳过。
+ARCHIVE_EXTRACT_IDS = {
+    "zip": "zip-extract",
+    "tar": "tar-extract",
+    "targz": "targz-extract",
+    "tarbz2": "tarbz2-extract",
+    "tarxz": "tarxz-extract",
+    "gz": "gz-extract",
+    "bz2": "bz2-extract",
+    "xz": "xz-extract",
+    "rar": "rar-extract",
+}
+# tar 家族的解压实现相同（tarfile 按内容自动识别压缩），engine 用这个集合分派
+TAR_EXTRACT_IDS = frozenset({"tar-extract", "targz-extract", "tarbz2-extract", "tarxz-extract"})
+# 压缩目标：动作 id → （标签，扩展名格式）
+ARCHIVE_COMPRESS_TARGETS = (
+    ("zip", "压缩为 ZIP"),
+    ("tar", "压缩为 TAR"),
+    ("targz", "压缩为 TAR.GZ"),
+    ("tarbz2", "压缩为 TAR.BZ2"),
+    ("tarxz", "压缩为 TAR.XZ"),
+    ("gz", "压缩为 GZ（单文件）"),
+    ("bz2", "压缩为 BZ2（单文件）"),
+    ("xz", "压缩为 XZ（单文件）"),
+)
+# 可被压缩的源：除了归档本身以外的全部格式
+COMPRESSIBLE_FORMATS = (
+    TEXT_FORMATS + WORD_FORMATS + SHEET_FORMATS + IMAGE_FORMATS + IMAGE_READONLY_FORMATS
+    + VIDEO_FORMATS + AUDIO_FORMATS + DATA_FORMATS + SUBTITLE_FORMATS + EBOOK_FORMATS
+    + ("pdf",)
+)
 
 FMT_NAMES = {
-    "txt": "TXT", "markdown": "Markdown", "html": "HTML", "pdf": "PDF", "csv": "CSV",
-    "docx": "Word", "doc": "Word", "xlsx": "Excel", "xls": "Excel",
+    "txt": "TXT", "markdown": "Markdown", "html": "HTML", "pdf": "PDF", "csv": "CSV", "tsv": "TSV",
+    "docx": "Word", "doc": "Word", "odt": "ODT", "rtf": "RTF",
+    "xlsx": "Excel", "xls": "Excel", "ods": "ODS",
     "jpg": "JPG", "png": "PNG", "webp": "WEBP", "bmp": "BMP", "gif": "GIF",
-    "mp4": "MP4", "mov": "MOV", "avi": "AVI", "m4a": "M4A", "mp3": "MP3", "wav": "WAV",
-    "flac": "FLAC", "aac": "AAC", "ogg": "OGG", "opus": "OPUS", "wma": "WMA",
+    "tiff": "TIFF", "ico": "ICO", "tga": "TGA", "pcx": "PCX", "ppm": "PPM",
+    "psd": "PSD", "dds": "DDS", "jp2": "JP2",
+    "mp4": "MP4", "mov": "MOV", "avi": "AVI", "mkv": "MKV", "webm": "WEBM", "flv": "FLV",
+    "wmv": "WMV", "m4v": "M4V", "mpg": "MPG", "mpeg": "MPEG", "ts": "TS", "3gp": "3GP", "ogv": "OGV",
+    "m4a": "M4A", "mp3": "MP3", "wav": "WAV", "flac": "FLAC", "aac": "AAC", "ogg": "OGG",
+    "opus": "OPUS", "wma": "WMA", "m4b": "M4B", "aiff": "AIFF", "amr": "AMR", "ac3": "AC3",
+    "json": "JSON", "xml": "XML", "ini": "INI", "yaml": "YAML",
+    "srt": "SRT", "vtt": "VTT", "epub": "EPUB",
+    "zip": "ZIP", "tar": "TAR", "targz": "TAR.GZ", "tarbz2": "TAR.BZ2", "tarxz": "TAR.XZ",
+    "gz": "GZ", "bz2": "BZ2", "xz": "XZ", "rar": "RAR",
 }
 
 
@@ -36,15 +99,15 @@ class ConverterAction:
     label: str
     source_formats: tuple[str, ...]
     target_format: str
-    category: str  # document / image / audio / video / archive
-    kind: str      # text / word / sheet / image / media / archive
+    category: str  # document / image / audio / video / archive / data / subtitle / ebook
+    kind: str      # text / word / sheet / image / media / pdf / data / subtitle / ebook / archive
 
     def matches(self, source_format: str) -> bool:
         return source_format in self.source_formats
 
 
 def _fmt_name(fmt: str) -> str:
-    return FMT_NAMES.get(fmt, fmt.upper())
+    return FMT_NAMES.get(fmt, format_label(fmt))
 
 
 def _pair_actions(family: tuple[str, ...], targets: tuple[str, ...], kind: str, category: str,
@@ -54,12 +117,9 @@ def _pair_actions(family: tuple[str, ...], targets: tuple[str, ...], kind: str, 
         for target in targets:
             if target == source:
                 continue
-            if source in ("csv",) and target == "csv":
-                continue
             src = label_src or _fmt_name(source)
-            tgt = _fmt_name(target)
             actions.append(ConverterAction(
-                id=f"{source}-to-{target}", label=f"{src} 转 {tgt}",
+                id=f"{source}-to-{target}", label=f"{src} 转 {_fmt_name(target)}",
                 source_formats=(source,), target_format=target,
                 category=category, kind=kind,
             ))
@@ -68,59 +128,62 @@ def _pair_actions(family: tuple[str, ...], targets: tuple[str, ...], kind: str, 
 
 def _build_actions() -> list[ConverterAction]:
     actions: list[ConverterAction] = []
-    # 文本族（txt/md/html ↔ txt/md/html/pdf）
+    # 文本族（txt/md/html → txt/md/html/pdf）
     actions.extend(_pair_actions(TEXT_FORMATS, TEXT_TARGETS, "text", "document"))
-    # Word 族（doc/docx → txt/md/html/pdf）
+    # Word 族（doc/docx/odt/rtf → txt/md/html/pdf）
     actions.extend(_pair_actions(WORD_FORMATS, WORD_TARGETS, "word", "document", label_src="Word"))
-    # 表格族（xlsx/xls/csv → csv/html/txt/pdf）
+    # 表格族（xlsx/xls/ods/csv/tsv → csv/tsv/xlsx/md/html/txt/pdf）
     actions.extend(_pair_actions(SHEET_FORMATS, SHEET_TARGETS, "sheet", "document"))
-    # 图片族：两两互转
-    for source in IMAGE_FORMATS:
-        for target in IMAGE_FORMATS:
+    # 图片族：可写格式两两互转 + 只读格式（psd/dds/jp2）转出 + 全部转 PDF
+    for source in tuple(IMAGE_FORMATS) + tuple(IMAGE_READONLY_FORMATS):
+        for target in IMAGE_TARGETS:
             if target == source:
                 continue
+            label = f"{_fmt_name(source)} 转 PDF" if target == "pdf" \
+                else f"{_fmt_name(source)} 转 {_fmt_name(target)}"
             actions.append(ConverterAction(
-                id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 转 {_fmt_name(target)}",
+                id=f"{source}-to-{target}", label=label,
                 source_formats=(source,), target_format=target, category="image", kind="image",
             ))
-    # 视频族内部互转
+    # 视频族内部互转 + 提取音频
     for source in VIDEO_FORMATS:
         for target in VIDEO_FORMATS:
-            if target == source:
-                continue
-            actions.append(ConverterAction(
-                id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 转 {_fmt_name(target)}",
-                source_formats=(source,), target_format=target, category="video", kind="media",
-            ))
-    # 音频族内部互转
-    for source in AUDIO_FORMATS:
-        for target in AUDIO_FORMATS:
-            if target == source:
-                continue
-            actions.append(ConverterAction(
-                id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 转 {_fmt_name(target)}",
-                source_formats=(source,), target_format=target, category="audio", kind="media",
-            ))
-    # 视频提取音频（mp3 / wav）
-    for source in VIDEO_FORMATS:
-        for target in ("mp3", "wav"):
+            if target != source:
+                actions.append(ConverterAction(
+                    id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 转 {_fmt_name(target)}",
+                    source_formats=(source,), target_format=target, category="video", kind="media",
+                ))
+        for target in ("mp3", "wav", "m4a", "aac"):
             actions.append(ConverterAction(
                 id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 提取 {_fmt_name(target)}",
                 source_formats=(source,), target_format=target, category="audio", kind="media",
             ))
-    # JSON（v1.0.0 新增：此前 json 没有任何可转换动作）
-    actions.extend([
-        ConverterAction(id="json-to-txt", label="JSON 转 TXT（美化）",
-                        source_formats=("json",), target_format="txt",
-                        category="document", kind="text"),
-        ConverterAction(id="json-to-csv", label="JSON 转 CSV（对象数组）",
-                        source_formats=("json",), target_format="csv",
-                        category="document", kind="text"),
-        ConverterAction(id="json-to-pdf", label="JSON 转 PDF",
-                        source_formats=("json",), target_format="pdf",
-                        category="document", kind="text"),
-    ])
-    # PDF 输入（v1.0.0 新增：此前 pdf 只能当输出，源文件加进来没有动作）
+    # 音频族内部互转
+    for source in AUDIO_FORMATS:
+        for target in AUDIO_FORMATS:
+            if target != source:
+                actions.append(ConverterAction(
+                    id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 转 {_fmt_name(target)}",
+                    source_formats=(source,), target_format=target, category="audio", kind="media",
+                ))
+    # 数据族（json/xml/ini/yaml 互转 + 文本/表格/PDF 输出）
+    actions.extend(_pair_actions(DATA_FORMATS, DATA_TARGETS, "data", "data"))
+    # 字幕族（srt↔vtt + 转纯文本）
+    actions.extend(_pair_actions(SUBTITLE_FORMATS, SUBTITLE_TARGETS, "subtitle", "subtitle"))
+    # 电子书族（txt/md/html → epub；epub → txt/md/html/pdf）
+    for target in EBOOK_FORMATS:
+        for source in TEXT_FORMATS:
+            actions.append(ConverterAction(
+                id=f"{source}-to-{target}", label=f"{_fmt_name(source)} 转 {_fmt_name(target)}",
+                source_formats=(source,), target_format=target, category="ebook", kind="ebook",
+            ))
+    for source in EBOOK_FORMATS:
+        for target in ("txt", "markdown", "html", "pdf"):
+            actions.append(ConverterAction(
+                id=f"{source}-to-{target}", label=f"EPUB 转 {_fmt_name(target)}",
+                source_formats=(source,), target_format=target, category="ebook", kind="ebook",
+            ))
+    # PDF 输入：抽取文本（pypdf）
     actions.extend([
         ConverterAction(id="pdf-to-txt", label="PDF 提取文本（TXT）",
                         source_formats=("pdf",), target_format="txt",
@@ -129,20 +192,19 @@ def _build_actions() -> list[ConverterAction]:
                         source_formats=("pdf",), target_format="markdown",
                         category="document", kind="pdf"),
     ])
-    # 归档族
-    archive_all = TEXT_FORMATS + WORD_FORMATS + SHEET_FORMATS + IMAGE_FORMATS + VIDEO_FORMATS + AUDIO_FORMATS + ARCHIVE_FORMATS
-    actions.extend([
-        ConverterAction(id="compress-to-zip", label="压缩为 ZIP", source_formats=archive_all,
-                        target_format="zip", category="archive", kind="archive"),
-        ConverterAction(id="compress-to-tar", label="压缩为 TAR", source_formats=archive_all,
-                        target_format="tar", category="archive", kind="archive"),
-        ConverterAction(id="zip-extract", label="ZIP 解压", source_formats=("zip",),
-                        target_format="zip", category="archive", kind="archive"),
-        ConverterAction(id="tar-extract", label="TAR 解压", source_formats=("tar",),
-                        target_format="tar", category="archive", kind="archive"),
-        ConverterAction(id="rar-extract", label="RAR 解压", source_formats=("rar",),
-                        target_format="rar", category="archive", kind="archive"),
-    ])
+    # 归档族：压缩（对除归档外的所有格式）与解压（每个归档格式）
+    for target, label in ARCHIVE_COMPRESS_TARGETS:
+        # 归档自身也能再打包成别的归档（zip → tar.gz 是常见需求），但不能压成同名格式
+        sources = tuple(fmt for fmt in COMPRESSIBLE_FORMATS + ARCHIVE_FORMATS if fmt != target)
+        actions.append(ConverterAction(
+            id=f"compress-to-{target}", label=label, source_formats=sources,
+            target_format=target, category="archive", kind="archive",
+        ))
+    for fmt, action_id in ARCHIVE_EXTRACT_IDS.items():
+        actions.append(ConverterAction(
+            id=action_id, label=f"{_fmt_name(fmt)} 解压", source_formats=(fmt,),
+            target_format=fmt, category="archive", kind="archive",
+        ))
     return actions
 
 

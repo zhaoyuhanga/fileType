@@ -36,6 +36,18 @@ from modu_workbench.ui_kit.toast import Toaster
 
 VIEWABLE_DOC_EXTENSIONS = {".txt", ".md", ".json", ".mp4"}
 
+# 动作面板的排序与分组：按"用户想干什么"排（文档 → 图片 → 音频 → 视频 → 数据 → 字幕 → 电子书 → 归档）
+_CATEGORY_ORDER = ("document", "image", "audio", "video", "data", "subtitle", "ebook", "archive")
+_CATEGORY_LABELS = {
+    "document": "文档", "image": "图片", "audio": "音频", "video": "视频",
+    "data": "数据", "subtitle": "字幕", "ebook": "电子书", "archive": "归档",
+}
+
+
+def _action_sort_key(action) -> tuple[int, str]:  # noqa: ANN001
+    index = _CATEGORY_ORDER.index(action.category) if action.category in _CATEGORY_ORDER else 99
+    return (index, action.label)
+
 
 class _ConvertWorker(QThread):
     started = Signal(str)
@@ -351,27 +363,36 @@ class ConvertBoardPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         formats = [row["format"] for row in self._rows if row["checked"] and row["format"] != "unknown"]
-        actions = common_actions(formats) if formats else []
-        self._mixed_mode = False
-        if not actions and formats:
-            # 勾选了多种格式且没有"共同动作"：退化为并集（每个文件用自己适用的动作）
-            actions = union_actions(formats)
-            self._mixed_mode = bool(actions)
+        # 始终列出「各自可用动作的并集」：
+        # 以前是"先取共同动作，交集为空才退化为并集"，但归档压缩对**所有**格式都适用，
+        # 于是混选 mp4+png+csv 时交集=8 个压缩动作，各格式自己的转换全被藏起来
+        # （截图验收时发现）。运行时不适用的文件会被跳过并写明原因，所以并集更符合直觉。
+        actions = union_actions(formats) if formats else []
+        actions = sorted(actions, key=_action_sort_key)
+        self._mixed_mode = len({fmt for fmt in formats}) > 1
         self._current_actions: list[ConverterAction] = actions
         self._action_buttons: list[QPushButton] = []
         for action in actions:
             button = QPushButton(action.label)
             button.setObjectName("actionOption")
             button.setProperty("active", False)
+            button.setToolTip(f"{_CATEGORY_LABELS.get(action.category, action.category)} · 输出 .{action.target_format}")
             button.clicked.connect(lambda _=False, a=action: self._select_action(a))
             self._actions_box.addWidget(button)
             self._action_buttons.append(button)
         self._selected_action = next((a for a in actions if a.id == previous_id), actions[0] if actions else None)
-        self._action_hint.setText(
-            "" if actions else
-            ("勾选的文件没有可用动作（可能是未知格式）；先右侧「添加文件」选择受支持的类型"
-             if not formats else "已选格式暂无可用动作")
-        )
+        if not actions:
+            self._action_hint.setText(
+                "勾选的文件没有可用动作（可能是未知格式）；先右侧「添加文件」选择受支持的类型"
+                if not formats else "已选格式暂无可用动作"
+            )
+        elif self._mixed_mode:
+            self._action_hint.setText(
+                f"已勾选 {len(set(formats))} 种格式：下面列出各自可用的动作，"
+                "运行时不适用的文件会自动跳过（并在状态列写明原因）"
+            )
+        else:
+            self._action_hint.setText(f"「{format_label(formats[0])}」可用动作（共 {len(actions)} 个）")
         if self._selected_action is not None and self._action_buttons:
             for button, candidate in zip(self._action_buttons, self._current_actions):
                 active = candidate.id == self._selected_action.id

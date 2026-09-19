@@ -10,34 +10,50 @@ import threading
 import time
 from pathlib import Path
 
-AUDIO_TARGETS = {"m4a", "mp3", "wav", "flac", "aac", "ogg", "opus", "wma"}
+AUDIO_TARGETS = {"m4a", "mp3", "wav", "flac", "aac", "ogg", "opus", "wma",
+                 "m4b", "aiff", "amr", "ac3"}
 
-# 视频转换目标（墨软影视「视频格式转换」使用）
-VIDEO_TARGETS = {"mp4", "mkv", "mov", "avi", "webm", "flv", "ts", "gif"}
+# 视频转换目标（墨软影视「视频格式转换」也复用这里）
+VIDEO_TARGETS = {"mp4", "mkv", "mov", "avi", "webm", "flv", "wmv", "m4v",
+                 "mpg", "mpeg", "ts", "3gp", "ogv", "gif"}
 
 # 目标音频格式 → ffmpeg 编码器（未列出者使用 ffmpeg 默认编码器）
 AUDIO_CODECS = {
     "mp3": "libmp3lame",
     "m4a": "aac",
+    "m4b": "aac",
     "aac": "aac",
     "flac": "flac",
     "ogg": "libvorbis",
     "opus": "libopus",
     "wma": "wmav2",
+    "aiff": "pcm_s16be",
+    "amr": "libopencore_amrnb",
+    "ac3": "ac3",
 }
 # 目标视频格式 → ffmpeg 编码器（None 表示交给 ffmpeg 默认，通常更兼容）
 VIDEO_CODECS: dict[str, str | None] = {
     "mp4": "copy",      # 优先不重编码（快且无损），失败由调用方重试
     "mkv": "copy",
     "mov": "copy",
+    "m4v": "copy",
+    "ts": "copy",
     "avi": "mpeg4",
     "webm": "libvpx-vp9",
     "flv": "flv",
-    "ts": "copy",
+    "wmv": "wmv2",
+    "mpg": "mpeg2video",
+    "mpeg": "mpeg2video",
+    "3gp": "h263",
+    "ogv": None,        # libtheora 不一定随构建提供，交给 ffmpeg 默认
     "gif": None,
 }
 # 需要显式指定容器（避免 ffmpeg 猜错）
-CONTAINER_FORMATS = {"aac": "adts", "webm": "webm", "flv": "flv", "ts": "mpegts", "m4a": "ipod"}
+CONTAINER_FORMATS = {
+    "aac": "adts", "webm": "webm", "flv": "flv", "ts": "mpegts", "m4a": "ipod", "m4b": "ipod",
+    "ac3": "ac3", "wmv": "asf", "mpg": "mpeg", "mpeg": "mpeg", "3gp": "3gp", "ogv": "ogg",
+    "aiff": "aiff", "amr": "amr",
+}
 
 # 目标为纯音频时，从视频里提取音轨
 AUDIO_ONLY_TARGETS = AUDIO_TARGETS | {"mp3"}

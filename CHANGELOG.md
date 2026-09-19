@@ -3,6 +3,58 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v1.0.4 — 墨软转换：把所有能转的格式都补上
+
+反馈：「墨软转换，所有已知可以转换的文件格式都添加进来」。格式与动作都是**数据**
+（`formats.py` 定义格式、`registry.py` 批量生成动作），所以这次是扩表 + 补齐实现。
+
+支持格式从 **24 种扩到 68 种**，动作从 **约 200 条扩到 592 条**。新增能力一览：
+
+| 族 | 新增 |
+|---|---|
+| 图片 | **图片 → PDF**（动图逐帧多页）；TIFF / ICO / TGA / PCX / PPM 互转；只读 PSD / DDS / JP2 也能转出 |
+| 表格 | **CSV / TSV → XLSX**（以前只能单向读出）、**表格 → Markdown**、ODS 输入（走 LibreOffice）、TSV 输入输出 |
+| 数据 | xml / ini / yaml ↔ json / csv / txt / md / html / pdf（**新增 PyYAML 依赖**） |
+| 文档 | ODT 文本抽取（**纯标准库读 content.xml，不依赖 LibreOffice**）、RTF 文本抽取 |
+| 字幕 | srt ↔ vtt、字幕 → 纯文本 |
+| 电子书 | epub → txt / md / html / pdf；txt / md / html → epub |
+| 音视频 | 视频补 MKV / WEBM / FLV / WMV / M4V / MPG / MPEG / TS / 3GP / OGV；音频补 M4B / AIFF / AMR / AC3；视频提取音频扩到 mp3 / wav / m4a / aac |
+| 归档 | tar.gz / tar.bz2 / tar.xz / gz / bz2 / xz 压缩与解压（标准库，解压带路径穿越防护） |
+
+### 关键实现细节（都踩过坑）
+
+- **ICO 的尺寸会漂**：Pillow 默认会写出一整套 16/24/32… 方形尺寸，32×24 的图转出来变成 24×18。
+  现在显式指定单一尺寸（方形、≤256）；
+- **PDF 渲染没有 QApplication 会直接崩进程**（实测 0xC0000409，不是抛异常）：
+  `pdf_out.render_text_pdf` 现在先检查并抛出可读的中文错误，测试也补上了 `qapp` 夹具；
+- **单文件压缩保留源文件全名**：`报告.txt` → `报告.txt.gz`（bz2/xz 格式本身没有文件名字段，
+  只有这样才能把原名带回去）；gz 另外把名字写进 RFC 1952 头的 FNAME
+  —— 注意标准库 gzip 会**静默丢弃非 Latin-1 文件名**（中文必丢），因此按 UTF-8 字节写入、读取端反向解码；
+- **动作 id 必须唯一**：tar / tar.gz 曾共用 `tar-extract`，并集去重后会导致其中一个文件被"跳过"；
+  现在每个归档格式一个独立 id，并有测试锁住"id 唯一、目标有扩展名、每个格式至少一个动作"。
+
+### 测试
+
+- 新增 `tests/board_convert/test_convert_format_coverage.py`：注册表不变量（id 唯一、
+  每个登记格式都有动作、目标都有扩展名映射、扩展名别名往返）；
+- 新增 `tests/board_convert/test_convert_formats_ext.py`：图片新格式 + 图片转 PDF（含动图多页）、
+  CSV↔XLSX、表格转 Markdown、ODT/RTF 文本抽取；
+- 新增 `tests/board_convert/test_convert_archive_ext.py`（26 条）：gz/bz2/xz 往返、
+  gz 中文名进头、解压不覆盖、tar 四种变体、`../` 路径穿越拦截；
+- 数据/字幕/电子书三族另有专项测试（见 `tests/board_convert/`）。
+
+### 发布产物（v1.0.4，本机构建）
+
+| 产物 | 大小 | SHA256 |
+|---|---|---|
+| `dist/墨软工作台-Setup-1.0.4.exe`（NSIS 安装包） | 151.3 MB | `1B5670106C9FDA6A762095E796B1F5530A82FC8DA78872138D5C553D7A923C14` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.5 MB | `C11463D36B490B9AD5EFC733E06A2CA05436688EB3F028A62F61F6F0AA841E3D` |
+
+- onedir 目录合计约 382.9 MB（比 v1.0.3 多约 0.4 MB，来自新增的 PyYAML）；
+- 构建三道自检全部通过：源码自检 14/14、exe 关键字模块 15/15、打包产物自检全 `true`；
+- 已确认 `yaml` 与 `core.convert.{data_io,subtitle_io,ebook_io}` 真的进了包（在 exe 字节流里检索到）；
+- 两个产物文件属性里 `FileVersion` / `ProductVersion` = **1.0.4**。
+
 ## v1.0.3 — 使用反馈修复（影视下载/清晰度 · 转换输出 · 图库导航 · 更多片源）
 
 针对第二轮五条使用反馈的修复。图 1 的报错（`Error initializing the muxer for …\ffmpeg.exe`）

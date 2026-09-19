@@ -47,6 +47,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 | v0.3.x | 731 MB | — | 含 QtWebEngine + 内嵌 React 前端 |
 | v1.0.0 | **371 MB** | 150 MB | 移除 QtWebEngine（约 340MB）与 Qml/Quick/Pdf/虚拟键盘（约 18MB） |
 | v1.0.2 | 382.5 MB | 151 MB | 控件样式补齐 + 在线曲目质量过滤；打包环境 Python 3.12.10 / PySide6 6.11.2 / PyInstaller 6.22.3 |
+| v1.0.4 | 382.9 MB | 151.3 MB | 墨软转换格式扩到 68 种（+PyYAML 约 0.4MB） |
 
 精简原则：只删除**已用二进制导入表核实无依赖**的 Qt 模块；
 每次精简后必须重跑打包产物自检（`multimedia_playback` 会真实播放一段音频，是最有效的回归）。
