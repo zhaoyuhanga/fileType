@@ -47,13 +47,28 @@
 
 | 产物 | 大小 | SHA256 |
 |---|---|---|
-| `dist/墨软工作台-Setup-1.0.4.exe`（NSIS 安装包） | 151.3 MB | `1B5670106C9FDA6A762095E796B1F5530A82FC8DA78872138D5C553D7A923C14` |
-| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.5 MB | `C11463D36B490B9AD5EFC733E06A2CA05436688EB3F028A62F61F6F0AA841E3D` |
+| `dist/墨软工作台-Setup-1.0.4.exe`（NSIS 安装包） | 151.3 MB | `7F7977A5411B219CD45060E93D85120FB310AD56E0ACB40A1FF130C6C130E1A8` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.5 MB | `CC24E510048869395CC4235C27D870D9ED8409FCC1555E9BADB38882182D8FB9` |
 
 - onedir 目录合计约 382.9 MB（比 v1.0.3 多约 0.4 MB，来自新增的 PyYAML）；
 - 构建三道自检全部通过：源码自检 14/14、exe 关键字模块 15/15、打包产物自检全 `true`；
 - 已确认 `yaml` 与 `core.convert.{data_io,subtitle_io,ebook_io}` 真的进了包（在 exe 字节流里检索到）；
 - 两个产物文件属性里 `FileVersion` / `ProductVersion` = **1.0.4**。
+
+### 缺依赖的动作改为「置灰 + 说明原因」
+
+有些格式依赖外部能力，不是每台机器都有：**ODS / 旧版 DOC 需要 LibreOffice**、
+**音视频需要 ffmpeg**（`amr` 还要求 ffmpeg 带 `libopencore_amrnb` 编码器）、
+**RAR 解压需要 unrar/7z**、**yaml 需要 PyYAML**。
+
+以前这些动作照样列出来，用户点了才拿到报错。现在新增 `core/convert/capabilities.py` 做能力探测：
+
+- 缺依赖的动作**置灰**，悬停写明缺什么（例如「需要系统提供 unrar / 7z 才能解压 RAR」）；
+- 面板提示里写明「其中 N 个因缺少依赖已置灰」；全部不可用时直接说明第一个原因；
+- **默认选中的改成第一个可用动作** —— 否则用户一进来点「开始转换」就是注定失败的；
+- 探测逻辑独立成模块，测试用替身覆盖（不依赖本机到底装了什么）：
+  `tests/board_convert/test_convert_capabilities.py` 8 条，含一条界面契约测试
+  （按钮禁用 + tooltip 带原因 + 默认选中可用动作）。
 
 ## v1.0.3 — 使用反馈修复（影视下载/清晰度 · 转换输出 · 图库导航 · 更多片源）
 

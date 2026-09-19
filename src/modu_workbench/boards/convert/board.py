@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.convert import engine as convert_engine
+from modu_workbench.core.convert.capabilities import blocked_reason
 from modu_workbench.core.convert.formats import TARGET_EXTENSION, format_from_extension, format_label
 from modu_workbench.core.convert.registry import (
     ConverterAction,
@@ -372,27 +373,46 @@ class ConvertBoardPage(QWidget):
         self._mixed_mode = len({fmt for fmt in formats}) > 1
         self._current_actions: list[ConverterAction] = actions
         self._action_buttons: list[QPushButton] = []
+        blocked: list[str] = []
         for action in actions:
+            reason = blocked_reason(action)
             button = QPushButton(action.label)
             button.setObjectName("actionOption")
             button.setProperty("active", False)
-            button.setToolTip(f"{_CATEGORY_LABELS.get(action.category, action.category)} · 输出 .{action.target_format}")
+            tip = f"{_CATEGORY_LABELS.get(action.category, action.category)} · 输出 .{action.target_format}"
+            if reason:
+                # 缺依赖的动作**置灰 + 写明原因**，而不是让用户点了才拿到报错
+                button.setEnabled(False)
+                button.setToolTip(f"{tip}\n⚠ {reason}")
+                blocked.append(reason)
+            else:
+                button.setToolTip(tip)
             button.clicked.connect(lambda _=False, a=action: self._select_action(a))
             self._actions_box.addWidget(button)
             self._action_buttons.append(button)
-        self._selected_action = next((a for a in actions if a.id == previous_id), actions[0] if actions else None)
+        self._blocked_reasons = blocked
+        available = [a for a in actions if blocked_reason(a) is None]
+        # 默认选中第一个**可用**动作：否则用户一进来点「开始转换」就是注定失败的
+        self._selected_action = next(
+            (a for a in actions if a.id == previous_id and blocked_reason(a) is None),
+            available[0] if available else None,
+        )
         if not actions:
             self._action_hint.setText(
                 "勾选的文件没有可用动作（可能是未知格式）；先右侧「添加文件」选择受支持的类型"
                 if not formats else "已选格式暂无可用动作"
             )
-        elif self._mixed_mode:
+        elif not available:
             self._action_hint.setText(
-                f"已勾选 {len(set(formats))} 种格式：下面列出各自可用的动作，"
-                "运行时不适用的文件会自动跳过（并在状态列写明原因）"
+                f"⚠ 这些动作在当前机器上都缺少依赖：{blocked[0]}"
             )
         else:
-            self._action_hint.setText(f"「{format_label(formats[0])}」可用动作（共 {len(actions)} 个）")
+            scope = (f"已勾选 {len(set(formats))} 种格式：下面列出各自可用的动作，"
+                     "运行时不适用的文件会自动跳过（并在状态列写明原因）"
+                     if self._mixed_mode else f"「{format_label(formats[0])}」可用动作（共 {len(actions)} 个）")
+            if blocked:
+                scope += f"；其中 {len(blocked)} 个因缺少依赖已置灰（悬停看原因）"
+            self._action_hint.setText(scope)
         if self._selected_action is not None and self._action_buttons:
             for button, candidate in zip(self._action_buttons, self._current_actions):
                 active = candidate.id == self._selected_action.id
