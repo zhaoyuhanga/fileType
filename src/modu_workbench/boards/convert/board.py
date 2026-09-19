@@ -200,6 +200,13 @@ class ConvertBoardPage(QWidget):
         # 分类筛选：格式铺开后动作很多（单个 mp4 24 个、混选可到 50 个），先按族收窄。
         # 芯片只建一次、只更新可用状态与计数 —— 若每次重建都在点击信号里销毁按钮，
         # 会踩到 shiboken 的"点击处理中销毁发送者"崩溃（图库侧树节点踩过同样的坑）。
+        # 搜索框：动作多起来以后（混选可达 50 个）按名字找比按族翻更快。
+        # 只重排动作按钮、不重建输入框本身，所以 textChanged 里直接重建是安全的。
+        self._action_search = QLineEdit()
+        self._action_search.setPlaceholderText("搜索动作…（例如「转 PDF」「压缩」「epub」）")
+        self._action_search.setClearButtonEnabled(True)
+        self._action_search.textChanged.connect(lambda _text: self._rebuild_action_list())
+        right_layout.addWidget(self._action_search)
         self._category_filter = ""
         self._chip_buttons: dict[str, QPushButton] = {}
         chip_row = QHBoxLayout()
@@ -400,6 +407,9 @@ class ConvertBoardPage(QWidget):
             chip.setText(f"{_CATEGORY_LABELS[chip_key]} {total}" if total else _CATEGORY_LABELS[chip_key])
         if self._category_filter:
             actions = [a for a in actions if a.category == self._category_filter]
+        needle = self._action_search.text().strip().lower() if hasattr(self, "_action_search") else ""
+        if needle:
+            actions = [a for a in actions if needle in a.label.lower()]
         self._mixed_mode = len({fmt for fmt in formats}) > 1
         self._current_actions: list[ConverterAction] = actions
         self._action_buttons: list[QPushButton] = []
@@ -428,10 +438,13 @@ class ConvertBoardPage(QWidget):
             available[0] if available else None,
         )
         if not actions:
-            self._action_hint.setText(
-                "勾选的文件没有可用动作（可能是未知格式）；先右侧「添加文件」选择受支持的类型"
-                if not formats else "已选格式暂无可用动作"
-            )
+            if self._category_filter or needle:
+                self._action_hint.setText("当前筛选下没有动作：换个分类或清空搜索试试")
+            else:
+                self._action_hint.setText(
+                    "勾选的文件没有可用动作（可能是未知格式）；先右侧「添加文件」选择受支持的类型"
+                    if not formats else "已选格式暂无可用动作"
+                )
         elif not available:
             self._action_hint.setText(
                 f"⚠ 这些动作在当前机器上都缺少依赖：{blocked[0]}"

@@ -97,6 +97,27 @@ def test_capability_summary_lists_all_four() -> None:
         assert item.label and item.hint
 
 
+def test_action_search_filters_by_name(qapp, tmp_path) -> None:
+    """搜索框按动作名收窄（混选 50 个动作时的主要找法）。"""
+    from modu_workbench.boards.convert.board import ConvertBoardPage
+
+    video = tmp_path / "演示.mp4"
+    video.write_bytes(b"\x00" * 64)
+    page = ConvertBoardPage(output_dir=str(tmp_path / "out"))
+    try:
+        page._append_paths([str(video)])
+        page._action_search.setText("压缩")
+        assert page._action_buttons, "「压缩」应当能搜到归档动作"
+        assert all("压缩" in button.text() for button in page._action_buttons)
+        page._action_search.setText("不存在的动作名")
+        assert not page._action_buttons
+        assert "筛选" in page._action_hint.text()
+        page._action_search.setText("")
+        assert len(page._action_buttons) >= 10
+    finally:
+        page.close()
+
+
 def test_category_chip_filters_the_action_panel(qapp, tmp_path) -> None:
     """分类芯片把面板收窄到某一族，点「全部」恢复（动作多了以后的主要找法）。"""
     from modu_workbench.boards.convert.board import ConvertBoardPage

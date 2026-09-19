@@ -47,8 +47,8 @@
 
 | 产物 | 大小 | SHA256 |
 |---|---|---|
-| `dist/墨软工作台-Setup-1.0.4.exe`（NSIS 安装包） | 151.3 MB | `DFCCD3632F2C7857EA3781E272035FBA0EDDC3360EF6F6C590442611C200CA3F` |
-| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.5 MB | `825B81E5601B33D3CA2151B344F3DE47CAF1AFC80959CA32822EA90D9B1F23F7` |
+| `dist/墨软工作台-Setup-1.0.4.exe`（NSIS 安装包） | 151.3 MB | `5C5E17053CA4F48E7C2608BAA9CD9E292CA864DCE5A0027ACD1C1E779F2387E8` |
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 11.5 MB | `0FAE1D30B1425DCC941588690499369A0251AA3C08937D2EB92DEAB252A48809` |
 
 - onedir 目录合计约 382.9 MB（比 v1.0.3 多约 0.4 MB，来自新增的 PyYAML）；
 - 构建三道自检全部通过：源码自检 14/14、exe 关键字模块 15/15、打包产物自检全 `true`；
