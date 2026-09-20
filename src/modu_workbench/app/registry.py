@@ -21,10 +21,15 @@ BOOK_BOARD = BoardSpec(
 CONVERT_BOARD = BoardSpec(
     key="convert",
     title="墨软转换",
-    tagline="文档 / 表格 / 图片 / 媒体 / 归档",
-    description="本地离线转换：文本互转、PDF、图片、归档与查看编辑（txt/md/json/mp4）；Word/Excel、音视频能力陆续升级中。",
+    tagline="文本 / 文档 / 表格 / 图片 / 音视频 / 字幕 / 电子书 / 归档",
+    description=(
+        "本地离线转换：68 种格式、592 个动作 —— 文本与数据互转（txt/md/json/xml/yaml/ini/csv）、"
+        "文档与表格（docx/xlsx/odt/rtf/pdf）、图片（含图片转 PDF）、音视频、字幕（srt/vtt）、"
+        "电子书（epub）与压缩解压（zip/tar/gz/bz2/xz），并可查看编辑与批量处理。"
+        "音视频依赖随包 ffmpeg、Office 高保真依赖 LibreOffice，缺依赖的动作会置灰并说明原因。"
+    ),
     icon="🔄",
-    phase="基础可用",
+    phase="可用",
     page=convert_board.ConvertBoardPage,
 )
 
