@@ -27,7 +27,7 @@ Thumbs.db
 out-dist/
 out-build/
 
-# Í¼±êÔ¤ÀÀ£¨ÓÉ packaging/icon_preview.py Éú³É£©
+# å›¾æ ‡é¢„è§ˆå›¾ï¼ˆç”± packaging/icon_preview.py ç”Ÿæˆï¼‰
 .icon_preview.png
 .icon_installer_preview.png
 

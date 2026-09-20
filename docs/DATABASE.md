@@ -9,7 +9,7 @@
 | 决策 | 选择 | 理由 |
 |---|---|---|
 | 库数量 | **单库** `modu.db` | 备份/迁移只需复制一个文件；跨板块（历史/统计/收藏）可联表查询 |
-| 隔离方式 | **板块前缀分表**（`book_`/`music_`/`video_`/`gallery_`/`llm_`） | 单库仍能一眼看出归属；板块删除/搬迁互不影响 |
+| 隔离方式 | **板块前缀分表**（`book_`/`music_`/`video_`/`gallery_`/`doc_`/`llm_`） | 单库仍能一眼看出归属；板块删除/搬迁互不影响 |
 | 设置 | 统一 `app_settings`，键带命名空间（`music/sources/enabled`） | 免去每个板块各建一张 key/value 表；板块读写由 `settings_namespace` 自动加前缀 |
 | 结构演进 | 版本化迁移（`schema_migrations`） | 老用户升级可平滑；`CREATE TABLE IF NOT EXISTS` 无法改列 |
 | 旧数据 | 首次启动自动导入 5 个旧分库，旧文件改名 `*.imported.bak` | 不删用户数据，可人工回退 |
@@ -17,7 +17,7 @@
 | 主键 | `INTEGER PRIMARY KEY AUTOINCREMENT` | 行号稳定，便于历史/收藏长期引用 |
 | 外键 | 显式声明 + `PRAGMA foreign_keys=ON` | 删除图片/视频/书时级联清理关联行 |
 
-数据位置：`%APPDATA%\ModuWorkbench\modu.db`（`MODU_DATA_DIR` 可覆盖，媒体文件在 `music/` `video/` `gallery/` 子目录）。
+数据位置：`%APPDATA%\ModuWorkbench\modu.db`（`MODU_DATA_DIR` 可覆盖，媒体文件在 `music/` `video/` `gallery/`，文档板块的产出与兜底目录在 `document/`）。
 连接参数：`journal_mode=WAL`、`foreign_keys=ON`，每个板块持有一条连接（`core/platform/db.SqliteStore`）。
 
 ## 2. 平台表
@@ -69,6 +69,19 @@
 | `gallery_edits` | 非破坏性编辑步骤栈 `steps_json` |
 | `gallery_ai_tasks` | AI 任务队列：`kind` `state` `progress` `result_path` `message` |
 
+### 墨软文档（`doc_`，迁移 v2）
+
+| 表 | 关键字段 |
+|---|---|
+| `doc_documents` | `path`(唯一) `title` `format` `category` `size_bytes` `blocks` `words` `pages` `favorited` `tags` `meta_json` `added_at` `opened_at` `edited_at`；索引 `idx_doc_documents_opened` |
+| `doc_versions` | **版本快照**：`document_id` `path` `label` `kind`(`open`/`save`/`beautify`/`merge`/`loop`/`manual`) `round_index` `note` `ir_json`（`DocumentIR` 的 JSON）`created_at`；索引 `idx_doc_versions_doc`；每篇默认保留 40 个 |
+| `doc_merge_reports` | 两个文档合并的报告：`main_path` `other_path` `mode` `output_path` `summary` `report_json` `ai_used` `created_at`；索引 `idx_doc_merge_time` |
+| `doc_ai_calls` | AI 调用日志：`document_id` `kind` `role` `model` `prompt_preview` `output_preview` `tools` `ok` `detail` `duration_ms` `est_cost` `masked` `created_at`；索引 `idx_doc_ai_time` |
+| `doc_audit` | 审计日志：`action`（open/edit/export/beautify/merge/split/loop/rollback/mask/ocr…）`target` `detail` `actor` `created_at`；索引 `idx_doc_audit_time` |
+
+> 板块设置（输出目录、默认模板、AI 权限、脱敏规则、循环上限）走 `app_settings` 的 `document/` 命名空间，
+> 不单独建表 —— 与其它板块一致。
+
 ### 大模型（`llm_`）
 
 | 表 | 关键字段 |
@@ -88,6 +101,9 @@ store = SqliteStore(app_db_path())          # 自动 migrate 到最新版本
 # 2) 在 migrations/__init__.py 的 MIGRATIONS 注册
 # 3) tests/test_db_schema.py + docs/DATABASE.md 同步
 ```
+
+已发布迁移：`v1_initial`（单库初始结构）、`v2_document`（墨软文档板块的 `doc_*` 五张表，
+纯增量、可重复执行、不需要数据搬迁）。
 
 旧分库导入（`core/platform/legacy.py`，首次启动执行一次）：
 

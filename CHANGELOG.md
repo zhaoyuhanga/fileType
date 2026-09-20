@@ -3,6 +3,181 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v1.0.5 — 第六大板块：墨软文档（含三批自查修复）
+
+新增第六大板块「墨软文档」（一站式文档工作台），并新增 `doc_*` 五张表（迁移 `v2_document`，
+纯增量、可重复执行）。**不改动任何既有板块的代码、数据与界面**：新板块以一个独立包接入
+（`boards/document/` + `core/document/`），在 `ACTIVE_BOARDS` 中追加在末尾，首页与顶栏自动出现。
+
+> 本版是"先做出来、再自查补齐"的一版：初版交付后连着做了三批自查修复
+> （设置接线与导出/合并安全 → 图片不丢/人工确认/打印/布尔设置 → Word 文字不丢/标题不凭空造/
+> Markdown·HTML 图片/素材缓存管理），并在 v1.0.5 把版本号、安装包与文档一并收尾。
+
+### 新增能力（对应需求 6.2 ~ 6.8）
+
+| 需求 | 落地 |
+|---|---|
+| 6.2 格式查看编辑 | **33 种格式**的能力矩阵（`core/document/formats.py`）：DOCX/DOC/PDF/RTF/ODT、TXT、MD、HTML、EPUB、XLSX/XLS/ODS/CSV/TSV、PPTX/PPT/ODP、WPS/ET/DPS、JSON/XML/YAML/INI、PNG/JPG/…、LOG/SQL/代码。查看 + 源码/段落/单元格编辑 + 只读预览 + 大纲/查找替换（正则）/文档体检/版本历史；**多标签**（同时开多份、保留未保存编辑）、**分屏与 Markdown 实时预览**、**书签**、**批注**（Word 原生批注 / Excel 批注表 / 其它格式附录 / PDF 真实标注）、**自动保存**、**打印**、**OCR**（图片与扫描件 PDF → 可编辑文本）、**导出图片**（任意文档 → PNG）；**PDF 工具箱**（拆分/合并/压缩/加密/解密/旋转/逐页水印/表单列出与填写/批注读写/转图片） |
+| 6.3 格式美化 | 7 套模板（通用/公文/报告/论文/合同/简历/会议纪要）+ 样式统一 + 表格美化 + 多级自动编号 + 目录（Word TOC 域）+ 品牌色/页眉页脚/页码；**先预览每一处改动再应用** |
+| 6.4 自动填充与计算 | 序列/日期/工作日/月份/星期/中文序号/文本序号/公式填充；**智能填充**按示例反推规则（拆姓名、提取号码/邮箱/金额、归类）；**Excel 子集公式引擎**（40+ 函数、跨表引用、数组公式、循环引用检测）；统计/分组/透视/图表数据/单位换算/AI 生成公式；**表格排序与筛选**（含还原）与导出 Excel 的冻结表头/条件格式/数据验证 |
+| 6.5 AI 模型与工具调用 | 复用「大模型」多配置与降级；7 类场景（润色/摘要/翻译/扩写/缩写/纠错/改写）；**51 个工具**（读取/解析/写入/替换/排版/计算/表格/OCR/翻译/导出/合并/拆分/对比/摘要/脱敏/水印/批注/PDF 页面操作/模板库），AI 与界面共用同一套实现；调用日志（模型/角色/工具/耗时/成本/脱敏次数），工具调用同时写审计 |
+| 6.6 两个文档合并（P0） | 七种模式（追加/章节/表格按行·列·主键/主从/对比）+ 同格式与跨格式 + 语义去重 + 术语统一 + 风格统一 + 过渡段 + 目录 + 摘要 + 冲突扫描 + 差异报告 + 版本快照；**无大模型也能合并**（本地规则），报告里标注哪些内容由 AI 生成或修改 |
+| 6.7 AI 循环美化 | 分析 → 计划 → 工具调用 → 五维评分（格式/语言/可读性/事实/目标）→ 未达标继续；停止条件：质量阈值/最大轮次/无可改进项/用户停止/成本/时间；每轮 diff、工具日志、版本快照，可回滚到任意一轮 |
+| 6.8 权限与安全 | 默认本地优先（不允许云端上传）；上传前脱敏手机号/身份证/银行卡/邮箱/金额/IP/车牌/姓名；导出水印与追踪标识；审计日志（打开/编辑/导出/美化/合并/回滚/脱敏/OCR/批注/工具调用） |
+| 6.11 优先级（P1 项） | 循环美化、跨格式合并、OCR（图片与扫描 PDF）、差异报告、**PDF 工具箱**、**本地模板库**（保存/导入/导出/删除，JSON 可分享）均已实现；P2（多人协作/实时协同/插件生态/联网模板市场）未做，见 `docs/BOARDS/document.md` 第 8 节 |
+| 6.9 非功能 | **性能**：表格上限截断 + 大文档预览保护（>800 块或 >40 万字只渲染前 800 块，保存/导出仍是全文），实测 1.5 MB Markdown 解析 0.1s、2 万行 CSV 0.03s、导出 Word 1.6s（有预算测试挡回归）；**可靠**：自动保存 + 版本快照按上限清理 + 回滚只改内存；**扩展**：**插件目录**（`register(api)` 注册自定义工具，与内置同权，默认关闭、失败不致命）+ 工具/格式/模板都是数据；**易用**：13 个窗口级快捷键 + `Alt+1~6` 切页签 + 「⌨ 快捷键」说明窗；**可访问**：关键控件设 `accessibleName`/`accessibleDescription` |
+
+### 实现要点（踩过的坑）
+
+- **统一中间结构（IR）**：新增一种格式只需扩 `parser.py`，美化/合并/计算/循环全部复用；
+- **公式引擎的解析状态必须每层保存恢复** —— 单元格里也是公式时会递归求值，
+  不保存就会把外层公式的 token 流冲掉（表现为莫名其妙的"缺少 )"，第一次实现就踩到了）；
+- **自动编号要跳过文档标题**，否则"年度报告"会变成"1 年度报告"；标题被跳过后章节号从 1 起，
+  下级标题得到 `1.1` 而不是 `0.1`；
+- **合并过程中的冲突不能被覆盖**：合并模式记录的问题（找不到章节、表格模式无表可并）与
+  两稿冲突必须**累加**进报告；
+- **合并的「生成目录」不能只靠模板**：模板默认值（"通用"）本身不含目录，
+  直接按模板美化会把 `add_toc` 吞掉，必须显式覆盖；
+- **AI 文本工具必须真的写回文档**：逐段调用模型并替换正文（保留标题与表格结构），
+  每段留一条 Change，每轮只处理前 N 段并提示"还有 N 段，再跑一轮即可覆盖"；
+  工具内部漏了常量导入会被 `call_tool` 兜成"失败"，表现为"勾了 AI 却什么都没发生"——
+  验收测试专门盯这一条；
+- **权限实时读取**：`DocumentAi` 通过 `permissions_provider` 每次调用前读设置，
+  设置页改完立即生效，不必重启或重建板块单例；
+- **保存与导出的覆盖语义不同**：`DocumentLibrary.save` 默认覆盖原文件
+  （否则用户点"保存"会得到一个 `(1)` 副本），防覆盖加序号只用于导出/转换输出；
+- **pypdf 的三个坑**：密码错误时 `decrypt()` 返回 0 而不是抛异常（必须检查返回值）；
+  页面要 `clone_from` 挂到新 writer 后再改（否则报 "pages not assigned to a writer" 弃用警告）；
+  `compress_identical_objects` 的参数在 7.x 改名（新旧参数名都要兼容）；
+- **水印覆盖层必须与页面同尺寸**：pypdf 的 `merge_page` 不会自动缩放，
+  尺寸不一致会错位，所以用 Qt 按页尺寸生成覆盖层并缓存；
+- 只读工作簿读取（openpyxl `read_only=True`）没有 `freeze_panes` 等属性，必须 `getattr` 兜底；
+- **测试里的 `deleteLater()` 不会自动执行**：`processEvents()` 默认不派发 DeferredDelete，
+  页面因此越积越多，`setStyleSheet` 每次都要重新 polish 所有存活控件 ——
+  界面测试从 216 秒降到 18 秒就是显式派发 DeferredDelete 换来的；
+- **打包脚本必须保留 UTF-8 BOM**：Windows PowerShell 5.1（文档推荐的 `powershell -File`）
+  不认没有 BOM 的 UTF-8 脚本，中文按 ANSI 解码后引号被吃掉，直接报"Missing closing ')'" ——
+  实测踩过一次（编辑器保存丢 BOM 即复现），现在 `test_spec_integrity.py` 专门锁住这两个 `.ps1` 与 `.nsi`；
+- **插件加载的"注册钩子"不能提前撤**：先给 `api.register_tool` 打补丁、`exec` 完就恢复，
+  会导致随后调用的 `register(api)` 拿到原始实现、注册结果全丢（表现为"插件加载成功但没注册任何工具"）；
+  改成 `PluginApi.register_tool` 是真正的实例方法（内部调模块级 `register_tool`）后就没有这个时序坑；
+- **大文档要有预览保护**：万级块整篇渲染成 HTML 会让界面卡住，因此预览只渲染前 800 块
+  并明确提示"保存/导出仍是全文"，而不是让用户以为文档被截断了。
+
+### 修复：设置项接线与导出/合并的数据安全（本轮）
+
+自查发现一类"界面已经承诺、底层没接线"的问题，以及两个会造成重复/误覆盖的行为问题，已全部修掉：
+
+| 问题 | 原因 | 修复 |
+|---|---|---|
+| 设置页「版本保留」无效 | `document/max_versions` 只被设置页自己读写，`prune_versions` 用写死的常量 40 | `DocumentStorage.version_keep_provider` 注入读取器（`boards/document/context.py`），裁剪时实时取设置值；非法值退回常量 |
+| 设置页「AI 循环美化默认值」无效 | `loop_page` 用硬编码初值 3 / 0.9 / 0 | 面板构造时读 `document/max_rounds`、`quality_threshold`、`max_cost`（只覆盖用户保存过的键） |
+| 设置页「默认美化参数」到不了美化面板 | `context.default_options()` 只喂给 `library`，面板初值一律取模板默认 | `BeautifyPanel._apply_settings_defaults()`：先按设置的默认模板套模板参数，再用设置里**显式保存过**的字体/字号/品牌色/开关覆盖（没保存过的项保持模板默认，避免把"公文体"的字体字号冲成通用值） |
+| 标题重复 | `ir.title` 与首个 H1 同名（文件名当标题是常态）时，HTML/PDF/DOCX 既写标题行又写标题块 | `writer._title_already_in_blocks()`：同名时不再单独输出标题；不同名照旧写 |
+| 合并结果会覆盖主文件 | 「应用到文档」后 `ir.path` 仍指向主文档，Ctrl+S / 自动保存直接替换原稿 | `MergePanel._apply()` 断掉路径（原路径记进 `metadata["merge_source_path"]`），保存时走「另存为」；无路径文档在板块里单独占一个标签，切走再切回不会取回合并前的旧内容 |
+| 另存为后每次 Ctrl+S 都再弹路径 | `DocumentLibrary.save` 写完后不更新 `ir.path` | 保存成功即把 `ir.path` 指向落盘文件，新文件同时进文档库 |
+
+回归测试：`test_write_does_not_repeat_document_title`、`test_write_keeps_title_when_it_differs_from_first_heading`、
+`test_version_keep_follows_setting`、`test_save_remembers_new_path`（core）、
+`test_loop_panel_takes_settings_defaults`、`test_beautify_panel_takes_settings_defaults`、
+`test_merge_apply_never_overwrites_main_file`、`test_context_version_keep_follows_settings`（ui）。
+
+仍未修（已在 `docs/BOARDS/document.md` 第 9 节如实标注）：Word 里的图表/文本框/SmartArt 会退化成其中的文字。
+
+### 修复（第二批）：图片不再丢、人工确认接通、打印可选打印机、布尔设置读法
+
+承上一批继续清"承诺了但没接上/会丢内容"的问题：
+
+| 问题 | 原因 | 修复 |
+|---|---|---|
+| **带图 Word 保存后图片丢失**（静默数据丢失） | `_parse_docx` 段落没文字就 `continue`，`word/media/` 里的图片既不进 IR 也不回写 | 新增 `core/document/media.py`：图片按内容 sha1 落到 `数据目录/document/media/`，块上只留引用（**版本快照因此不膨胀**）；解析认 DrawingML 与老式 VML、含表格单元格里的图片；写出用 `add_picture` 重新嵌入并保留原尺寸；HTML/PDF 转 data URI 自包含，TXT/MD/XLSX 留 `[图片] …` 占位并在 `WriteResult.notes` 里说明；素材缺失时留占位文字 + 提示，不再静默丢 |
+| 设置页「每轮结束人工确认」无效 | 引擎侧支持 `confirm` 回调，但界面从不传 | `LoopWorker.ask_confirm/answer_confirm`：工作线程发信号、主线程弹 `QMessageBox`、工作线程等答复（超时 1 小时；点「停止」/关闭板块都会解锁），面板 `options()` 反映设置值 |
+| 非 HTML 文档「打印」盲打默认打印机 | PDF 直接 `os.startfile(path, "print")`，不弹对话框、不能选打印机 | 统一先弹 `QPrintDialog`；PDF 用 `viewer._PdfPages` 逐页按打印机分辨率渲染（PyMuPDF → **QtPdf** 兜底），页范围/份数/打印机都生效；两个 spec 不再裁掉 `PySide6.QtPdf` 与 `Qt6Pdf.dll`，并新增自检项 `pdf_print_engine`（自检 15 → **16 项**） |
+| **布尔设置读法错误**：`bool("false") is True` | Qt 在 Windows 注册表里把 bool 存成 `"true"/"false"` 字符串，代码里到处 `bool(settings.value(...))` | 全部改 `settings.value(key, default, type=bool)`；`security._setting_bool` 兼容字符串 getter。**实际影响**：「自动保存」关不掉、「允许云端上传」取消勾选仍生效、「上传前脱敏」关不掉、人工确认弹框关不掉——权限与安全开关是最不该出错的一类设置 |
+
+回归测试：`test_docx_images_are_parsed_into_blocks`、`test_docx_images_survive_save_and_export`、
+`test_docx_image_missing_cache_keeps_placeholder`、`test_docx_image_in_other_targets`、
+`test_beautify_keeps_images`、`test_loop_confirm_setting_is_wired`、`test_pdf_printing_renders_pages`、
+`test_permissions_read_windows_bool_strings`、`test_bool_settings_read_from_windows_string_form`
+（另外 `app/main.py` 的 `document_core` 自检也加上了"带图 Word 往返 + 字符串布尔"两项）。
+
+### 完善（第三批）：Word 文字不再静默丢、标题不再凭空造、图片覆盖 Markdown/HTML、素材缓存可管理
+
+| 问题 | 原因 | 修复 |
+|---|---|---|
+| Word 里**文本框 / 修订插入 / 超链接**的文字整段消失 | 一直用 `paragraph.text`，而它只拼接**直接子级** `w:r`——`w:ins`（修订插入）、`w:hyperlink`、`w:smartTag` 里的文字拿不到 | 新增 `_docx_paragraph_text()`：按文档顺序取全部 `w:t`、跳过 `w:del` 的删除内容与 `w:txbxContent`；文本框另按引用块保留（IR 装不下浮动位置）并记 warning；页眉页脚文字收进 `metadata`；文档含修订时明确提示"按接受全部修订读取" |
+| 打开文件再保存会**凭空多一行标题** | 解析时 `title` 取自文件名，写出时又把 `title` 当可见标题行写入 → 保存一次多一行 | 解析时记 `metadata["title_source"]`（`filename` / `content`）；`writer._title_already_in_blocks()` 只在标题是"文档自己的"时才写标题行 |
+| Markdown / HTML 里的图片没有进素材体系 | Markdown 解析不认 `![]()`（当普通文字），HTML 的 data URI/相对路径只留字符串、保存后变占位 | 新增 `_image_block()`：`data:image/...;base64` 与相对路径（按 `base_dir`）都收进素材缓存；远程 URL 原样保留——导出 HTML 写 `<img src>`、导出 Markdown 写 `![alt](url)`；`DocumentIR.text()` 里的图片统一成 `[图片] 名字`（AI 上下文与 TXT 一致） |
+| 素材缓存看不见也清不掉 | 只增不减 | `media.cache_stats()` / `media.clear_cache()` + 设置页「素材缓存」区（大小 / 打开目录 / 清空，清空前弹确认） |
+
+回归测试：`test_docx_textbox_and_revision_text_is_not_lost`、
+`test_filename_title_is_not_invented_as_visible_title`、`test_markdown_images_become_blocks`、
+`test_html_data_uri_image_is_kept`、`test_media_cache_stats_and_clear`。
+
+### 测试
+
+- `tests/board_document/test_document_core.py`：格式矩阵不变量、解析（md/txt/csv/json/xlsx/html/docx/html）、
+  写出（8 种目标 + 防覆盖 + PDF）、**图片素材往返（Word/Markdown/HTML + 缓存清理）**、
+  **文本框/修订/超链接文字不丢**、**文件名标题不写成正文**、
+  美化（模板/编号/目录/表格/幂等）、体检与评分、存储与库流程；
+- `tests/board_document/test_document_sheet.py`：公式引擎（含数组、跨表、循环引用、错误码）、
+  自动填充（含工作日与公式平移）、智能填充（拆名/提取/归类/补零）、统计/透视/图表、单位换算、AI 公式解析；
+- `tests/board_document/test_document_merge.py`：七种模式、表格三种合并、去重/术语/样式/冲突/摘要、
+  AI 回调与失败回退、跨格式合并、库集成与报告落库；
+- `tests/board_document/test_document_ai_loop.py`：工具注册表与真实改写、本地兜底、
+  AI 权限/脱敏/长度限制/日志、工具调用智能体、循环美化的四种停止条件与回滚；
+- `tests/board_document/test_document_pdf.py`：PDF 概况/页码解析/拆分三种模式/抽取/合并（含书签）/
+  压缩/旋转/加密解密（含错误密码与未解密拦截）/逐页水印/表单列出与填写/工具端到端/PDF 工具箱对话框；
+- `tests/board_document/test_document_ui.py`：板块与六个子页、打开/编辑/查找替换/版本回滚、
+  分屏与实时预览、书签、自动保存、多标签（切换保留未保存编辑、关闭清空）、美化应用与导出、
+  公式与填充、合并预览与应用、循环美化（离线）、脱敏与水印与审计、设置页；
+- `tests/board_document/test_document_acceptance.py`：需求 6.10 的**八条验收标准**逐条端到端验收；
+- `tests/board_document/test_document_comments.py`：批注（Word 原生 / Excel 批注表 / PDF 标注 / 附录汇总）；
+- `tests/board_document/test_document_extras.py`：本地模板库、OCR、导出图片；
+- `tests/board_document/test_document_plugins.py`：插件加载器（同权、默认关闭、坏插件不致命）；
+- `tests/board_document/test_document_nonfunctional.py`：6.9 性能预算、预览保护、版本清理与回滚、
+  快捷键与可访问名。
+
+同步更新：`tests/architecture/test_architecture.py`（新增板块 key）、
+`tests/platform/test_db_schema.py`（`doc_*` 表与索引前缀）、
+`tests/smoke/test_cross_board_link.py`（设置页清单）、两个 PyInstaller spec、
+`packaging/build_app.ps1`（模块核验 + 自检项）、`app/main.py`（新增 `document_core` 与
+`pdf_print_engine` 自检，共 16 项）、
+`docs/DATABASE.md`、`docs/ARCHITECTURE.md`、`docs/BOARDS/document.md`、`docs/TESTING.md`、`README.md`。
+
+### 发布产物（v1.0.5，本机构建）
+
+（大小与 SHA256 以最近一次构建为准，重打包命令：
+`powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -SkipDeps -Installer`。）
+
+| 产物 | 大小 | SHA256 |
+|---|---|---|
+| `dist/ModuWorkbench/ModuWorkbench.exe`（onedir 启动器） | 13.19 MB | `98D190E734FF09E90E5FD921B5706B57FA17FC39CFAA20BAFE4D707E22A81AB3` |
+| `dist/墨软工作台-Setup-1.0.5.exe`（NSIS 安装包） | 152.1 MB | `A12E1AE9DD62920FA8B840BE6049E6DC2D6D8EB582A305EA33F9BA41AF41422C` |
+
+- onedir 目录合计约 **379.1 MB**（上一版 374.4 MB；+4.6 MB 来自 **QtPdf**（`Qt6Pdf.dll` + `QtPdf.pyd`，
+  文档板块打印 PDF 逐页渲染要用，见第二批修复）+ 新增的 `core/document` 与 `ui_kit/settings/document`）；
+- 构建三道自检全绿：源码自检 **16/16**、打包产物模块核验 **28/28**（含文档板块 9 个模块 + 插件加载器）、
+  打包后运行自检 **16/16**（`document_core` 覆盖 PDF 拆分/合并/压缩、批注、PDF 标注、
+  本地模板库、**插件加载**、排序筛选、Excel 冻结表头/条件格式/数据验证、工具注册表与循环美化、
+  **带图 Word 往返**、**布尔设置读字符串**；`pdf_print_engine` 覆盖 QtPdf 渲染 PDF 页面）；
+- `FileVersion` / `ProductVersion` = **1.0.5**（exe 与安装包都是；安装包另在
+  `HKCU\...\Uninstall\墨软工作台` 写 `DisplayVersion`）；
+- 三批修复都已随这次打包进入产物（设置项接线、标题去重、合并结果另存为、图片保留、人工确认、
+  打印对话框、布尔设置读法、Word 文本框/修订文字、Markdown/HTML 图片、素材缓存管理），
+  做法与验证见上面三节；全量测试 `pytest tests -q` 通过（1 项按环境跳过）；
+- **安装包实测走了一遍完整闭环**（不是只看文件生成）：
+  `Setup-1.0.5.exe /S /D=<临时目录>` 静默安装 → 装出 379.1 MB、`ModuWorkbench.exe` 与 `Uninstall.exe` 都在、
+  注册表 `DisplayVersion=1.0.5`、桌面与开始菜单快捷方式都在 → 跑安装后的 exe 自检 **16/16**、
+  GUI 进程能正常起来并稳定存活 → `Uninstall.exe /S` 静默卸载后目录、快捷方式、注册表键全部清干净；
+- 本机没有 `makensis` 在 PATH 里（`winget` 在这台机器上不可用：只有 App Execution Alias 空壳），
+  实际用的是 `packaging\build_installer.ps1` 既有的兜底路径 —— electron-builder 缓存里的
+  `nsis-3.0.4.1\makensis.exe`（`v3.04`），无需额外安装；
+- 顺手清理：删除未再引用的 `.webfront-build/`（旧内嵌前端构建缓存 72 MB）、
+  PyInstaller 工作目录 `build/`、各 `__pycache__` 与 `.pytest_cache`（合计释放约 640 MB），
+  并删掉已被 1.0.5 取代的旧安装包 `dist/墨软工作台-Setup-1.0.4.exe`（149.1 MB，加入文档板块**之前**那一版）；
+  另修复 `.gitignore` 里一行历史遗留的乱码注释（该文件此前不是合法 UTF-8）。
+
 ## v1.0.4 — 墨软转换：把所有能转的格式都补上
 
 反馈：「墨软转换，所有已知可以转换的文件格式都添加进来」。格式与动作都是**数据**

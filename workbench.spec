@@ -8,7 +8,7 @@ EXCLUDES = [
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebEngineQuick",
-    # 用不到的 Qt 大模块（保留 QtWebEngine 用于文档预览渲染）
+    # 用不到的 Qt 大模块（注意：QtPdf 要留着 —— 文档板块用它打印 PDF）
     "PySide6.Qt3DCore",
     "PySide6.Qt3DRender",
     "PySide6.Qt3DExtras",
@@ -19,7 +19,6 @@ EXCLUDES = [
     "PySide6.QtQml",
     "PySide6.QtCharts",
     "PySide6.QtDataVisualization",
-    "PySide6.QtPdf",
     "PySide6.QtBluetooth",
     "PySide6.QtNfc",
     "PySide6.QtPositioning",
@@ -145,12 +144,42 @@ a = Analysis(
         "modu_workbench.core.gallery.edits",
         "modu_workbench.core.gallery.enhance",
         "modu_workbench.core.gallery.ai",
+        # 墨软文档：板块页面与核心引擎（解析/美化/计算/合并/AI 工具与循环）＋设置页
+        "modu_workbench.boards.document.board",
+        "modu_workbench.boards.document.context",
+        "modu_workbench.boards.document.viewer",
+        "modu_workbench.boards.document.beautify_page",
+        "modu_workbench.boards.document.sheet_page",
+        "modu_workbench.boards.document.merge_page",
+        "modu_workbench.boards.document.loop_page",
+        "modu_workbench.boards.document.security_page",
+        "modu_workbench.boards.document.pdf_dialog",
+        "modu_workbench.boards.document.widgets",
+        "modu_workbench.core.document.models",
+        "modu_workbench.core.document.formats",
+        "modu_workbench.core.document.parser",
+        "modu_workbench.core.document.writer",
+        "modu_workbench.core.document.beautify",
+        "modu_workbench.core.document.sheet",
+        "modu_workbench.core.document.merge",
+        "modu_workbench.core.document.quality",
+        "modu_workbench.core.document.security",
+        "modu_workbench.core.document.tools",
+        "modu_workbench.core.document.ai",
+        "modu_workbench.core.document.loop",
+        "modu_workbench.core.document.library",
+        "modu_workbench.core.document.storage",
+        "modu_workbench.core.document.pdf_tools",
+        "modu_workbench.core.document.templates",
+        "modu_workbench.core.document.plugins",
+        "modu_workbench.core.document.ocr",
         # 大模型能力中心：多类型/多配置/优先级降级
         "modu_workbench.core.llm.models",
         "modu_workbench.core.llm.router",
         "modu_workbench.ui_kit.settings.general",
         "modu_workbench.ui_kit.settings.book",
         "modu_workbench.ui_kit.settings.convert",
+        "modu_workbench.ui_kit.settings.document",
         "modu_workbench.ui_kit.settings.music",
         "modu_workbench.ui_kit.settings.video",
         "modu_workbench.ui_kit.settings.gallery",
@@ -175,10 +204,11 @@ a = Analysis(
 # ---- v1.0.0 体积精简：Qt 单栈后不再需要这些 Qt 模块 ------------------------------
 # 说明：EXCLUDES 只影响 Python 绑定模块，Qt 的 DLL 仍会被 PySide6 hook 收进来，
 # 因此这里按文件名再过滤一次。已核实依赖：QtCore/Gui/Widgets/Multimedia/PrintSupport
-# 均不引用 Qml/Quick/Pdf/VirtualKeyboard（用二进制导入表检查过）。
+# 均不引用 Qml/Quick/VirtualKeyboard（用二进制导入表检查过）。
+# Qt6Pdf **不在**丢弃列表里：文档板块的「打印 PDF」用 QtPdf 渲染页面（约 1.5 MB）。
 _DROP_BINARY_TOKENS = (
-    "Qt6Qml", "Qt6Quick", "Qt6Pdf", "Qt6VirtualKeyboard",
-    "QtQml", "QtQuick", "QtPdf", "QtVirtualKeyboard",
+    "Qt6Qml", "Qt6Quick", "Qt6VirtualKeyboard",
+    "QtQml", "QtQuick", "QtVirtualKeyboard",
 )
 a.binaries = [item for item in a.binaries
               if not any(token in item[0] for token in _DROP_BINARY_TOKENS)]

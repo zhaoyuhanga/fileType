@@ -11,9 +11,9 @@ from __future__ import annotations
 import sqlite3
 import time
 
-from . import v1_initial
+from . import v1_initial, v2_document
 
-MIGRATIONS: tuple = (v1_initial,)
+MIGRATIONS: tuple = (v1_initial, v2_document)
 
 LATEST_VERSION = max(module.VERSION for module in MIGRATIONS)
 

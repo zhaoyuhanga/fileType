@@ -10,8 +10,8 @@ tests/
 │   ├── test_version.py               # 版本单一来源（包 / pyproject / 安装包）
 │   └── test_branding_assets.py       # 图标与安装包图形随包
 ├── platform/              # core/platform：单库结构快照、旧库迁移、本机流服务
-├── board_book/  board_convert/  board_music/  board_video/  board_gallery/  board_llm/
-│                          # 各板块引擎（*_core）与界面（*_ui）
+├── board_book/  board_convert/  board_document/  board_music/  board_video/  board_gallery/
+│   board_llm/             # 各板块引擎（*_core）与界面（*_ui）
 ├── smoke/                 # 主壳导航、跨板块联动
 └── helpers/               # 测试辅助脚本（不参与收集）
 ```

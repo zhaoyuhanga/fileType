@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from .base import SETTINGS_APP, SETTINGS_ORG, SettingsPage, app_settings
 from .book import BookSettingsPage
 from .convert import ConvertSettingsPage
+from .document import DocumentSettingsPage
 from .gallery import GallerySettingsPage
 from .general import GeneralSettingsPage
 from .llm import LlmSettingsPage
@@ -39,6 +40,7 @@ PAGE_FACTORIES: tuple[tuple[str, str, str, Callable[[], SettingsPage]], ...] = (
     ("llm", "大模型", "🤖", LlmSettingsPage),
     ("book", "书库", "📚", BookSettingsPage),
     ("convert", "转换", "🔄", ConvertSettingsPage),
+    ("document", "文档", "📄", DocumentSettingsPage),
     ("music", "乐库", "🎧", MusicSettingsPage),
     ("video", "影视", "🎬", VideoSettingsPage),
     ("gallery", "图库", "🖼", GallerySettingsPage),

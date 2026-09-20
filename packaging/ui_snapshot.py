@@ -4,7 +4,7 @@
     .venv\\Scripts\\python.exe packaging\\ui_snapshot.py            # 输出到 docs/ui/
     .venv\\Scripts\\python.exe packaging\\ui_snapshot.py --width 1440 --height 900
 
-产物：`docs/ui/board-<key>.png`（首页/五大板块各一张）。
+产物：`docs/ui/board-<key>.png`（首页/六大板块各一张）。
 
 为什么需要它：v1.0.0 的界面规范（无直角、统一留白、空状态）光靠单测锁不住，
 把页面渲染成图后可以人眼过一遍，也能在改动前后对比。

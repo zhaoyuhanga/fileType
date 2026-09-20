@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..boards.book import board as book_board
 from ..boards.convert import board as convert_board
+from ..boards.document import board as document_board
 from ..boards.gallery import board as gallery_board
 from ..boards.music import board as music_board
 from ..boards.video import board as video_board
@@ -31,6 +32,21 @@ CONVERT_BOARD = BoardSpec(
     icon="🔄",
     phase="可用",
     page=convert_board.ConvertBoardPage,
+)
+
+DOCUMENT_BOARD = BoardSpec(
+    key="document",
+    title="墨软文档",
+    tagline="查看编辑 · 格式美化 · 填充计算 · 文档合并 · AI 循环美化",
+    description=(
+        "一站式文档工作台：Word/PDF/Excel/Markdown/TXT/HTML/EPUB/PPT/CSV/JSON 等格式的查看与编辑；"
+        "一键与模板美化（公文/报告/论文/合同/简历/会议纪要）；自动填充、智能填充、公式计算与统计；"
+        "配置 AI 文本模型后可用 7 类场景与 30+ 文档工具，并把两个文档合并（同格式与跨格式）；"
+        "AI 循环美化按「分析→计划→工具→评分」多轮优化，每轮可预览、可回滚、有日志。"
+    ),
+    icon="📄",
+    phase="可用",
+    page=document_board.DocumentBoardPage,
 )
 
 MUSIC_BOARD = BoardSpec(
@@ -70,9 +86,10 @@ GALLERY_BOARD = BoardSpec(
     page=gallery_board.GalleryBoardPage,
 )
 
-# 首页卡片与顶栏导航顺序
+# 首页卡片与顶栏导航顺序：前五个板块顺序固定（历史约定），
+# 第六大板块「墨软文档」追加在末尾，避免影响既有板块的入口位置。
 ACTIVE_BOARDS: tuple[BoardSpec, ...] = (
-    BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD, GALLERY_BOARD,
+    BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD, GALLERY_BOARD, DOCUMENT_BOARD,
 )
 
 

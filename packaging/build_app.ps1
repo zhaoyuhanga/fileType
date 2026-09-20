@@ -187,7 +187,7 @@ Write-Ok "已生成：$exePath"
 
 # ---------------------------------------------------------------- 打包后验证
 
-Write-Step "打包后验证（第四/第五板块是否随包）"
+Write-Step "打包后验证（第四/五/六板块是否随包）"
 
 # 关键点：墨软影视 / 墨软图库模块必须真的进了包，否则首页板块卡会缺。
 # onedir 下纯 Python 模块名存放在 exe 内嵌的 PYZ 归档里，磁盘上没有 .pyz 文件，
@@ -209,8 +209,21 @@ $required = @(
     "modu_workbench.core.gallery.library",
     "modu_workbench.core.gallery.enhance",
     "modu_workbench.core.gallery.ai",
+    "modu_workbench.boards.document.board",
+    "modu_workbench.boards.document.viewer",
+    "modu_workbench.boards.document.merge_page",
+    "modu_workbench.boards.document.loop_page",
+    "modu_workbench.boards.document.pdf_dialog",
+    "modu_workbench.core.document.library",
+    "modu_workbench.core.document.merge",
+    "modu_workbench.core.document.loop",
+    "modu_workbench.core.document.tools",
+    "modu_workbench.core.document.pdf_tools",
+    "modu_workbench.core.document.templates",
+    "modu_workbench.core.document.plugins",
     "modu_workbench.core.llm.router",
-    "modu_workbench.ui_kit.settings.llm"
+    "modu_workbench.ui_kit.settings.llm",
+    "modu_workbench.ui_kit.settings.document"
 )
 $missing = @()
 foreach ($name in $required) {
@@ -219,7 +232,7 @@ foreach ($name in $required) {
 if ($missing.Count -gt 0) {
     Fail ("打包产物缺少板块模块：" + ($missing -join ", ") + "`n    请确认 workbench.spec 的 hiddenimports 未被改动。")
 }
-Write-Ok "影视 / 图库 / 大模型模块已随包（$($required.Count) 项全部命中）"
+Write-Ok "影视 / 图库 / 文档 / 大模型模块已随包（$($required.Count) 项全部命中）"
 
 # 真正跑一次打包产物：MODU_CHECK_DEPS 会输出各能力自检结果（含 video_core）
 Write-Step "运行打包产物做能力自检"
@@ -241,7 +254,7 @@ Remove-Item Env:\MODU_CHECK_DEPS -ErrorAction SilentlyContinue
 if ($selfCheckError) {
     Write-Warn2 "打包产物未能运行自检：$selfCheckError"
     Write-Warn2 "  若是「Application Control policy」，请关闭「智能应用控制」或对 exe 签名后重跑；"
-    Write-Warn2 "  也可以只做模块级核验（上面 15 项已通过）。"
+    Write-Warn2 "  也可以只做模块级核验（上面 $($required.Count) 项已通过）。"
 }
 
 if (Test-Path $checkOut2) {
@@ -262,8 +275,14 @@ if (Test-Path $checkOut2) {
     if ($null -eq $json2.gallery_core) {
         Write-Warn2 "自检结果里没有 gallery_core 项，请确认 app/main.py 的 record(\"gallery_core\", ...) 存在。"
     }
+    if ($null -eq $json2.document_core) {
+        Write-Warn2 "自检结果里没有 document_core 项，请确认 app/main.py 的 record(\"document_core\", ...) 存在。"
+    }
+    if ($null -eq $json2.pdf_print_engine) {
+        Write-Warn2 "自检结果里没有 pdf_print_engine 项：文档板块打印 PDF 需要 QtPdf，请确认 spec 的 EXCLUDES 没有排除 PySide6.QtPdf（以及 Qt6Pdf.dll）。"
+    }
 } else {
-    Write-Warn2 "打包产物未输出自检结果，请手动运行 $exePath 确认首页有五张板块卡。"
+    Write-Warn2 "打包产物未输出自检结果，请手动运行 $exePath 确认首页有六张板块卡。"
 }
 
 # ---------------------------------------------------------------- 安装包（可选）
@@ -285,5 +304,5 @@ if ($Installer) {
 
 Write-Step "完成"
 Write-Ok "onedir 产物：dist\ModuWorkbench\ModuWorkbench.exe"
-Write-Ok "启动后首页应显示五张板块卡：墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视 / 墨软图库"
+Write-Ok "启动后首页应显示六张板块卡：墨软书库 / 墨软转换 / 墨软乐库 / 墨软影视 / 墨软图库 / 墨软文档"
 Write-Host ""

@@ -74,3 +74,23 @@ def test_specs_share_the_same_project_hiddenimports() -> None:
     assert windows == mac, (
         f"{SPECS[0]} 独有：{sorted(windows - mac)}；{SPECS[1]} 独有：{sorted(mac - windows)}"
     )
+
+
+#: 必须带 UTF-8 BOM 的打包脚本与 NSIS 脚本
+BOM_REQUIRED = ("packaging/build_app.ps1", "packaging/build_installer.ps1", "packaging/installer.nsi")
+
+
+@pytest.mark.parametrize("relative", BOM_REQUIRED)
+def test_packaging_scripts_keep_utf8_bom(relative: str) -> None:
+    """打包脚本必须保留 UTF-8 BOM。
+
+    Windows PowerShell 5.1（`powershell -File …`，文档里的推荐调用方式）**不认没有 BOM 的
+    UTF-8 脚本**：中文会按 ANSI 解码，字符串里的引号被吃掉，直接报
+    "Missing closing ')'" 之类的语法错误 —— 实测踩过一次（编辑器保存丢掉 BOM 就会复现）。
+    """
+    data = (REPO_ROOT / relative).read_bytes()
+    assert data.startswith(b"\xef\xbb\xbf"), (
+        f"{relative} 缺少 UTF-8 BOM：Windows PowerShell 5.1 会解析失败（请用带 BOM 的方式保存）"
+    )
+    # 顺带确认文件确实是 UTF-8（而不是 GBK 等），避免"有 BOM 但内容坏掉"
+    data.decode("utf-8")

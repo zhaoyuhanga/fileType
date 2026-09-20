@@ -15,6 +15,9 @@ import importlib
 _LAZY: dict[str, str] = {
     "library": "modu_workbench.boards.book.context",
     "storage": "modu_workbench.boards.book.context",
+    "document_storage": "modu_workbench.boards.document.context",
+    "document_library": "modu_workbench.boards.document.context",
+    "document_ai": "modu_workbench.boards.document.context",
     "music_storage": "modu_workbench.boards.music.context",
     "music_library": "modu_workbench.boards.music.context",
     "music_registry": "modu_workbench.boards.music.context",

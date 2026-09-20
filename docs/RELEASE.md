@@ -1,8 +1,14 @@
-# 发布规范（RELEASE，v1.0.2）
+# 发布规范（RELEASE）
 
 > 版本单一来源：`src/modu_workbench/__init__.py` 的 `__version__`
-> （`pyproject.toml` 必须与之一致，见 `tests/architecture/test_version.py`）。
+> （`pyproject.toml`、`packaging/version_info.txt`、`workbench_mac.spec` 必须与之一致，
+> 见 `tests/architecture/test_version.py`）。
 > 安装包版本由 `packaging/build_installer.ps1` 从包内读取并通过 `/DAPP_VERSION` 传给 NSIS。
+> 改版本号时同步改 `packaging/installer.nsi` 里的兜底 `APP_VERSION`（手动 makensis 时用）。
+>
+> makensis 的查找顺序：`-Makensis` 参数 → `PATH` → **electron-builder 缓存**
+> （`%LOCALAPPDATA%\electron-builder\Cache\nsis\**\makensis.exe`，本机实测可用 v3.04，
+> 因此不装 NSIS 也能出包）。
 
 ## 1. 发版前检查
 
@@ -10,7 +16,7 @@
 # 1) 全量测试（含架构闸门）
 .venv\Scripts\python.exe -m pytest tests -q
 
-# 2) 源码自检（14 项：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/四个板块核心/ffmpeg/品牌）
+# 2) 源码自检（16 项：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/四个板块核心（乐库·影视·图库·文档）/PDF 打印渲染/ffmpeg/品牌）
 $env:MODU_CHECK_DEPS="$env:TEMP\check.json"
 .venv\Scripts\python.exe -m modu_workbench; type $env:TEMP\check.json
 
@@ -37,7 +43,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 
 打包脚本内置三道自检，任一处 `Fail` 都会直接中断：
 1. 源码自检（`MODU_CHECK_DEPS`）；
-2. exe 字节流里检索关键模块名（影视/图库/乐库/书库/转换/大模型/平台层，共 15 项）；
+2. exe 字节流里检索关键模块名（影视/图库/乐库/书库/转换/大模型/平台层，共 28 项）；
 3. 运行打包产物做能力自检。
 
 ## 3. 体积基线与精简记录
@@ -48,6 +54,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 | v1.0.0 | **371 MB** | 150 MB | 移除 QtWebEngine（约 340MB）与 Qml/Quick/Pdf/虚拟键盘（约 18MB） |
 | v1.0.2 | 382.5 MB | 151 MB | 控件样式补齐 + 在线曲目质量过滤；打包环境 Python 3.12.10 / PySide6 6.11.2 / PyInstaller 6.22.3 |
 | v1.0.4 | 382.9 MB | 151.3 MB | 墨软转换格式扩到 68 种（+PyYAML 约 0.4MB） |
+| v1.0.5 | **379.1 MB** | **152.1 MB** | 新增第六大板块（文档/PDF/OCR）+ 三批自查修复；**QtPdf 回归**（约 1.5MB）：文档板块打印 PDF 要逐页渲染，见 `app/main.py` 的 `pdf_print_engine` 自检；安装包实测静默安装→自检 16/16→静默卸载闭环 |
 
 精简原则：只删除**已用二进制导入表核实无依赖**的 Qt 模块；
 每次精简后必须重跑打包产物自检（`multimedia_playback` 会真实播放一段音频，是最有效的回归）。

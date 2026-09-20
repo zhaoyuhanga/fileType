@@ -6,7 +6,7 @@
 
 - 产品名：**墨软·工作台**；形态：**全 Python 单应用**（PySide6/Qt6），onedir 分发 + NSIS 安装包；
 - 仓库：沿用 fileType 仓库演进（历史保留），旧 Electron/React 代码归档于 `archive/electron-formatflow/`；
-- 板块化：首页 + 可扩展板块入口，当前为「墨软书库」「墨软转换」「墨软乐库」「墨软影视」「墨软图库」，未来可继续追加；
+- 板块化：首页 + 可扩展板块入口，当前为「墨软书库」「墨软转换」「墨软乐库」「墨软影视」「墨软图库」「墨软文档」，未来可继续追加；
 - 后端主技术：**Python**（无 Node/Python 双运行时）；SQLite 用 Python 标准库 `sqlite3`；
 - **界面技术（v1.0.0：Qt 单栈）**：全部界面为 PySide6 原生控件 —— 转换板块为 Qt 表格 + 动作面板，
   文档预览用 `QTextBrowser`（Markdown/JSON/HTML/TXT 由 `QTextDocument` 渲染），
@@ -18,18 +18,22 @@
 
 - `src/modu_workbench/app/`：应用骨架 —— 入口 `main.py`、主壳 `shell.py`、板块注册表 `registry.py`
   （新增板块只需在注册表加一条）。
-- `src/modu_workbench/boards/`：**五大板块各自一个包**，板块之间互不引用
-  （由 `tests/test_architecture.py` 强制，破坏边界即测试失败）：
+- `src/modu_workbench/boards/`：**每个板块一个包**，板块之间互不引用
+  （由 `tests/architecture/test_architecture.py` 强制，破坏边界即测试失败）：
   - `boards/home/`（首页）、`boards/book/`（墨软书库）、`boards/convert/`（墨软转换）、
-    `boards/music/`（墨软乐库）、`boards/video/`（墨软影视）、`boards/gallery/`（墨软图库）；
+    `boards/music/`（墨软乐库）、`boards/video/`（墨软影视）、`boards/gallery/`（墨软图库）、
+    `boards/document/`（墨软文档）；
   - 每个板块包固定以 `board.py` 作为入口（装配导航 + 子页），其余按功能拆分
-    （`search.py` / `detail.py` / `player.py` / `widgets.py` …）。
+    （`search.py` / `detail.py` / `player.py` / `widgets.py` …）；
+  - `ACTIVE_BOARDS` 的**前五个板块顺序固定**（既有约定），第六大板块「墨软文档」追加在末尾。
 - `src/modu_workbench/ui_kit/`：统一设计令牌（ThemeTokens）+ QSS + 基础组件 + 分板块设置页。
 - `src/modu_workbench/core/book/`：墨软书库引擎（自 win-e-book 迁移：parser/storage/library/online）。
 - `src/modu_workbench/core/convert/`：墨软转换引擎（自 fileType 行为重写：registry、text/pdf/image/media/archive 等）。
 - `src/modu_workbench/core/music/`：墨软乐库引擎（models/storage/sources/downloader/library/player）。
 - `src/modu_workbench/core/video/`：墨软影视引擎（models/storage/hls/sources/downloader/library）。
 - `src/modu_workbench/core/gallery/`：墨软图库引擎（models/storage/hashing/exif/thumbs/edits/enhance/ai/library）。
+- `src/modu_workbench/core/document/`：墨软文档引擎（formats/models/parser/writer/beautify/sheet/merge/
+  quality/security/tools/ai/loop/storage/library/ocr）。
 - `src/modu_workbench/core/llm/`：大模型能力中心（跨板块共用：配置 / 路由 / 降级）。
 - `src/modu_workbench/services/`：跨板块的本地服务（数据目录 `config.py`、应用级单例 `app_context.py`、
   本机媒体流 `media_server.py`）。
@@ -120,6 +124,50 @@
   避免做成"点了没反应"的按钮。默认关闭图片上传，关闭时只发送元数据。
 - **后台任务**：导入扫描 / 增强 / AI 分析 / 重复检测均为 `QThread`，支持取消与进度回报。
 
+## 墨软文档设计要点
+
+- **统一中间结构（IR）**：所有格式先解析成 `DocumentIR`（`Block` 列表 + `TableData` + 样式 + 元数据），
+  美化/合并/计算/AI 循环都只认 IR，因此**新增一种格式只需扩 `parser.py` 的格式表**，
+  上层能力一行都不用改；写出时再由 `writer.py` 落到 txt/md/html/docx/xlsx/csv/tsv/json/pdf。
+- **格式能力矩阵是"诚实"的**：`formats.py` 里每个格式显式声明 view/edit/convert/annotate/ocr，
+  只读格式（PDF/DOC/XLS/ODS/EPUB…）在界面上**不会给出编辑框**，而是提示"另存为 DOCX/XLSX 后再编辑"
+  —— 登记了却做不到，就是用户口中的"点了没反应"。
+- **公式引擎是受控子集**（`sheet.py`）：递归下降解析 + 40 余个函数 + 跨表引用 + 数组公式，
+  在指定表格内求值，**不执行 VBA、不访问文件与网络**；循环引用检测靠"求值中集合"实现，
+  报 Excel 风格错误码（#DIV/0! / #VALUE! / #CIRC! / #N/A）。
+  注意：解析状态（token 流）**必须每次 evaluate 前保存、结束后恢复** ——
+  单元格里也是公式时会递归求值，不保存就会把外层公式的 token 冲掉（表现为"缺少 )"）。
+- **自动填充与智能填充**：填充规律（等差/日期/工作日/月份/星期/中文序号/文本序号/公式）是
+  **数据**（`SeriesSpec`），公式填充用 `translate_formula` 平移相对引用（`$` 锁定不动）；
+  智能填充是"按示例反推规则"（`infer_pattern`：拆分姓名、提取号码/邮箱/金额、加前后缀、大小写、
+  编号补零、按关键词归类），推断不出规则时**明说"没能推断出规则"**，绝不猜一个用不了的规则。
+- **两个文档合并**（`merge.py`，P0 核心）：七种模式（追加/章节/表格按行·列·主键/主从/对比）+
+  语义去重（difflib 相似度）+ 术语统一 + 风格统一 + 过渡段 + 目录 + 摘要 + 差异报告 +
+  冲突扫描（样式/编号/引用/元数据）。**没有大模型也能合并**：过渡句用模板、摘要用抽取式；
+  有模型时由模型写过渡句与摘要，并在报告的变更条目上标注 `ai_generated`。
+  合并过程的冲突（找不到章节、表格模式无表可并）与两稿冲突**都要累加**进报告 ——
+  曾经在这里用赋值覆盖过一次，导致"找不到章节"这类关键提示被静默丢掉。
+- **AI 工具调用走 JSON 协议**（`tools.py` + `ai.py`）：30+ 个工具是**真做事**的函数（读取/解析/写入/
+  替换/排版/计算/表格/OCR/翻译/导出/合并/拆分/对比/摘要/脱敏/水印），界面按钮与 AI 调用同一套实现，
+  因此"AI 能做的"和"手动能做的"永远一致；协议是 `{"tool": "...", "args": {...}}` / `{"final": "..."}`
+  （不依赖厂商各自的 function calling，任何 OpenAI 兼容模型都能用）。
+- **AI 文本工具必须真的改写文档**：`polish/proofread/rewrite/translate/condense/expand` 逐段调用模型
+  并写回正文（保留标题与表格结构），每段留一条 `Change`（可预览、可回滚）；
+  每轮只处理前 N 段以避免一次打几十个请求，界面会提示"还有 N 段，再跑一轮即可覆盖"。
+- **权限默认本地优先**（`security.py`）：默认允许本地模型、**不允许云端上传**，上传前自动脱敏
+  （手机号/身份证/银行卡/邮箱/金额/IP/车牌/中文姓名）；权限由 `permissions_provider` **每次调用前实时读取**，
+  设置页改完立即生效，不必重启或重建单例。额度与长度也在这里拦（超限直接把原因抛给用户）。
+- **循环美化引擎**（`loop.py`）：分析 → 计划（AI 选工具，失败退回 `heuristic_plan` 规则计划）→
+  工具调用 → 五维评分（AI 打分与本地规则各半，AI 不可用则纯本地）→ 未达标继续；
+  停止条件覆盖质量阈值/最大轮次/无可改进项/用户停止/成本/时间。每轮保存快照（`doc_versions`）、
+  记录 diff 与工具日志，可回滚到任意一轮。
+- **撤销与回滚**：打开、保存、美化、合并、循环美化每轮都写一份 `DocumentIR` 快照；
+  回滚只改内存里的编辑内容，**不会动磁盘原文件**（想落盘再点保存）。
+- **OCR 是可选能力**（`ocr.py`）：引擎用外部 tesseract（`MODU_TESSERACT` 可指定），扫描件 PDF 还需 PyMuPDF；
+  缺失时直接说"未检测到 tesseract，怎么装"，不给"点了没反应"。
+- **后台任务**：解析、合并、循环美化、导出都在 `QThread`（`boards/document/widgets.DocumentWorker`）里跑，
+  支持取消与进度回报；循环美化的事件用信号回主线程，界面不阻塞。
+
 ## 大模型能力中心（core/llm）
 
 需求是"模型配置要单独一块，并能按类型配多个、按优先级调用、异常降级"，因此抽成独立包：
@@ -168,6 +216,8 @@
 - M6 墨软乐库（在线搜索下载 / 播放器 / 歌单收藏分类 / 播放历史 / 音频格式转换）✅
 - M7 墨软影视（多源搜索下载 / 多清晰度播放器 / 分类收藏 / 播放历史 / 视频格式转换）✅
 - M8 墨软图库（本地相册 / 分类标签收藏 / 导入去重 / 美化编辑 / 本地增强）+ 设置按板块分区 ✅
+- M9 墨软文档（格式查看编辑 / 格式美化 / 自动填充与计算 / AI 模型与工具调用 / 两个文档合并 /
+  AI 循环美化 / 权限脱敏与审计）✅
 
 ## 合规要点
 

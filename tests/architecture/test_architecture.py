@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "src" / "modu_workbench"
 PACKAGE = "modu_workbench"
 
-BOARD_KEYS = ("book", "convert", "music", "video", "gallery")
+BOARD_KEYS = ("book", "convert", "document", "music", "video", "gallery")
 
 # 允许的跨板块依赖（键 = (来源包, 目标包)）：P2 解耦完成后应为空
 PENDING_DECOUPLING: dict[tuple[str, str], str] = {
@@ -159,7 +159,7 @@ def test_pending_decoupling_entries_still_real() -> None:
 
 @pytest.mark.parametrize("board", BOARD_KEYS)
 def test_board_package_exists(board: str) -> None:
-    """五大板块必须是独立包，且各自有入口模块 board.py。"""
+    """每个板块必须是独立包，且各自有入口模块 board.py。"""
     package = SRC / "boards" / board
     assert (package / "__init__.py").is_file(), f"缺少 boards/{board}/__init__.py"
     assert (package / "board.py").is_file(), f"缺少 boards/{board}/board.py"
