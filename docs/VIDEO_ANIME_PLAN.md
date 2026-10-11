@@ -1113,7 +1113,8 @@ CREATE INDEX IF NOT EXISTS idx_anime_progress_time ON anime_progress(updated_at 
 - [x] **C-d** `update_check.py` + "有新集"角标
 - [x] **C-e** 字幕 + 外部播放器打开
 - [x] **D-a** 追番/进度导出导入（JSON；WebDAV 按 6.2 的"不做"清单明确不做）
-- [ ] **D-b** 离线增强（ffmpeg 放大/重编码）—— 未做
+- [x] **D-b** 离线增强（ffmpeg 放大/重编码）：`core/video/enhance.py` + 「我的视频 → 增强」入口，
+  **如实标注这不是 Anime4K 实时超分**，只对已下载的本地文件生效、可取消（有真 ffmpeg 的端到端测试）
 - [x] **D-c** 广告分片跳过（与 3.3.7 共用，实验性、默认关）
 - [~] **E-a** 打包登记（两个 spec 的 hiddenimports + `build_app.ps1` 模块核验清单 + 自检
   `anime_core` 全部就位，自检 18 项全绿）；**发版产物（onedir + Setup）未构建**

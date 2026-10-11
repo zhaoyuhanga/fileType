@@ -42,6 +42,7 @@ from modu_workbench.ui_kit.toast import Toaster
 from .widgets import (
     CollectionPicker,
     ConvertWorker,
+    EnhanceWorker,
     action_video_ids,
     attach_context_menu,
     configure_table,
@@ -73,6 +74,7 @@ class VideoLibraryPage(QWidget):
         self._task = task_bar
         self._videos = []
         self._convert_worker: ConvertWorker | None = None
+        self._enhance_worker: EnhanceWorker | None = None
         self._tail_stretch = False
         self._fallback_status = QLabel("就绪。")   # 兼容旧引用/单页自测
 
@@ -153,6 +155,27 @@ class VideoLibraryPage(QWidget):
         self._list_card.add(row(QLabel("转换为"), self._target, self._convert_button,
                                 self._cancel_button,
                                 hint_label("转换需要 ffmpeg（可用 MODU_FFMPEG 指定）"),
+                                stretch_last=True))
+
+        # 离线画质增强（D-b）：**明确标注这不是 Anime4K 实时超分**，
+        # 而是下载完成后的一次性 ffmpeg 处理（耗时以分钟计）
+        from modu_workbench.core.video.enhance import ENHANCE_MODES
+
+        self._enhance_mode = QComboBox()
+        for key, label in ENHANCE_MODES.items():
+            self._enhance_mode.addItem(label, key)
+        self._enhance_mode.setToolTip(
+            "离线重编码，不是 Anime4K 实时超分：放大档用 lanczos + 轻锐化，"
+            "耗时取决于片长与机器性能。已完成下载的本地文件才能增强。")
+        self._enhance_button = ghost_button("画质增强")
+        self._enhance_button.setToolTip(self._enhance_mode.toolTip())
+        self._enhance_button.clicked.connect(self._start_enhance)
+        self._enhance_cancel = ghost_button("取消增强")
+        self._enhance_cancel.clicked.connect(self._cancel_enhance)
+        self._enhance_cancel.setEnabled(False)
+        self._list_card.add(row(QLabel("增强"), self._enhance_mode, self._enhance_button,
+                                self._enhance_cancel,
+                                hint_label("离线 ffmpeg 放大/重编码，非实时超分"),
                                 stretch_last=True))
 
         self._page.add(self._list_card)
@@ -387,6 +410,55 @@ class VideoLibraryPage(QWidget):
         self._convert_worker = None
         self._cancel_button.setEnabled(False)
         self._convert_button.setEnabled(True)
+
+    # ------------------------------------------------------------------ 离线增强（D-b）
+
+    def _start_enhance(self) -> None:
+        ids = self._target_ids()
+        if not ids:
+            self._toaster.info("请先勾选或选中要增强的条目")
+            return
+        if self._enhance_worker is not None and self._enhance_worker.isRunning():
+            self._toaster.info("已有增强任务在进行，请等待或先取消")
+            return
+        mode = self._enhance_mode.currentData() or "upscale"
+        self._enhance_worker = EnhanceWorker(ids, mode, self)
+        self._enhance_worker.progressed.connect(self._on_enhance_progress)
+        self._enhance_worker.finishedAll.connect(self._on_enhance_finished)
+        self._enhance_worker.failed.connect(self._on_enhance_failed)
+        self._enhance_worker.finished.connect(self._on_enhance_thread_finished)
+        self._enhance_cancel.setEnabled(True)
+        self._enhance_button.setEnabled(False)
+        self._busy(f"开始画质增强 {len(ids)} 个条目（离线重编码，耗时以分钟计）…")
+        self._enhance_worker.start()
+
+    def _cancel_enhance(self) -> None:
+        if self._enhance_worker is not None:
+            self._enhance_worker.cancel()
+            self._busy("正在取消增强…")
+
+    def _on_enhance_progress(self, done: int, total: int, message: str) -> None:
+        self._report(message, done, total)
+
+    def _on_enhance_finished(self, outputs: list, errors: list) -> None:
+        message = f"增强完成：成功 {len(outputs)}，失败 {len(errors)}"
+        if errors:
+            message += "；" + "；".join(errors[:3])
+        self._idle(message)
+        if outputs:
+            self._toaster.success(f"已增强 {len(outputs)} 个文件（在「我的视频」可见）")
+        else:
+            self._toaster.error("增强失败：请确认 ffmpeg 可用、且条目是已下载到本地的文件")
+        self.reload()
+
+    def _on_enhance_failed(self, message: str) -> None:
+        self._report(f"增强失败：{message}")
+        self._toaster.error(f"增强失败：{message}")
+
+    def _on_enhance_thread_finished(self) -> None:
+        self._enhance_worker = None
+        self._enhance_cancel.setEnabled(False)
+        self._enhance_button.setEnabled(True)
 
 
     def _set_tail_stretch(self, enabled: bool) -> None:

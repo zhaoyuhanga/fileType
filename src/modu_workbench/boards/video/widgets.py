@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import threading
+import time
+from pathlib import Path
 from typing import Iterable, List
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -690,6 +692,85 @@ class DanmakuWorker(QThread):
 
             result = DanmakuResult(note=f"弹幕获取失败：{error}")
         self.fetched.emit(result)
+
+
+class EnhanceWorker(QThread):
+    """离线画质增强（逐个条目，支持取消）。
+
+    **这是离线重编码，不是 Anime4K 实时超分**（见 `core/video/enhance.py` 的说明）：
+    只处理已经下载到本地的文件，耗时以分钟计，所以进度与取消都要有。
+    """
+
+    progressed = Signal(int, int, str)
+    finishedAll = Signal(object, object)   # (ok paths, errors)
+    failed = Signal(str)
+
+    def __init__(self, video_ids: Iterable[int], mode: str = "upscale", parent=None):
+        super().__init__(parent)
+        self._ids = list(video_ids)
+        self._mode = mode
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    def run(self) -> None:  # noqa: D102
+        from modu_workbench.core.video.enhance import enhance_video
+
+        outputs: list[str] = []
+        errors: list[str] = []
+        total = len(self._ids)
+        library: VideoLibrary = app_context.video_library()
+        for index, video_id in enumerate(self._ids, start=1):
+            if self._cancel.is_set():
+                errors.append("已取消")
+                break
+            video = library.storage.get_video(video_id)
+            name = video.display() if video else str(video_id)
+            self.progressed.emit(index - 1, total, f"[{index}/{total}] {name}")
+            if video is None:
+                errors.append(f"{name}：条目不存在")
+                continue
+            if not video.file_path or not Path(video.file_path).is_file():
+                errors.append(f"{name}：只有下载到本地的文件才能增强")
+                continue
+            source = Path(video.file_path)
+            suffix = source.suffix or ".mp4"
+            target = source.with_name(f"{source.stem}（增强）{suffix}")
+            if target.exists():
+                target = source.with_name(
+                    f"{source.stem}（增强 {int(time.time())}）{suffix}")
+            try:
+                result = enhance_video(
+                    source, target, mode=self._mode, cancel=self._cancel,
+                    on_progress=lambda done, count, message,
+                    i=index: self.progressed.emit(i - 1, total, message),
+                )
+            except Exception as error:  # noqa: BLE001
+                errors.append(f"{name}：{error}")
+                continue
+            if result.ok and result.path is not None:
+                outputs.append(str(result.path))
+                # 入库（与下载入库同一条路径，便于「我的视频」直接看到）
+                try:
+                    library.import_download_result(_enhanced_result(video, result.path))
+                except Exception:  # noqa: BLE001  入库失败不影响文件已产出
+                    pass
+            else:
+                errors.append(f"{name}：{result.message}")
+        self.progressed.emit(len(outputs), total, f"完成 {len(outputs)}/{total}")
+        self.finishedAll.emit(outputs, errors)
+
+
+def _enhanced_result(video, path):  # noqa: ANN001, ANN202
+    """把增强产物包成 `DownloadResult`，复用既有的入库逻辑。"""
+    from modu_workbench.core.video.downloader import DownloadResult
+
+    return DownloadResult(
+        video=video.to_remote() if hasattr(video, "to_remote") else video,
+        episode=None, quality=None, path=str(path), ok=True,
+        message="离线增强", source="local",
+    )
 
 
 class ConvertWorker(QThread):

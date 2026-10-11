@@ -120,6 +120,11 @@ class VideoBoardPage(QWidget):
         self._session_episode: Episode | None = None
         self._session_source = ""
         self._session_referer = ""
+        # 正在播放的清晰度标签（stall 自愈用它决定降到哪一档）
+        self._session_quality_label = ""
+        # 自动降档计数（在构造函数里就初始化：不能在 _connect_self_heal 里才建，
+        # 否则卡顿信号先到时会 AttributeError）
+        self._downgrade_count = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -319,6 +324,8 @@ class VideoBoardPage(QWidget):
         self._session_referer = resolved.referer
 
         label = resolved.quality_label or (quality_label if quality_label else (video.quality or ""))
+        # 记住"正在播的是哪一档"：stall 自愈要靠它才知道该往哪一档降
+        self._session_quality_label = str(label or "")
         qualities = self._quality_labels_for(resolved.episode)
         display_title = title or self._play_title(resolved.video, resolved.episode)
 
@@ -439,6 +446,7 @@ class VideoBoardPage(QWidget):
                 start_ms=position, title=self._play_title(remote, episode),
             )
             return
+        self._session_quality_label = str(label or "")
         self._session_video_quality(label)
         if self._player is not None:
             self._player.switch_source(
@@ -558,7 +566,7 @@ class VideoBoardPage(QWidget):
 
     def _on_stall_detected(self, reason: str) -> None:
         """播放器报卡顿/起播超时 → 执行降档或换源（保留播放位置）。"""
-        from modu_workbench.core.video.abr import MAX_DOWNGRADES, next_lower, pick_variant
+        from modu_workbench.core.video.abr import MAX_DOWNGRADES, next_lower, variant_label
 
         remote = self._session_remote
         episode = self._session_episode
@@ -570,25 +578,43 @@ class VideoBoardPage(QWidget):
             return
         if reason == "downgrade" and self._downgrade_count < MAX_DOWNGRADES:
             variants = [quality for quality in (episode.qualities or []) if quality.url]
-            target = None
-            if len(variants) >= 2:
-                current = next((item for item in variants
-                                if item.label == (self._session_video.quality
-                                                  if self._session_video else "")), None)
-                if current is None:
-                    current = pick_variant(variants, policy="highest")
-                target = next_lower(variants, current)
-            if target is not None and target.label:
+            target = self._lower_variant(variants, variant_label)
+            if target is not None and getattr(target, "label", ""):
                 self._downgrade_count += 1
                 self._task_bar.note(
                     f"网络偏慢，正在自动降低清晰度到 {target.label}"
                     f"（第 {self._downgrade_count} 次）…")
                 self._on_quality_requested(target.label)
                 return
-            # 没有更低档可降 → 直接换源
+            # 没有"比当前更低"的档可降 → 直接换源
         # 到底就换源（跨源定位同一集，保留进度）
         self._task_bar.note("该线路持续卡顿，正在自动更换片源…")
         self._swap_source_keeping_position(remote, episode, position)
+
+    def _lower_variant(self, variants: list, label_of):  # noqa: ANN001, ANN202
+        """挑一个**确实比当前更低**的档位；挑不到返回 None。
+
+        为什么不能"从最高档往下数一格"（这是首版的真实缺陷）：
+        播放的是主清单（`episode.qualities` 常常为空、`session_video.quality` 也没写），
+        若把"当前档"当成最高档，`next_lower` 就会从 1080P 直接跳到最低的 538P —— 画质断崖。
+        所以：**先看当前档标签，认不出来就认为"已经在最低可用档"，直接去换源**，
+        宁可换源也不要莫名其妙掉一半分辨率。
+        """
+        from modu_workbench.core.video.abr import next_lower
+
+        if len(variants) < 2:
+            return None
+        labels = set()
+        for candidate in (self._session_quality_label,
+                          getattr(self._session_video, "quality", "") if self._session_video else "",
+                          getattr(self._session_episode, "quality_label", "") if self._session_episode else ""):
+            if candidate:
+                labels.add(str(candidate))
+        current = next((item for item in variants
+                        if label_of(item) in labels or getattr(item, "label", "") in labels), None)
+        if current is None:
+            return None
+        return next_lower(variants, current)
 
     def _swap_source_keeping_position(self, remote: RemoteVideo, episode: Episode,
                                       position_ms: int) -> None:
@@ -685,6 +711,9 @@ class VideoBoardPage(QWidget):
         self._session_episode = None
         self._session_source = "local"
         self._session_referer = ""
+        # 本地文件没有多档可选：清掉会话档位，避免残留上一次在线播放的档位影响自愈判定
+        self._session_quality_label = "" if video.quality == "本地" else str(video.quality or "")
+        self._downgrade_count = 0
         title = video.display()
         start = self._resume_position(video)
         if self._player is None:
