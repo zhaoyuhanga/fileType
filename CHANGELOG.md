@@ -134,6 +134,18 @@
 不内置浏览器内核/不执行页面 JS（**纯 JS 渲染站点无法支持**）、不做实时 Anime4K 超分
 （改离线 ffmpeg 增强）、**不发送弹幕**、不做 DLNA/一起看、不做 WebDAV 同步、不做自动过验证码。
 
+### 打包实测（安装 → 自检 → 卸载闭环）
+
+`packaging/build_app.ps1 -Installer` 全程跑通：onedir **388.5 MB** / 安装包 **154.7 MB**，
+exe 字节流模块核验 **48 项**命中；静默安装到 `%LOCALAPPDATA%\Programs\墨软工作台`（388.6 MB，
+随包 `ffmpeg`/`ffprobe` 在位）→ **已安装产物自检 18/18 通过** → 静默卸载后安装目录、
+注册表项、快捷方式全部清干净，而 `%APPDATA%\ModuWorkbench\modu.db` 用户数据保留。
+
+顺带加固了一处**会误报通过**的自检：`ffmpeg_tools` 原先"定位不到 ffmpeg 也算通过"，
+而冻结运行时会回退到系统 PATH，于是随包丢失也照样报 true。现在冻结运行时必须
+`_MEIPASS/tools/ffmpeg` 存在**且**解析出的 ffmpeg 来自包内；反向验证（藏起随包 ffmpeg）
+会得到退出码 1 + `ffmpeg_tools=false`。详见 `docs/RELEASE.md` 第 7 节。
+
 ## v1.0.5 — 第六大板块：墨软文档（含三批自查修复）
 
 新增第六大板块「墨软文档」（一站式文档工作台），并新增 `doc_*` 五张表（迁移 `v2_document`，

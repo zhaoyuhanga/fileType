@@ -372,15 +372,31 @@ def _run_dependency_check(output_path: str) -> int:
     def check_ffmpeg_tools() -> bool:
         """随包 ffmpeg/ffprobe 可定位且能执行（音视频转换与 HLS 合流依赖它）。
 
-        未随包时不视为失败：用户可自行安装或用 MODU_FFMPEG 指定 —— 下载会退回 .ts。
+        两条判定：
+        1. **打包产物里必须真的带上 ffmpeg**：冻结运行时 `_MEIPASS/tools/ffmpeg` 必须存在
+           （否则 spec 的 `datas` 写错/漏了，用户会得到"下载退化为 .ts、音视频转换不可用"，
+           而旧逻辑会因为 `find_ffmpeg()` 回退到 PATH 而**误报通过**）；
+        2. 源码运行时缺 ffmpeg 不算失败：用户可自行安装或用 `MODU_FFMPEG` 指定。
         """
         import subprocess
+        import sys
+        from pathlib import Path as _Path
 
-        from modu_workbench.core.platform.media import find_ffmpeg, find_ffprobe
+        from modu_workbench.core.platform.media import bundled_dir, find_ffmpeg, find_ffprobe
+
+        frozen = bool(getattr(sys, "frozen", False))
+        bundled = bundled_dir()
+        if frozen:
+            # 冻结时随包目录必须存在，且解析出来的 ffmpeg 必须来自包内
+            meipass = _Path(getattr(sys, "_MEIPASS", "") or "")
+            if bundled is None or not str(bundled).startswith(str(meipass)):
+                return False
 
         ffmpeg = find_ffmpeg()
         if not ffmpeg:
-            return True   # 可选依赖：缺省不算打包失败
+            return not frozen   # 源码运行：可选依赖；打包运行：必须随包
+        if frozen and bundled is not None and not str(_Path(ffmpeg)).startswith(str(bundled)):
+            return False        # 打包后却用了系统 PATH 的 ffmpeg：说明随包丢失了
         try:
             out = subprocess.run([ffmpeg, "-hide_banner", "-version"], capture_output=True,
                                  text=True, encoding="utf-8", errors="replace", timeout=20,
