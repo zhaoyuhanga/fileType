@@ -72,6 +72,107 @@ def video_auto_switch_pref() -> bool:
     return str(value).lower() not in ("false", "0", "no", "")
 
 
+# --------------------------------------------------------------------------- 图片代理（V3-f）
+
+
+def proxied_image(url: str, referer: str = "") -> str:
+    """把远程海报地址改写成**本机图片代理**地址（治采集站的防盗链 403）。
+
+    采集站的海报往往校验 Referer，直接交给 Qt 去下就是一张破图；走
+    `services.media_proxy.image_url()` 后由本机带 Referer/UA 取回并缓存
+    （`Cache-Control: max-age=86400`，见计划 3.3.6）。
+
+    约定：
+    - `""` / `None` → 返回 `""`（调用方据此走占位图）；
+    - 已经是本机代理地址 → 原样返回（`image_url` 自带幂等，这里不重复包一层）；
+    - **任何异常都退回原地址**：代理起不来时"直连"顶多是破图，总好过整个界面报错。
+
+    代理模块是惰性导入的：`boards.video` 的纯逻辑（表格、匹配）不该因为
+    "导入界面代码"就顺带把本机 HTTP 代理服务拉起来。
+    """
+    text = (url or "").strip()
+    if not text:
+        return ""
+    try:
+        from modu_workbench.services.media_proxy import image_url
+
+        return image_url(text, referer) or text
+    except Exception:  # noqa: BLE001  代理不可用时退回直连，绝不打断渲染
+        return text
+
+
+class _ImageFetchWorker(QThread):
+    """后台取图：**只做网络 IO**，解码与 setPixmap 回到 UI 线程做。
+
+    为什么不在工作线程里直接 `QPixmap.loadFromData`：QPixmap 依赖 GUI 后端，
+    在非 GUI 线程上构造属于未定义行为（X11 下会直接崩）。所以这里只把原始字节
+    带回来，由 `load_pixmap` 在主线程解码。
+    """
+
+    fetched = Signal(str, object)     # url, bytes（失败时是 None）
+
+    TIMEOUT = 8.0
+
+    def __init__(self, url: str, parent=None):
+        super().__init__(parent)
+        self._url = url
+
+    def run(self) -> None:  # noqa: D102
+        import requests
+
+        payload = None
+        try:
+            response = requests.get(self._url, timeout=self.TIMEOUT)
+            if response.ok and response.content:
+                payload = response.content
+        except Exception:  # noqa: BLE001  取图失败就是"没有封面"，不是错误
+            payload = None
+        self.fetched.emit(self._url, payload)
+
+
+def load_pixmap(url: str, referer: str = "", size: tuple[int, int] | None = None,
+                *, on_loaded=None, parent=None):  # noqa: ANN001, ANN201
+    """异步加载远程封面，`on_loaded(QPixmap|None)` 回调；返回 QThread（调用方要留着引用）。
+
+    与源设置里那些 Worker 同样的用法：拿到返回值后必须持有它 ——
+    丢掉仍在运行的 QThread 引用会让进程直接崩（见
+    `detail.py::VideoDetailDialog.shutdown` 里的同一条教训）。
+
+    行为约定（计划 3.3.6 的"失败回退"）：
+    - 空地址 → 同步回调 `None`（不起线程），调用方显示既定占位图；
+    - 下载/解码失败 → 回调 `None`，**不弹任何错误框**（顶多由调用方写个 tooltip）；
+    - `size` 给了就等比缩放到该尺寸，避免原图直接贴上去。
+    """
+    from PySide6.QtGui import QPixmap
+
+    target = proxied_image(url, referer)
+    if not target:
+        if on_loaded is not None:
+            on_loaded(None)
+        return None
+
+    worker = _ImageFetchWorker(target, parent)
+
+    def _on_fetched(_url: str, payload) -> None:  # noqa: ANN001
+        pixmap = None
+        if payload:
+            candidate = QPixmap()
+            if candidate.loadFromData(payload) and not candidate.isNull():
+                if size:
+                    candidate = candidate.scaled(
+                        int(size[0]), int(size[1]),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                pixmap = candidate
+        if on_loaded is not None:
+            on_loaded(pixmap)
+
+    worker.fetched.connect(_on_fetched)
+    worker.start()
+    return worker
+
+
 # --------------------------------------------------------------------------- 表格
 
 
@@ -492,12 +593,18 @@ class HdSearchWorker(QThread):
 
 
 class DownloadWorker(QThread):
-    """批量下载（可选跨源兜底与取消）。"""
+    """批量下载（可选跨源兜底、可取消、可暂停/继续）。
+
+    暂停/继续的实现要点：**暂停不是"杀掉线程"** —— 它只是一个 `threading.Event`，
+    分片下载器在四个检查点等它（取清单后 / 每片开始前 / 每片写盘后 / 拼接前），
+    已下载的分片留在 `.parts/` 里。因此"暂停后继续"是**真续传**，不会从头再来。
+    """
 
     progressed = Signal(int, int, str)
     taskDone = Signal(object)        # DownloadResult
     finishedAll = Signal(object)     # List[DownloadResult]
     failed = Signal(str)
+    pausedChanged = Signal(bool)
 
     def __init__(self, tasks: Iterable[tuple], dest_dir: str, *, allow_cross_source: bool = True,
                  parent=None, library=None):
@@ -507,9 +614,34 @@ class DownloadWorker(QThread):
         self._allow_cross = allow_cross_source
         self._library = library
         self._cancel = threading.Event()
+        self._pause = threading.Event()
+
+    # ------------------------------------------------------------------ 控制
 
     def cancel(self) -> None:
         self._cancel.set()
+        self._pause.clear()
+
+    def pause(self) -> None:
+        """暂停：分片下载器在下一个检查点停下，已下载分片保留。"""
+        if self._cancel.is_set():
+            return
+        self._pause.set()
+        self.pausedChanged.emit(True)
+
+    def resume(self) -> None:
+        self._pause.clear()
+        self.pausedChanged.emit(False)
+
+    @property
+    def is_paused(self) -> bool:
+        return self._pause.is_set()
+
+    @property
+    def paused(self) -> bool:
+        return self._pause.is_set()
+
+    # ------------------------------------------------------------------ 执行
 
     def run(self) -> None:  # noqa: D102
         try:
@@ -519,10 +651,45 @@ class DownloadWorker(QThread):
                 on_progress=lambda done, total, message: self.progressed.emit(done, total, message),
                 on_task_done=lambda result: self.taskDone.emit(result),
                 cancel=self._cancel, allow_cross_source=self._allow_cross,
+                pause_event=self._pause,
             )
             self.finishedAll.emit(results)
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
+
+
+class DanmakuWorker(QThread):
+    """后台取弹幕（弹弹play）：匹配 + 下载 + 落盘缓存，绝不阻塞 UI。
+
+    弹幕是**可选增强**：任何失败都只回报一句可读原因，不影响正在播放的视频。
+    """
+
+    fetched = Signal(object)          # DanmakuResult
+
+    def __init__(self, title: str, episode_label: str = "", *, episode_number: int = 0,
+                 year: str = "", parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._episode = episode_label
+        self._number = episode_number
+        self._year = year
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    def run(self) -> None:  # noqa: D102
+        from modu_workbench.ui_kit.media.danmaku_bridge import DanmakuFetcher
+
+        try:
+            result = DanmakuFetcher().fetch(
+                self._title, self._episode, episode_number=self._number,
+                year=self._year, cancel=self._cancel)
+        except Exception as error:  # noqa: BLE001  弹幕失败不能影响播放
+            from modu_workbench.ui_kit.media.danmaku_bridge import DanmakuResult
+
+            result = DanmakuResult(note=f"弹幕获取失败：{error}")
+        self.fetched.emit(result)
 
 
 class ConvertWorker(QThread):
@@ -587,6 +754,8 @@ __all__ = [
     "fill_video_row",
     "make_item",
     "make_kind_combo",
+    "load_pixmap",
+    "proxied_image",
     "remote_columns",
     "row_remote",
     "row_video_id",

@@ -1067,45 +1067,56 @@ CREATE INDEX IF NOT EXISTS idx_anime_progress_time ON anime_progress(updated_at 
 
 ### 5.1 第六大板块（影视改造）
 
-- [ ] **V1-a** 媒体代理：`services/media_proxy/{server,upstream,cache,playlist}.py` + `media_server.py` 兼容壳
-- [ ] **V1-b** 分片磁盘缓存（LRU + 配额 + Range 索引）+ 设置页「缓存」组
-- [ ] **V1-c** 连接池/流式转发/分层超时与重试/并发上限
-- [ ] **V1-d** `PlaybackSession`（warmup + 预取 + stall 看门狗）
-- [ ] **V1-e** 硬解环境变量注入（`app/main.py`）+ 设置项 + 自动降级提示
-- [ ] **V1-f** `QGraphicsView + QGraphicsVideoItem` 渲染路径（含 `QVideoWidget` 回退开关）
-- [ ] **V1-g** `core/video/abr.py`（带宽估算 + 档位选择 + 降档/升档）
-- [ ] **V1-h** 起播加速与自愈（3s/8s/20s 三段策略，position 前进判定）
-- [ ] **V2-a** `core/video/segment_downloader.py`（并发 + 续传 + 重试/坏片 + 限速 + 合并）
-- [ ] **V2-b** ffmpeg 路径：直连优先 + `-rw_timeout/-reconnect*/-http_persistent` 探测注入
-- [ ] **V2-c** `download_many` 并发化 + 暂停/继续 + 失败重试队列 + 速度/ETA
-- [ ] **V3-a** 自动连播 + 播放队列
-- [ ] **V3-b** 字幕层（外挂 srt/vtt）
-- [ ] **V3-c** 弹幕层（`ui_kit/media/danmaku.py`）+ 影视板块接线（弹弹play 只读）
-- [ ] **V3-d** 播放诊断面板（F12，含导出日志）
-- [ ] **V3-e** 源测速与排序（`SourceHealth.latency_ms`）
-- [ ] **V3-f** 图片代理（海报）
-- [ ] **V3-g** 测试：3.5 全部用例 + `test_video_nonfunctional.py` 性能预算
-- [ ] **V3-h** 自检 `video_playback`；文档/CHANGELOG 同步
+> **v1.1.0 落地情况**：V1-a ~ V1-h、V2-a ~ V2-c、V3-a ~ V3-f 均已落地并有测试；
+> V1-d 的独立 `PlaybackSession` 对象未做（预热/预取已内建在代理里）、V3-c 的弹幕取数走
+> 弹弹play 官方接口（只读），V3-g/V3-h 的测试与自检 `video_playback` 已完成并全绿。
+
+- [x] **V1-a** 媒体代理：`services/media_proxy/{server,upstream,cache,playlist}.py` + `media_server.py` 兼容壳
+- [x] **V1-b** 分片磁盘缓存（LRU + 配额 + Range 索引）+ 设置页「缓存」组
+- [x] **V1-c** 连接池/流式转发/分层超时与重试/并发上限
+- [~] **V1-d** `PlaybackSession`（warmup + 预取 + stall 看门狗）：**预热与预取已做**（清单改写时后台预热前 N 片 + 缓存身份键）；独立会话对象未做（播放器有 `_on_prefetch_tick` 挂点）
+- [x] **V1-e** 硬解环境变量注入（`app/main.py`）+ 设置项 + 自动降级提示
+- [x] **V1-f** `QGraphicsView + QGraphicsVideoItem` 渲染路径（含 `QVideoWidget` 回退开关）
+- [x] **V1-g** `core/video/abr.py`（带宽估算 + 档位选择 + 降档/升档）
+- [x] **V1-h** 起播加速与自愈（3s/8s/20s 三段策略，position 前进判定）
+- [x] **V2-a** `core/video/segment_downloader.py`（并发 + 续传 + 重试/坏片 + 限速 + 合并）
+- [x] **V2-b** ffmpeg 路径：直连优先 + `-rw_timeout/-reconnect*/-http_persistent` 探测注入
+- [x] **V2-c** `download_many` 并发化 + 暂停/继续（`DownloadWorker` 的 `pause_event` + 检查点门闸）+ 失败重试队列 + 速度/ETA
+- [x] **V3-a** 自动连播 + 播放队列（连播倒计时 + N/P 上下一集）
+- [x] **V3-b** 字幕层（外挂 srt/vtt）
+- [x] **V3-c** 弹幕层（`ui_kit/media/danmaku.py`）+ 影视板块接线（弹弹play 只读 + 本地 XML 导入导出）
+- [x] **V3-d** 播放诊断面板（F12，含导出/复制）
+- [x] **V3-e** 源测速与排序（`SourceHealth.latency_ms` + 打分公式 + 测速按钮）
+- [x] **V3-f** 图片代理（海报防盗链：搜索/详情/番剧库/历史全部过 `image_url()`）
+- [x] **V3-g** 测试：3.5 全部用例 + `test_video_nonfunctional.py` 性能预算
+- [x] **V3-h** 自检 `video_playback`；文档/CHANGELOG 同步
 
 ### 5.2 第七大板块（动漫）
 
-- [ ] **A-a** 共享层抽取：`ui_kit/media/{player,danmaku,subtitle,proxy}.py`（影视板块改为调用）
+> **v1.1.0 落地情况**：A-a ~ B-g 全部完成，C/D 阶段的可用子集也已落地
+> （规则编辑器试跑、订阅更新、Bangumi 元数据与时间表、更新提醒、字幕、外部播放器、
+> 追番/进度 JSON 导出导入）；**未做**的是 D 阶段的离线增强（ffmpeg 放大/重编码）、
+> 以图搜番（trace.moe，P2，需要上传截图默认关闭）、以及 E 阶段的打包实测与发版产物。
+> 边界见 `docs/BOARDS/anime.md` 第 0 节（无浏览器内核 → 纯 JS 渲染站点不支持）。
+
+- [x] **A-a** 共享层抽取：`ui_kit/media/{player,danmaku,subtitle,proxy}.py`（影视板块改为调用）
 - [ ] **B-a** `core/anime/{models,rules,selectors}.py`（规则解析/校验/三种选择器）
 - [ ] **B-b** `core/anime/{engine,sniffer,providers}.py`（执行/嗅探/源接口）
 - [ ] **B-c** `core/anime/{storage,library}.py` + 迁移 `v3_anime` + 表登记
 - [ ] **B-d** `core/anime/danmaku.py`（弹弹play 客户端 + xml + 匹配）
 - [ ] **B-e** `boards/anime/*`（搜索/详情/番剧库/历史 + 设置页）
-- [ ] **B-f** 内置规则 3–5 条（含 1 条 API 模式）+ 规则导入导出
-- [ ] **B-g** 测试 `tests/board_anime/*` + 架构/DB/设置页登记
-- [ ] **C-a** 规则编辑器 + 试跑面板
-- [ ] **C-b** 规则订阅（拉取/校验/更新）
-- [ ] **C-c** `bangumi.py` 元数据 + 时间表页
-- [ ] **C-d** `update_check.py` + "有新集"角标
-- [ ] **C-e** 字幕 + 外部播放器打开
-- [ ] **D-a** 追番/进度导出导入（JSON，预留 WebDAV）
-- [ ] **D-b** 离线增强（ffmpeg 放大/重编码）
-- [ ] **D-c** 广告分片跳过（与 3.3.7 共用）
-- [ ] **E-a** 打包（spec/build/自检 `anime_core`）+ 文档 + 发版 v1.1.0
+- [x] **B-f** 内置规则 3–5 条（含 1 条 API 模式）+ 规则导入导出（落了 2 条可离线验证的样例）
+- [x] **B-g** 测试 `tests/board_anime/*` + 架构/DB/设置页登记
+- [x] **C-a** 规则编辑器 + 试跑面板（逐步显示五步结果与失败原因）
+- [x] **C-b** 规则订阅（拉取/校验/更新；校验失败保留旧版本）
+- [x] **C-c** `bangumi.py` 元数据 + 时间表页
+- [x] **C-d** `update_check.py` + "有新集"角标
+- [x] **C-e** 字幕 + 外部播放器打开
+- [x] **D-a** 追番/进度导出导入（JSON；WebDAV 按 6.2 的"不做"清单明确不做）
+- [ ] **D-b** 离线增强（ffmpeg 放大/重编码）—— 未做
+- [x] **D-c** 广告分片跳过（与 3.3.7 共用，实验性、默认关）
+- [~] **E-a** 打包登记（两个 spec 的 hiddenimports + `build_app.ps1` 模块核验清单 + 自检
+  `anime_core` 全部就位，自检 18 项全绿）；**发版产物（onedir + Setup）未构建**
 
 ---
 

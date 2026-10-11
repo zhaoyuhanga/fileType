@@ -127,7 +127,8 @@ def test_board_registered_and_titled() -> None:
     assert spec.title == "墨软文档"
     assert spec.icon and spec.description
     keys = [board.key for board in ACTIVE_BOARDS]
-    assert keys[-1] == "document", "第六大板块追加在末尾，不影响既有板块位置"
+    # 第六（文档）、第七（动漫）板块依次追加在末尾，不影响既有板块位置
+    assert keys[-2:] == ["document", "anime"], "新板块追加在末尾，不影响既有板块位置"
 
 
 def test_board_has_all_panels(board: DocumentBoardPage) -> None:

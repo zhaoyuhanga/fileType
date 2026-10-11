@@ -61,6 +61,10 @@ class HlsPlaylist:
     key_iv: bytes | None = None
     live: bool = False
     headers: dict = field(default_factory=dict)
+    #: 媒体清单所属变体的声明码率（从主清单选中时回填，用于估算总大小/ETA）
+    bandwidth: int = 0
+    #: 每个分片的 EXTINF 时长（与 `segments` 同序；缺失处为 0）
+    segment_durations: List[float] = field(default_factory=list)
 
     @property
     def aes128(self) -> bool:
@@ -187,15 +191,16 @@ def parse_m3u8(text: str, base_url: str) -> HlsPlaylist:
             continue
 
         playlist.segments.append(absolute)
-        if pending_inf:
-            inf_durations.append(pending_inf)
+        # 时长与分片一一对齐：没有 EXTINF 的补 0，保持索引可直接使用
+        inf_durations.append(pending_inf)
         pending_inf = 0.0
 
     playlist.is_master = bool(playlist.variants)
     playlist.is_media = bool(playlist.segments)
+    playlist.segment_durations = list(inf_durations)
     # 分片时长优先用 EXTINF 的最大值（贴合 TARGETDURATION 语义）；
     # 没有 EXTINF 时才退回清单声明的 TARGETDURATION
-    if inf_durations:
+    if inf_durations and max(inf_durations) > 0:
         playlist.target_duration = max(inf_durations)
     else:
         playlist.target_duration = declared_target
@@ -218,6 +223,63 @@ def segment_iv(playlist: HlsPlaylist, index: int) -> bytes:
     if playlist.key_iv is not None:
         return playlist.key_iv
     return index.to_bytes(16, "big")
+
+
+# --------------------------------------------------------------------------- 广告分片识别
+
+
+@dataclass
+class AdSegment:
+    """疑似广告分片（识别结果，供用户确认而不是静默丢弃）。"""
+
+    index: int
+    url: str
+    duration: float
+    reason: str = ""
+
+
+def looks_like_ad_segment(durations: list[float], index: int, urls: list[str],
+                          *, ratio: float = 0.5) -> tuple[bool, str]:
+    """判断第 `index` 个分片是否"疑似广告"（保守规则，宁可漏判不误杀）。
+
+    两条同时满足才算：
+    1. 时长 < 中位时长的 `ratio`（默认 0.5 倍）—— 广告通常明显更短；
+    2. 与前一片**不属于同一个目录**（CDN 目录不同 —— 插播广告常来自另一路）。
+
+    为什么这么保守：误判会直接丢正片内容，所以调用方必须**先提示再跳过**，
+    而且默认关闭（`video/skip_ad_segments`）。
+    """
+    if not durations or index <= 0 or index >= len(durations):
+        return False, ""
+    ordered = sorted(value for value in durations if value > 0)
+    if not ordered:
+        return False, ""
+    median = ordered[len(ordered) // 2]
+    duration = durations[index]
+    if duration <= 0 or median <= 0 or duration >= median * ratio:
+        return False, ""
+    if index - 1 < len(urls) and index < len(urls):
+        previous_dir = urls[index - 1].rsplit("/", 1)[0]
+        current_dir = urls[index].rsplit("/", 1)[0]
+        if previous_dir == current_dir:
+            return False, ""
+    return True, f"时长 {duration:.1f}s 远短于中位 {median:.1f}s，且与前一片不同目录"
+
+
+def find_ad_segments(playlist: HlsPlaylist, *, ratio: float = 0.5,
+                     max_skip: int = 3) -> list[AdSegment]:
+    """列出疑似广告分片（最多 `max_skip` 个 —— 跳太多必然是误判）。"""
+    durations = list(playlist.segment_durations or [])
+    urls = list(playlist.segments or [])
+    found: list[AdSegment] = []
+    for index in range(len(urls)):
+        hit, reason = looks_like_ad_segment(durations, index, urls, ratio=ratio)
+        if hit:
+            found.append(AdSegment(index=index, url=urls[index],
+                                   duration=durations[index], reason=reason))
+            if len(found) >= max(1, max_skip):
+                break
+    return found
 
 
 def aes128_decrypt(data: bytes, key: bytes, iv: bytes) -> bytes:

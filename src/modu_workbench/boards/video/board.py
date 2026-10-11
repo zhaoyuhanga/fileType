@@ -48,6 +48,7 @@ from .player import VideoPlayerDialog, local_file_url
 from .search import VideoSearchPage
 from .sources import VideoSourceDialog
 from .widgets import (
+    DanmakuWorker,
     DetailWorker,
     DownloadWorker,
     ResolveWorker,
@@ -64,8 +65,19 @@ PROGRESS_SAVE_MS = 10_000
 
 
 def is_hls_url(url: str) -> bool:
-    """地址是否是 HLS 清单（m3u8 需要走网页播放内核 + 清单代理）。"""
+    """地址是否是 HLS 清单（m3u8 需要走清单代理 + 分片预取）。"""
     return ".m3u8" in (url or "").lower().split("?", 1)[0]
+
+
+def _episode_number(episode) -> int:  # noqa: ANN001
+    """从剧集名里解析集数（弹幕匹配要用）；解析不出返回 0。
+
+    真正的实现放在共享层（ui_kit.media.danmaku_bridge.episode_number_of）：
+    板块直接引用 core/anime 会被架构闸门拦下。
+    """
+    from modu_workbench.ui_kit.media.danmaku_bridge import episode_number_of
+
+    return episode_number_of(episode)
 
 
 class VideoBoardPage(QWidget):
@@ -96,6 +108,10 @@ class VideoBoardPage(QWidget):
         self._detail_workers: list[DetailWorker] = []
         self._resolve_worker: ResolveWorker | None = None
         self._download_worker: DownloadWorker | None = None
+        # 下载队列状态：失败的原始任务留着重试（`.parts/` 已保留，重试即续传）
+        self._download_tasks: list = []
+        self._failed_tasks: list = []
+        self._danmaku_worker: DanmakuWorker | None = None
 
         # 播放会话：当前在播放器里播放的条目与剧集，供换集/换清晰度复用
         self._player: VideoPlayerDialog | None = None
@@ -133,6 +149,21 @@ class VideoBoardPage(QWidget):
         settings_button.setToolTip("打开「设置 → 影视」：下载目录、自动换源、数据源启用")
         settings_button.clicked.connect(self._open_board_settings)
         nav_row.addWidget(settings_button)
+
+        # 下载控制（暂停/继续 + 重试失败项）：
+        # 放在导航行而不是 TaskBar 里 —— TaskBar 是全板块共用的，加按钮会影响别的板块
+        self._pause_button = make_nav_button("⏸ 暂停下载")
+        self._pause_button.setToolTip("暂停后已下载的分片会保留，继续时从断点接着下")
+        self._pause_button.clicked.connect(self.toggle_pause_download)
+        self._pause_button.setEnabled(False)
+        nav_row.addWidget(self._pause_button)
+
+        self._retry_button = make_nav_button("↻ 重试失败项")
+        self._retry_button.setToolTip("重试上次失败的条目（已下载的分片不会重下）")
+        self._retry_button.clicked.connect(self.retry_failed_downloads)
+        self._retry_button.setEnabled(False)
+        nav_row.addWidget(self._retry_button)
+
         nav_row.addStretch(1)
         self._source_hint = chip("")
         nav_row.addWidget(self._source_hint)
@@ -310,6 +341,7 @@ class VideoBoardPage(QWidget):
             self._player.episodeRequested.connect(self._on_episode_step)
             self._player.closed.connect(self._on_player_closed)
             self._player.finished.connect(self._on_player_finished)
+            self._connect_self_heal(self._player)
             self._player.show()
         else:
             self._player.set_qualities(qualities, label)
@@ -442,6 +474,167 @@ class VideoBoardPage(QWidget):
             title=self._play_title(remote, target),
         )
 
+    def _connect_self_heal(self, player) -> None:  # noqa: ANN001
+        """接上播放器的自愈与诊断信号（V1-h）。"""
+        for signal_name in ("stallDetected", "diagnosticsRequested"):
+            if not hasattr(player, signal_name):
+                return            # 旧替身播放器没有这些信号，静默跳过
+        self._downgrade_count = 0
+        player.stallDetected.connect(self._on_stall_detected)
+        player.diagnosticsRequested.connect(self._on_diagnostics_requested)
+        if hasattr(player, "danmakuRequested"):
+            player.danmakuRequested.connect(self._load_danmaku)
+        if hasattr(player, "danmakuImportRequested"):
+            player.danmakuImportRequested.connect(self._import_danmaku)
+
+    # ------------------------------------------------------------------ 弹幕（V3-c）
+
+    def _load_danmaku(self) -> None:
+        """取当前播放条目的弹幕（弹弹play，只读；未配置时给出明确提示）。"""
+        remote = self._session_remote
+        episode = self._session_episode
+        if self._player is None or remote is None:
+            return
+        if self._danmaku_worker is not None and self._danmaku_worker.isRunning():
+            return
+        number = _episode_number(episode)
+        worker = DanmakuWorker(remote.title, episode.name if episode else "",
+                               episode_number=number, year=remote.year or "", parent=self)
+        worker.fetched.connect(self._on_danmaku_fetched)
+        worker.finished.connect(self._on_danmaku_thread_finished)
+        self._danmaku_worker = worker
+        if self._player is not None:
+            self._player.set_status("正在获取弹幕…（未配置弹幕 AppId 时可右键弹幕按钮手动导入）")
+        worker.start()
+
+    def _on_danmaku_fetched(self, result) -> None:  # noqa: ANN001
+        if self._player is None:
+            return
+        if getattr(result, "items", None):
+            self._player.set_danmaku(result.items)
+            self._player.set_status(result.note)
+            if result.matched_title:
+                self._toaster.success(f"弹幕：{result.note}")
+        else:
+            self._player.set_status(getattr(result, "note", "") or "没有可用的弹幕")
+
+    def _import_danmaku(self) -> None:
+        """手动导入本地弹幕 XML（自动匹配不上时的兜底）。"""
+        from PySide6.QtWidgets import QFileDialog
+
+        from modu_workbench.ui_kit.media.danmaku_bridge import import_danmaku_file
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择弹幕文件", "", "弹幕 XML (*.xml);;所有文件 (*)")
+        if not path:
+            return
+        result = import_danmaku_file(path)
+        if getattr(result, "items", None) and self._player is not None:
+            self._player.set_danmaku(result.items)
+            self._player.set_status(result.note)
+        elif self._player is not None:
+            self._player.set_status(result.note)
+
+    def _export_danmaku(self) -> None:
+        """导出当前弹幕（与主流播放器互导）。"""
+        from PySide6.QtWidgets import QFileDialog
+
+        from modu_workbench.ui_kit.media.danmaku_bridge import export_danmaku_file
+
+        if self._player is None:
+            return
+        items = self._player.danmaku_items() if hasattr(self._player, "danmaku_items") else []
+        if not items:
+            self._toaster.info("当前没有弹幕可导出（先右键弹幕按钮导入，或开启弹幕）")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "导出弹幕", "danmaku.xml", "弹幕 XML (*.xml)")
+        if not path:
+            return
+        try:
+            export_danmaku_file(path, items)
+            self._toaster.success(f"已导出 {len(items)} 条弹幕")
+        except OSError as error:
+            self._toaster.error(f"导出失败：{error}")
+
+    def _on_stall_detected(self, reason: str) -> None:
+        """播放器报卡顿/起播超时 → 执行降档或换源（保留播放位置）。"""
+        from modu_workbench.core.video.abr import MAX_DOWNGRADES, next_lower, pick_variant
+
+        remote = self._session_remote
+        episode = self._session_episode
+        if remote is None or episode is None:
+            return
+        position = self._player.current_position_ms() if self._player is not None else 0
+        if reason == "download":
+            self._task_bar.note("该源长时间无法起播：建议先「下载到本地」，或手动换源。")
+            return
+        if reason == "downgrade" and self._downgrade_count < MAX_DOWNGRADES:
+            variants = [quality for quality in (episode.qualities or []) if quality.url]
+            target = None
+            if len(variants) >= 2:
+                current = next((item for item in variants
+                                if item.label == (self._session_video.quality
+                                                  if self._session_video else "")), None)
+                if current is None:
+                    current = pick_variant(variants, policy="highest")
+                target = next_lower(variants, current)
+            if target is not None and target.label:
+                self._downgrade_count += 1
+                self._task_bar.note(
+                    f"网络偏慢，正在自动降低清晰度到 {target.label}"
+                    f"（第 {self._downgrade_count} 次）…")
+                self._on_quality_requested(target.label)
+                return
+            # 没有更低档可降 → 直接换源
+        # 到底就换源（跨源定位同一集，保留进度）
+        self._task_bar.note("该线路持续卡顿，正在自动更换片源…")
+        self._swap_source_keeping_position(remote, episode, position)
+
+    def _swap_source_keeping_position(self, remote: RemoteVideo, episode: Episode,
+                                      position_ms: int) -> None:
+        """换到其他源播同一集，并保留播放位置（`registry` 会排除已失败的源）。"""
+        target = self._player
+        if target is not None and hasattr(target, "set_status"):
+            target.set_status("正在自动更换线路…")
+        self._resolve_and_play(
+            remote, episode, None, start_ms=position_ms,
+            title=self._play_title(remote, episode),
+        )
+
+    def _on_diagnostics_requested(self) -> None:
+        """F12：把诊断摘要打到任务栏（完整信息在播放器浮层里）。"""
+        if self._player is None:
+            return
+        try:
+            info = self._player.diagnostics()
+        except Exception:  # noqa: BLE001
+            return
+        self._task_bar.note(
+            f"播放诊断：{info.get('渲染路径', '?')} · 后端 {info.get('后端', '?')} · "
+            f"卡顿 {info.get('卡顿次数', 0)} 次 · 缓存命中率 "
+            f"{info.get('代理/hit_rate', 0)}"
+        )
+
+    # ------------------------------------------------------------------ 快捷键补充
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """板块级快捷键：`Ctrl+D` 导出当前弹幕（播放器内快捷键见 ui_kit/media/player.py）。
+
+        注意：播放时焦点在播放器窗口上，播放器的 `keyPressEvent` 先拿到按键；
+        这条只在焦点回到板块（例如播放器已关闭、弹幕仍在内存里）时生效。
+        """
+        from PySide6.QtCore import Qt
+
+        if (event.key() == Qt.Key.Key_D
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self._export_danmaku()
+            return
+        super().keyPressEvent(event)
+
+    def export_current_danmaku(self) -> None:
+        """对外暴露的导出入口（菜单/测试用）。"""
+        self._export_danmaku()
+
     def _on_player_closed(self, position_ms: int) -> None:
         if self._session_video is not None and position_ms > 0:
             from .widgets import video_settings
@@ -504,6 +697,7 @@ class VideoBoardPage(QWidget):
             self._player.episodeRequested.connect(self._on_episode_step)
             self._player.closed.connect(self._on_player_closed)
             self._player.finished.connect(self._on_player_finished)
+            self._connect_self_heal(self._player)
             self._player.show()
         else:
             self._player.set_qualities([], video.quality)
@@ -565,8 +759,9 @@ class VideoBoardPage(QWidget):
         dest = video_download_dir_pref()
         Path(dest).mkdir(parents=True, exist_ok=True)
         tasks = [(remote, episode, quality) for episode in episodes]
-        
-        
+
+        self._download_tasks = tasks                     # 失败重试队列要用原始任务
+        self._failed_tasks = []
         self._download_worker = DownloadWorker(
             tasks, dest, allow_cross_source=video_auto_switch_pref(), parent=self,
             library=self._library,
@@ -577,12 +772,65 @@ class VideoBoardPage(QWidget):
         self._download_worker.failed.connect(self._on_download_failed)
         self._download_worker.finished.connect(self._on_download_thread_finished)
         self._task_bar.report(f"开始下载 {len(tasks)} 集到 {dest}")
+        self._pause_button.setEnabled(True)
+        self._pause_button.setText("⏸ 暂停下载")
+        self._download_worker.start()
+
+    def toggle_pause_download(self) -> None:
+        """暂停 / 继续下载（真续传：已下载分片保留在 `.parts/`）。"""
+        worker = self._download_worker
+        if worker is None or not worker.isRunning():
+            self._toaster.info("当前没有下载任务")
+            return
+        if worker.is_paused:
+            worker.resume()
+            self._pause_button.setText("⏸ 暂停下载")
+            self._task_bar.set_text("已继续下载（从已下载的分片接着下）")
+            self._toaster.success("已继续下载")
+        else:
+            worker.pause()
+            self._pause_button.setText("▶ 继续下载")
+            self._task_bar.set_text("已暂停下载：已下载的分片会保留，可随时继续")
+
+    def retry_failed_downloads(self) -> None:
+        """重试上一次失败的条目（不带断点信息时也会自动续传）。"""
+        failed = list(getattr(self, "_failed_tasks", []) or [])
+        if not failed:
+            self._toaster.info("没有需要重试的下载项")
+            return
+        if self._download_worker is not None and self._download_worker.isRunning():
+            self._toaster.info("已有下载任务在进行，请等待或先取消")
+            return
+        dest = video_download_dir_pref()
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        self._failed_tasks = []
+        self._download_worker = DownloadWorker(
+            failed, dest, allow_cross_source=video_auto_switch_pref(), parent=self,
+            library=self._library,
+        )
+        self._download_worker.progressed.connect(self._on_download_progress)
+        self._download_worker.taskDone.connect(self._on_task_done)
+        self._download_worker.finishedAll.connect(self._on_download_finished)
+        self._download_worker.failed.connect(self._on_download_failed)
+        self._download_worker.finished.connect(self._on_download_thread_finished)
+        self._task_bar.report(f"重试 {len(failed)} 个失败项（已下载分片会续传）")
+        self._pause_button.setEnabled(True)
+        self._pause_button.setText("⏸ 暂停下载")
         self._download_worker.start()
 
     def _cancel_download(self) -> None:
         if self._download_worker is not None:
             self._download_worker.cancel()
             self._task_bar.set_text("正在取消下载…")
+
+    def _task_key(self, task) -> str:  # noqa: ANN001
+        """任务的身份键（失败重试队列去重用）：源 + 条目 + 集。"""
+        from modu_workbench.core.video.models import Episode, RemoteVideo
+
+        remote, episode, _quality = task
+        episode_label = episode.name if isinstance(episode, Episode) else ""
+        remote_id = remote.remote_id if isinstance(remote, RemoteVideo) else ""
+        return f"{getattr(remote, 'source', '')}:{remote_id}:{episode_label}"
 
     def _on_download_progress(self, done: int, total: int, message: str) -> None:
         self._task_bar.report(message, done, total)
@@ -599,16 +847,23 @@ class VideoBoardPage(QWidget):
         summary = f"下载完成：成功 {len(ok)}，失败 {len(failed)}"
         if switched:
             summary += f"；其中 {len(switched)} 集自动换源"
+        # 记下失败项：即便用户手动取消，`.parts/` 也留着，重试即续传
+        failed_keys = {item.episode_label for item in failed}
+        self._failed_tasks = [
+            task for task in (getattr(self, "_download_tasks", []) or [])
+            if (task[1].name if task[1] is not None else "") in failed_keys
+        ]
         if failed:
             reasons: list[str] = []
             for item in failed[:3]:
                 if item.message not in reasons:
                     reasons.append(item.message)
             summary += "；失败原因：" + "；".join(reasons)
+            summary += f"（可用「重试失败项」继续，已下载的分片不会重下）"
         self._task_bar.idle(summary)
         if ok:
             self._toaster.success(f"已下载 {len(ok)} 集，可在「我的视频」查看")
-        else:
+        elif failed:
             self._toaster.error("全部下载失败：可在「源设置」里调整源，或改用其他条目")
         self._refresh_pages()
 
@@ -616,9 +871,16 @@ class VideoBoardPage(QWidget):
         self._task_bar.idle(f"下载失败：{message}")
         self._toaster.error(f"下载失败：{message}")
 
+    def _on_danmaku_thread_finished(self) -> None:
+        self._danmaku_worker = None
+
     def _on_download_thread_finished(self) -> None:
         self._download_worker = None
-        
+        if hasattr(self, "_pause_button"):
+            self._pause_button.setEnabled(False)
+            self._pause_button.setText("⏸ 暂停下载")
+        if hasattr(self, "_retry_button"):
+            self._retry_button.setEnabled(bool(self._failed_tasks))
 
     # ------------------------------------------------------------------ 线程清理
 
@@ -647,18 +909,19 @@ class VideoBoardPage(QWidget):
             except RuntimeError:
                 continue
         self._detail_workers.clear()
-        for worker in (self._resolve_worker, self._download_worker):
+        for worker in (self._resolve_worker, self._download_worker, self._danmaku_worker):
             if worker is None:
                 continue
             try:
                 if worker.isRunning():
-                    if isinstance(worker, DownloadWorker):
+                    if isinstance(worker, (DownloadWorker, DanmakuWorker)):
                         worker.cancel()
                     worker.wait(3000)
             except RuntimeError:
                 continue
         self._resolve_worker = None
         self._download_worker = None
+        self._danmaku_worker = None
         if getattr(self, "_progress_timer", None) is not None:
             self._progress_timer.stop()
         if self._player is not None:

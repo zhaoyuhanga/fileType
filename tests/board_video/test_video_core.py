@@ -1209,27 +1209,53 @@ def test_download_cancel(tmp_path: Path) -> None:
 
 
 def test_download_hls_segments_without_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """没有 ffmpeg 时退化为「抓分片 → 拼接为 .ts」，仍然可用。"""
+    """没有 ffmpeg 时退化为「并发抓分片 → 拼接为 .ts」，仍然可用。
+
+    v1.1.0 起分片由 `core/video/segment_downloader.py` 并发抓取（连接复用 +
+    保序落盘），不再逐片 `requests.get`，所以这里替身的是它的两个取流点。
+    """
     from modu_workbench.core.video import downloader as downloader_module
     from modu_workbench.core.video.downloader import download_episode
+    from modu_workbench.core.video.segment_downloader import SegmentDownloader
 
     playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:9.0,\nseg-1.ts\n#EXTINF:9.0,\nseg-2.ts\n#EXT-X-ENDLIST\n"
     segment = b"\x47" + b"\x00" * 90_000      # 90001 字节/片
 
-    def fake_get(url, **kwargs):  # noqa: ANN001
-        if url.endswith(".m3u8"):
-            return _FakeStream([playlist.encode()], url=url,
-                               content_type="application/vnd.apple.mpegurl", text=playlist)
-        return _FakeStream([segment], url=url, content_type="video/mp2t")
-
     monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
-    monkeypatch.setattr(downloader_module.requests, "get", fake_get)
+    monkeypatch.setattr(downloader_module, "_fetch_text", lambda url, headers, timeout: playlist)
+    monkeypatch.setattr(SegmentDownloader, "_get_text", lambda self, url: playlist)
+    monkeypatch.setattr(SegmentDownloader, "_fetch_part", lambda self, item: segment)
 
     remote = RemoteVideo(source="cms", remote_id="1", title="剧", year="2024")
     episode = Episode(name="第01集", url="https://cdn/hls/index.m3u8", index=0)
     path, _resolved = download_episode(remote, episode, tmp_path)
     assert path.suffix == ".ts"
     assert path.stat().st_size == 2 * len(segment)
+
+
+def test_download_hls_legacy_serial_segments_still_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """旧串行分片实现保留为降级路径（并发被源站限流时可一键切回）。"""
+    from modu_workbench.core.video import downloader as downloader_module
+
+    playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:9.0,\nseg-1.ts\n#EXT-X-ENDLIST\n"
+    segment = b"\x47" + b"\x00" * 90_000
+    monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
+    monkeypatch.setattr(downloader_module, "_concurrent_segments_enabled", lambda: False)
+    monkeypatch.setattr(
+        downloader_module.requests, "get",
+        lambda url, **k: _FakeStream([playlist.encode()] if url.endswith(".m3u8") else [segment],
+                                     url=url, content_type="video/mp2t", text=playlist),
+    )
+    target = downloader_module._download_segments(  # noqa: SLF001
+        "https://cdn/hls/index.m3u8", tmp_path,
+        video=RemoteVideo(source="cms", remote_id="1", title="剧"),
+        episode=Episode(name="第01集", url="https://cdn/hls/index.m3u8", index=0),
+        headers={}, on_progress=None, cancel=None, timeout=10.0,
+    )
+    assert target is not None and target.suffix == ".ts"
+    assert target.stat().st_size == len(segment)
 
 
 def test_ffmpeg_download_command_passes_binary_exactly_once(
@@ -1387,7 +1413,12 @@ def test_best_variant_url_locks_the_sharpest_child_playlist() -> None:
 def test_resolve_playback_upgrades_master_playlist_to_best_variant(
     monkeypatch: pytest.MonkeyPatch, storage: VideoStorage, tmp_path: Path
 ) -> None:
-    """播放解析：源给的是主清单时，锁定到最高清晰度并标出画质标签。"""
+    """播放解析：`quality_policy=highest` 时锁定最高清晰度并标出画质标签（回归安全阀）。
+
+    v1.1.0 起默认策略是 `auto`（ABR-lite：按实测带宽选，无历史时目标 720P，
+    见 `core/video/abr.py`），"永远锁最高"改为由设置显式选择。
+    本用例锁定旧行为，保证 `highest` 策略与 v1.0.x 完全一致。
+    """
     from modu_workbench.core.video import library as library_module
     from modu_workbench.core.video.library import VideoLibrary
     from modu_workbench.core.video.sources import SourceInfo, VideoRegistry, VideoSource
@@ -1412,6 +1443,7 @@ def test_resolve_playback_upgrades_master_playlist_to_best_variant(
             return episode.url
 
     monkeypatch.setattr(library_module, "_probe_client", lambda provider: _Http())
+    monkeypatch.setattr(library_module, "_quality_policy", lambda: "highest")
 
     remote = RemoteVideo(source="one", remote_id="1", title="片", year="2024",
                          episodes=[Episode(name="正片", url="https://cdn/index.m3u8", index=0)])
@@ -1448,7 +1480,12 @@ def test_download_hls_rejects_unsupported_encryption(monkeypatch: pytest.MonkeyP
 
 def test_download_hls_decrypts_aes128_without_ffmpeg(monkeypatch: pytest.MonkeyPatch,
                                                     tmp_path: Path) -> None:
-    """AES-128 加密流应当能自行解密下载（不依赖 ffmpeg）。"""
+    """AES-128 加密流应当能自行解密下载（不依赖 ffmpeg）。
+
+    v1.1.0 起解密发生在并发分片下载器里（`SegmentDownloader._decrypt` 复用
+    同一套 `hls.segment_iv` + `aes.aes128_cbc_decrypt`），因此替身点从
+    `requests.get` 换成了 `_get_text` / `_fetch_part`；密钥仍由 `_fetch_key` 取。
+    """
     import binascii
 
     from helpers.aes_encrypt_ref import aes128_cbc_encrypt_ref
@@ -1456,6 +1493,7 @@ def test_download_hls_decrypts_aes128_without_ffmpeg(monkeypatch: pytest.MonkeyP
     from modu_workbench.core.video import downloader as downloader_module
     from modu_workbench.core.video.aes import aes128_cbc_decrypt
     from modu_workbench.core.video.downloader import download_episode
+    from modu_workbench.core.video.segment_downloader import SegmentDownloader
 
     key = binascii.unhexlify("2b7e151628aed2a6abf7158809cf4f3c")
     iv = b"\x00" * 16                      # 未给 IV 时 HLS 用分片序号(0) 作为 IV
@@ -1472,15 +1510,17 @@ def test_download_hls_decrypts_aes128_without_ffmpeg(monkeypatch: pytest.MonkeyP
     )
 
     def fake_get(url, **kwargs):  # noqa: ANN001
-        if url.endswith(".m3u8"):
-            return _FakeStream([playlist.encode()], url=url,
-                               content_type="application/vnd.apple.mpegurl", text=playlist)
         if url.endswith("key.bin"):
             return _FakeStream([key], url=url, content_type="application/octet-stream")
         return _FakeStream([cipher], url=url, content_type="video/mp2t")
 
     monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
     monkeypatch.setattr(downloader_module.requests, "get", fake_get)
+    monkeypatch.setattr(downloader_module, "_fetch_text", lambda url, headers, timeout: playlist)
+    monkeypatch.setattr(SegmentDownloader, "_get_text", lambda self, url: playlist)
+    monkeypatch.setattr(SegmentDownloader, "_fetch_part", lambda self, item: cipher)
+    monkeypatch.setattr(SegmentDownloader, "_fetch_key",
+                        lambda self, playlist_obj: key)
 
     remote = RemoteVideo(source="cms", remote_id="1", title="加密剧", year="2024")
     episode = Episode(name="第01集", url="https://cdn/enc/index.m3u8", index=0)
@@ -1608,18 +1648,29 @@ def test_media_server_proxy_url_keeps_file_extension() -> None:
     assert plain.startswith("/") and "?" in plain
 
 
-def test_media_server_proxy_response_is_length_delimited() -> None:
+def test_media_server_proxy_response_is_length_delimited(monkeypatch) -> None:  # noqa: ANN001
     """代理响应必须能界定长度 —— 这是「播放 fragLoadError / 下载卡 0 字节」的根因。
 
     真实源站常用 chunked 且不带 Content-Length；若本机代理原样转发（既无
     Content-Length 也无 Transfer-Encoding），客户端永远等不到响应结束。
+
+    注意：**没有** Content-Length 的响应现在走「流式 + `Connection: close`」
+    （读到 EOF 即结束），不再全量缓冲；而**内容是清单**时仍读完并显式给长度
+    （清单很小且有 4MB 上限），因此下面断言 Content-Length 存在且一致。
+
+    v1.1.0 起代理默认拒绝访问环回/私网目标（SSRF 收口），本用例是**本机 fixture**，
+    所以显式打开 `MODU_MEDIA_ALLOW_PRIVATE`。
     """
     import http.server
     import socketserver
     import threading
     import urllib.request
 
+    from modu_workbench.services import media_proxy
     from modu_workbench.services import media_server
+
+    monkeypatch.setenv("MODU_MEDIA_ALLOW_PRIVATE", "1")
+    media_proxy.reset_client()
 
     payload = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg.ts\n#EXT-X-ENDLIST\n" * 200
 

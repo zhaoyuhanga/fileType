@@ -163,11 +163,15 @@ def download_episode(
     allow_cross_source: bool = True,
     timeout: float = 30.0,
     resolved: ResolvedPlay | None = None,
+    pause_event: threading.Event | None = None,
 ) -> tuple[Path, ResolvedPlay]:
     """下载某一集到 dest_dir，返回 (保存路径, 解析结果)。
 
     解析地址时优先使用原源；失败（接口变更 / 线路失效 / 网络）时由 registry
     换源搜索同一部片继续尝试，因此调用方无需关心「某个源挂掉」。
+
+    `pause_event` 为 set 时在四个检查点暂停并保留 `.parts/`（见
+    `core/video/segment_downloader.py`），再次调用时会接着下。
     """
     if on_progress:
         label = f"{video.title} {episode.name if episode else ''}".strip()
@@ -196,11 +200,15 @@ def download_episode(
     while True:
         try:
             return _download_resolved(resolved, dest_dir, video=video, on_progress=on_progress,
-                                      cancel=cancel, timeout=timeout), resolved
+                                      cancel=cancel, timeout=timeout,
+                                      pause_event=pause_event), resolved
         except _RetryableSourceError as error:
             # 注意：必须先于 RuntimeError 捕获（前者是后者的子类）
+            # 离线/无源可换时**直接抛原始错误**，不要被 "NoneType is not iterable"
+            # 这类二次错误盖掉真实原因（测试与用户看到的都该是根因）
+            cause = error.cause if isinstance(error.cause, BaseException) else error
             if registry is None or not allow_cross_source:
-                raise error.cause
+                raise cause
             if on_progress:
                 on_progress(0, 0, f"{_label_of(registry, resolved.source)} 下载失败，尝试换源…")
             try:
@@ -236,6 +244,7 @@ def _download_resolved(
     on_progress: ProgressFn | None,
     cancel: threading.Event | None,
     timeout: float,
+    pause_event: threading.Event | None = None,
 ) -> Path:
     """按已解析地址下载（失败抛可换源重试的内部异常）。"""
     from .sources import SourceError
@@ -247,11 +256,12 @@ def _download_resolved(
     dest.mkdir(parents=True, exist_ok=True)
     headers = default_headers(url, resolved.referer)
 
-    # HLS：交给 ffmpeg 直接封装（最稳），或退化到分片拼接
+    # HLS：并发分片下载器优先，ffmpeg 作直连/兜底
     if resolved.is_hls or url.lower().split("?", 1)[0].endswith(".m3u8"):
         try:
             return _download_hls(resolved, dest, video=video, headers=headers,
-                                 on_progress=on_progress, cancel=cancel, timeout=timeout)
+                                 on_progress=on_progress, cancel=cancel, timeout=timeout,
+                                 pause_event=pause_event)
         except _RetryableSourceError:
             raise
         except RuntimeError:
@@ -348,6 +358,62 @@ def _download_direct(
 # --------------------------------------------------------------------------- HLS 下载
 
 
+def _ffmpeg_supports(ffmpeg: str, option: str, *, protocol: str = "http") -> bool:
+    """探测 ffmpeg 是否支持某个 protocol/format 选项（结果按 (ffmpeg, option) 缓存）。
+
+    为什么要探测：`-headers` / `-reconnect` / `-http_persistent` 在不同构建里
+    未必都有；写死会让"某个版本的 ffmpeg 直接报 Option not found"，
+    而**直接把这些选项交给 ffmpeg** 能省掉我们自己的 Python 代理这一跳（V2-b）。
+    """
+    key = (ffmpeg, protocol, option)
+    cached = _FFMPEG_CAPS.get(key)
+    if cached is not None:
+        return cached
+    supported = False
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-h", f"protocol={protocol}"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        text = (result.stdout or "") + (result.stderr or "")
+        supported = option in text
+    except Exception:  # noqa: BLE001  探测失败就当不支持（走代理，最稳）
+        supported = False
+    _FFMPEG_CAPS[key] = supported
+    return supported
+
+
+def _ffmpeg_network_args(ffmpeg: str, headers: dict) -> tuple[list[str], bool]:
+    """返回 (网络参数, 是否已把请求头直接交给 ffmpeg)。
+
+    支持 `-headers` 时**直连源站**（跳过本机代理这一跳）；否则返回空列表，
+    由调用方回退到"本地 playlist + 本机代理"（跨版本最稳）。
+    """
+    args: list[str] = []
+    direct = False
+    if _ffmpeg_supports(ffmpeg, "-headers"):
+        pairs = "".join(f"{key}: {value}\r\n" for key, value in (headers or {}).items()
+                        if key and value)
+        if pairs:
+            args += ["-headers", pairs]
+            direct = True
+        if _ffmpeg_supports(ffmpeg, "-user_agent"):
+            agent = str((headers or {}).get("User-Agent") or "")
+            if agent:
+                args += ["-user_agent", agent]
+    # 网络健壮性参数：按版本探测，不支持就跳过（绝不让 ffmpeg 报 Option not found）
+    if _ffmpeg_supports(ffmpeg, "-rw_timeout"):
+        args += ["-rw_timeout", "20000000"]          # 20s，单位微秒
+    if _ffmpeg_supports(ffmpeg, "-reconnect"):
+        args += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+    if _ffmpeg_supports(ffmpeg, "-http_persistent"):
+        args += ["-http_persistent", "1"]
+    if _ffmpeg_supports(ffmpeg, "-thread_queue_size"):
+        args += ["-thread_queue_size", "1024"]
+    return args, direct
+
+
 def _download_hls(
     resolved: ResolvedPlay,
     dest: Path,
@@ -357,38 +423,314 @@ def _download_hls(
     on_progress: ProgressFn | None,
     cancel: threading.Event | None,
     timeout: float,
+    pause_event: threading.Event | None = None,
 ) -> Path:
-    """m3u8 → 本地文件。优先 ffmpeg 封装；不可用时拼接分片为 .ts。"""
+    """m3u8 → 本地可播放文件。
+
+    优先顺序（V2-a/V2-b）：
+
+    1. **自研并发分片下载器**（默认，非加密流）：并发 6 + 每线程连接复用 +
+       `.parts` 断点续传 + 坏片重试，然后一次 `-c copy` remux 成 MP4。
+       —— 这是"下载慢"的正解：旧实现是严格串行 + 每片新建连接。
+    2. **ffmpeg 直连源站**（带 `-headers`，跳过本机代理那一跳）；
+    3. **ffmpeg 走本机代理**（跨版本最稳，旧路径；代理本身已被重写，不再拖后腿）。
+
+    AES-128 加密流由 1 自行解密；SAMPLE-AES 等无法自行解密的直接走 2/3。
+    """
     from .sources import SourceError
 
     url = _prefer_best_variant(resolved.url, headers)
+    # 取清单本身失败（网络抖动/被拦截）也不能直接判死：继续让 ffmpeg 试一次，
+    # 它是另一条取流实现（不同的超时与重连策略），实测能救回一部分"清单偶发失败"。
+    try:
+        playlist_text = _fetch_text(url, headers, timeout)
+        playlist = parse_m3u8(playlist_text, url)
+        if playlist.is_master:
+            best = playlist.best_variant()
+            if best is None:
+                raise SourceError("m3u8 主清单里没有可用的清晰度")
+            playlist_text = _fetch_text(best.url, headers, timeout)
+            playlist = parse_m3u8(playlist_text, best.url)
+            playlist.bandwidth = int(getattr(best, "bandwidth", 0) or 0)
+        if not playlist.segments:
+            raise SourceError("m3u8 清单里没有分片（可能是直播流或链接已失效）")
+    except SourceError as error:
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            raise
+        if on_progress:
+            on_progress(0, 0, f"分片清单获取失败（{error}），改用 ffmpeg 重试…")
+        return _ffmpeg_hls(ffmpeg, url, dest, video=video, episode=resolved.episode,
+                           headers=headers, on_progress=on_progress, cancel=cancel)
+
     ffmpeg = find_ffmpeg()
+    decodable = (not playlist.encrypted) or playlist.aes128
+    if _skip_ad_segments_pref():
+        kept = _drop_ad_segments(playlist, on_progress=on_progress)
+        if kept:
+            playlist = kept
+    if decodable:
+        try:
+            ts_path = _segments_download(playlist, dest, video=video,
+                                         episode=resolved.episode, headers=headers,
+                                         on_progress=on_progress, cancel=cancel,
+                                         timeout=timeout, pause_event=pause_event,
+                                         playlist_text=playlist_text)
+            if ts_path is not None:
+                if ffmpeg:
+                    remuxed = _remux_to_mp4(ffmpeg, ts_path, dest, video=video,
+                                            episode=resolved.episode,
+                                            on_progress=on_progress, cancel=cancel)
+                    if remuxed is not None:
+                        ts_path.unlink(missing_ok=True)
+                        return remuxed
+                return ts_path
+        except RuntimeError:
+            raise
+        except _RetryableSourceError:
+            raise
+        except Exception:  # noqa: BLE001  并发下载失败 → 回退 ffmpeg（更"能忍"）
+            if on_progress:
+                on_progress(0, 0, "并发分片下载失败，改用 ffmpeg 重试…")
+
     if ffmpeg:
-        target = unique_path(dest, build_filename(video, resolved.episode, ".mp4"))
-        # 用清单总时长做百分比进度：-c copy 写 MP4 时输出文件长时间为 0 字节，
-        # 只看文件大小会让用户以为卡死
-        duration_ms = _playlist_duration_ms(url, headers)
-        # AAC(ADTS) → MP4 需要 bitstream filter；音频不是 AAC 时会报错，因此失败后去掉再试一次
+        return _ffmpeg_hls(ffmpeg, url, dest, video=video, episode=resolved.episode,
+                           headers=headers, on_progress=on_progress, cancel=cancel)
+
+    # 没有 ffmpeg：AES-128 还能自己解密，其它加密只能报错
+    if not decodable:
+        raise SourceError(
+            f"该视频流使用 {playlist.key_method or '未知'} 加密，需要 ffmpeg 才能下载；"
+            "请安装 ffmpeg 或改用其他源")
+    return _segments_download(playlist, dest, video=video, episode=resolved.episode,
+                              headers=headers, on_progress=on_progress, cancel=cancel,
+                              timeout=timeout, pause_event=pause_event,
+                              playlist_text=playlist_text, require_path=True)
+
+
+def _segments_download(
+    playlist,  # noqa: ANN001  HlsPlaylist
+    dest: Path,
+    *,
+    video: RemoteVideo,
+    episode: Episode | None,
+    headers: dict,
+    on_progress: ProgressFn | None,
+    cancel: threading.Event | None,
+    timeout: float,
+    playlist_text: str = "",
+    pause_event: threading.Event | None = None,
+    require_path: bool = False,
+) -> Path | None:
+    """把分片并发抓下来并拼接为 `.ts`。
+
+    `video/segment_concurrency_enabled=False`（或直接调 `_download_segments`）时
+    走**旧的串行实现** —— 保留它有两个理由：① 并发被源站限流时的一键降级；
+    ② 它是 AES-128 解密路径的既有回归基线。
+    """
+    if not _concurrent_segments_enabled():
+        base = playlist.segments[0] if playlist.segments else ""
+        playlist_url = base.rsplit("/", 1)[0] + "/index.m3u8" if base else ""
+        return _download_segments(playlist_url, dest, video=video, episode=episode,
+                                  headers=headers, on_progress=on_progress,
+                                  cancel=cancel, timeout=timeout)
+
+    from .segment_downloader import SegmentDownloader
+
+    def relay(progress) -> None:  # noqa: ANN001
+        if on_progress is None:
+            return
+        on_progress(progress.done_parts, progress.total_parts, progress.message)
+
+    downloader = SegmentDownloader(
+        concurrency=_segment_concurrency(),
+        headers=headers,
+        on_progress=relay,
+        cancel=cancel,
+        pause_event=pause_event,
+        speed_limit_bps=_download_speed_limit_bps(),
+        timeout=min(60.0, max(10.0, timeout)),
+    )
+    try:
+        target = unique_path(dest, build_filename(video, episode, ".ts"))
+        outcome = downloader.download(playlist, target)
+    finally:
+        downloader.close()
+    if outcome.ok and outcome.path is not None:
+        return outcome.path
+    if on_progress:
+        on_progress(0, 0, outcome.message or "分片下载未完成")
+    if require_path:
+        from .sources import SourceError
+
+        raise SourceError(outcome.message or "分片下载失败")
+    return None
+
+
+def _concurrent_segments_enabled() -> bool:
+    """是否用并发分片下载器（`video/segment_concurrency_enabled`，默认开）。"""
+    try:
+        from PySide6.QtCore import QSettings
+
+        return bool(QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/segment_concurrency_enabled", True, type=bool))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _skip_ad_segments_pref() -> bool:
+    """是否跳过疑似广告分片（`video/skip_ad_segments`，**默认关**）。
+
+    默认关的原因很直接：误判会丢正片内容。开启后也只跳"独立成片、时长明显异常"
+    的分片，且最多 3 片（见 `hls.looks_like_ad_segment`）。
+    """
+    try:
+        from PySide6.QtCore import QSettings
+
+        return bool(QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/skip_ad_segments", False, type=bool))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _drop_ad_segments(playlist, *, on_progress: ProgressFn | None = None):  # noqa: ANN001
+    """从清单里剔除疑似广告分片；**先把命中原因报给用户**，再返回新清单。
+
+    返回 None 表示没有命中（保持原清单，避免无谓的对象拷贝）。
+    """
+    from dataclasses import replace as _replace
+
+    from .hls import find_ad_segments
+
+    ads = find_ad_segments(playlist)
+    if not ads:
+        return None
+    index_set = {ad.index for ad in ads}
+    if on_progress:
+        detail = "；".join(f"第 {ad.index + 1} 片（{ad.duration:.1f}s，{ad.reason}）"
+                           for ad in ads[:3])
+        on_progress(0, 0, f"疑似广告分片已跳过：{detail}")
+    kept = _replace(
+        playlist,
+        segments=[url for index, url in enumerate(playlist.segments)
+                  if index not in index_set],
+        segment_durations=[value for index, value in enumerate(playlist.segment_durations)
+                           if index not in index_set],
+    )
+    return kept
+
+
+def _remux_to_mp4(ffmpeg: str, ts_path: Path, dest: Path, *, video: RemoteVideo,
+                  episode: Episode | None, on_progress: ProgressFn | None,
+                  cancel: threading.Event | None) -> Path | None:
+    """把 TS 用 ffmpeg `-c copy` 重封装为 MP4（不重编码，几秒完成）。"""
+    if on_progress:
+        on_progress(0, 0, "正在封装为 MP4（不重编码）…")
+    target = unique_path(dest, build_filename(video, episode, ".mp4"))
+    args = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostats",
+            "-i", str(ts_path), "-c", "copy", "-bsf:a", "aac_adtstoasc",
+            "-movflags", "+faststart", str(target)]
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", creationflags=creationflags, timeout=900)
+    except (OSError, subprocess.SubprocessError):
+        target.unlink(missing_ok=True)
+        return None
+    if result.returncode != 0 or not target.is_file():
+        # 音频不是 AAC 时 `aac_adtstoasc` 会失败 → 去掉再试一次
+        args = [item for item in args if item not in ("-bsf:a", "aac_adtstoasc")]
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", creationflags=creationflags, timeout=900)
+        except (OSError, subprocess.SubprocessError):
+            target.unlink(missing_ok=True)
+            return None
+    if result.returncode != 0 or not target.is_file() or target.stat().st_size < _MIN_VIDEO_BYTES:
+        target.unlink(missing_ok=True)
+        return None
+    if on_progress:
+        on_progress(target.stat().st_size, target.stat().st_size,
+                    f"完成：{target.name}")
+    return target
+
+
+def _ffmpeg_hls(ffmpeg: str, url: str, dest: Path, *, video: RemoteVideo,
+                episode: Episode | None, headers: dict, on_progress: ProgressFn | None,
+                cancel: threading.Event | None) -> Path:
+    """ffmpeg 路径：**直连优先**（能带 `-headers` 就不走本机代理）。"""
+    from .sources import SourceError
+
+    target = unique_path(dest, build_filename(video, episode, ".mp4"))
+    duration_ms = _playlist_duration_ms(url, headers)
+    # V2-b：优先把请求头直接交给 ffmpeg（直连源站，省掉本机代理这一跳）；
+    # 探测不支持 `-headers` 时回退「本地 playlist + 本机代理」
+    direct_args, direct = _ffmpeg_network_args(ffmpeg, headers) if _direct_enabled() else ([], False)
+    attempts: list[list[str] | None] = [direct_args] if direct else [None]
+    last_error: Exception | None = None
+    for extra_args in attempts:
         try:
             _ffmpeg_download(ffmpeg, url, target, headers=headers,
                              on_progress=on_progress, cancel=cancel,
-                             bitstream_filter="aac_adtstoasc", total_duration_ms=duration_ms)
-        except SourceError:
+                             bitstream_filter="aac_adtstoasc",
+                             total_duration_ms=duration_ms, extra_input_args=extra_args)
+        except SourceError as error:
+            last_error = error
             target.unlink(missing_ok=True)
             if cancel is not None and cancel.is_set():
-                raise RuntimeError("下载已取消")
-            _ffmpeg_download(ffmpeg, url, target, headers=headers,
-                             on_progress=on_progress, cancel=cancel,
-                             bitstream_filter="", total_duration_ms=duration_ms)
+                raise RuntimeError("下载已取消") from None
+            try:
+                _ffmpeg_download(ffmpeg, url, target, headers=headers,
+                                 on_progress=on_progress, cancel=cancel,
+                                 bitstream_filter="", total_duration_ms=duration_ms,
+                                 extra_input_args=extra_args)
+            except SourceError as second:
+                last_error = second
+                target.unlink(missing_ok=True)
+                continue
         if target.is_file() and target.stat().st_size >= _MIN_VIDEO_BYTES:
             return target
         target.unlink(missing_ok=True)
-        raise SourceError("ffmpeg 未能产出有效视频（线路可能已失效或加密）")
+    raise SourceError(f"ffmpeg 未能产出有效视频（线路可能已失效或加密）：{str(last_error)[:200]}")
 
-    # 退化路径：抓分片后拼接
-    return _download_segments(url, dest, video=video, episode=resolved.episode,
-                              headers=headers, on_progress=on_progress,
-                              cancel=cancel, timeout=timeout)
+
+def _direct_enabled() -> bool:
+    """是否允许 ffmpeg 直连源站（`video/ffmpeg_direct`，默认开）。"""
+    try:
+        from PySide6.QtCore import QSettings
+
+        return bool(QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/ffmpeg_direct", True, type=bool))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _segment_concurrency() -> int:
+    """分片并发（`video/segment_concurrency`，默认 6，范围 2–16）。"""
+    try:
+        from PySide6.QtCore import QSettings
+
+        value = int(QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/segment_concurrency", 6) or 6)
+    except Exception:  # noqa: BLE001
+        value = 6
+    return max(2, min(16, value))
+
+
+def _download_speed_limit_bps() -> float:
+    """下载限速（`video/download_speed_limit_mbps`，0 = 不限）。"""
+    try:
+        from PySide6.QtCore import QSettings
+
+        mbps = int(QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/download_speed_limit_mbps", 0) or 0)
+    except Exception:  # noqa: BLE001
+        mbps = 0
+    return float(max(0, mbps) * 1024 * 1024)
+
+
+#: ffmpeg 能力探测缓存（(ffmpeg, protocol, option) → bool）
+_FFMPEG_CAPS: dict[tuple[str, str, str], bool] = {}
 
 
 def _prefer_best_variant(url: str, headers: dict) -> str:
@@ -410,18 +752,27 @@ def _prefer_best_variant(url: str, headers: dict) -> str:
 def _ffmpeg_download(ffmpeg: str, url: str, target: Path, *, headers: dict,
                      on_progress: ProgressFn | None, cancel: threading.Event | None,
                      bitstream_filter: str = "aac_adtstoasc",
-                     total_duration_ms: int = 0) -> None:
+                     total_duration_ms: int = 0,
+                     extra_input_args: list[str] | None = None) -> None:
     """用 ffmpeg 直接拉流封装为 mp4（-c copy 不重新编码，速度快）。
 
-    请求头不通过 ffmpeg 选项传递 —— ffmpeg 各版本对 `-headers` / `-user_agent`
-    的接受程度不一致（9.x 起会直接报 "Option not found"）。
-    改为：清单与分片一律走本机流服务的代理（服务端补 Referer/UA），
-    ffmpeg 只需要读取一个本地 m3u8 文件即可，跨版本都稳。
+    两条输入路径（V2-b）：
+
+    - `extra_input_args` 非 None：调用方已探测到 ffmpeg 支持 `-headers`，
+      **直连源站**（省掉本机代理这一跳），并把网络健壮性参数一并传入；
+    - `extra_input_args is None`：回退"本地 playlist + 本机代理"——
+      请求头由代理在服务端补，ffmpeg 不需要任何 HTTP 选项（跨版本最稳）。
+
+    为什么保留代理路径：ffmpeg 各版本对 `-headers` / `-user_agent` 的接受程度
+    不一致（9.x 起曾直接报 Option not found），直连只能作为"探测成功才用"的加速项。
     """
     args = ["-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats"]
     input_arg = url
     temp_playlist: Path | None = None
-    if url.lower().split("?")[0].endswith(".m3u8"):
+    if extra_input_args:
+        # 直连：把请求头与网络参数交给 ffmpeg（都要在 -i 之前）
+        args += list(extra_input_args)
+    elif url.lower().split("?")[0].endswith(".m3u8"):
         try:
             temp_playlist = _localize_playlist(url, headers)
             input_arg = str(temp_playlist)
@@ -733,6 +1084,22 @@ def _fetch_bytes(url: str, headers: dict, timeout: float) -> bytes:
 # --------------------------------------------------------------------------- 批量下载
 
 
+def download_parallelism() -> int:
+    """同时下载的集数（`video/download_parallel`，默认 2，范围 1–4）。
+
+    与 Kazumi 的"同时下载集数默认 2"一致；再往上（12 集 × 6 分片并发）
+    很容易被源站限流，也会把家里带宽打满。
+    """
+    try:
+        from PySide6.QtCore import QSettings
+
+        value = int(QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/download_parallel", 2) or 2)
+    except Exception:  # noqa: BLE001
+        value = 2
+    return max(1, min(4, value))
+
+
 def download_many(
     tasks: Iterable[tuple[RemoteVideo, Episode | None, Quality | None]],
     dest_dir: str | Path,
@@ -742,13 +1109,28 @@ def download_many(
     cancel: threading.Event | None = None,
     registry: VideoRegistry | None = None,
     allow_cross_source: bool = True,
+    parallel: int | None = None,
+    pause_event: threading.Event | None = None,
 ) -> List[DownloadResult]:
-    """批量下载：单个失败不影响后续，返回每条的结果（含实际使用的源）。"""
+    """批量下载：**集间并发**（默认 2），单个失败不影响后续。
+
+    旧实现是 `for 任务: download_episode(...)` 的严格串行 —— 一季 12 集就是
+    12 次串行等待，这也是"下载慢"的一部分（方案 B1）。
+
+    进度回调签名不变（`on_progress(done, total, message)`），UI 无需改动；
+    并发时 `done/total` 改按"已完成集数"计数，`message` 带 `[i/N]` 前缀。
+    """
     items = list(tasks)
+    if not items:
+        return []
+    workers = download_parallelism() if parallel is None else max(1, min(4, int(parallel)))
     results: List[DownloadResult] = []
-    for index, (video, episode, quality) in enumerate(items, start=1):
-        if cancel is not None and cancel.is_set():
-            break
+    lock = threading.Lock()
+    done_count = [0]
+    on_task_done_lock = threading.Lock()
+
+    def run_one(index: int, video: RemoteVideo, episode: Episode | None,
+                quality: Quality | None) -> DownloadResult:
         label = f"{video.title} {episode.name if episode else ''}".strip()
         if on_progress:
             on_progress(index - 1, len(items), f"[{index}/{len(items)}] {label}")
@@ -756,9 +1138,10 @@ def download_many(
             path, resolved = download_episode(
                 video, episode, dest_dir, quality=quality, on_progress=on_progress,
                 cancel=cancel, registry=registry, allow_cross_source=allow_cross_source,
+                pause_event=pause_event,
             )
             size = path.stat().st_size if path.is_file() else 0
-            result = DownloadResult(
+            return DownloadResult(
                 video=resolved.video, episode=resolved.episode, quality=resolved.quality,
                 path=str(path), ok=True, message=resolved.note or "完成",
                 source=resolved.source, switched_from=resolved.switched_from,
@@ -766,15 +1149,49 @@ def download_many(
             )
         except (RuntimeError, OSError) as error:
             if isinstance(error, RuntimeError) and str(error) == "下载已取消":
-                break
-            result = DownloadResult(video=video, episode=episode, quality=quality,
-                                    ok=False, message=str(error))
+                return DownloadResult(video=video, episode=episode, quality=quality,
+                                      ok=False, message="下载已取消")
+            return DownloadResult(video=video, episode=episode, quality=quality,
+                                  ok=False, message=str(error))
         except Exception as error:  # noqa: BLE001
-            result = DownloadResult(video=video, episode=episode, quality=quality,
-                                    ok=False, message=str(error))
-        results.append(result)
-        if on_task_done:
-            on_task_done(result)
+            return DownloadResult(video=video, episode=episode, quality=quality,
+                                  ok=False, message=str(error))
+
+    def report(result: DownloadResult) -> None:
+        with on_task_done_lock:
+            if on_task_done:
+                on_task_done(result)
+
+    if workers <= 1 or len(items) == 1:
+        for index, (video, episode, quality) in enumerate(items, start=1):
+            if cancel is not None and cancel.is_set():
+                break
+            result = run_one(index, video, episode, quality)
+            if not result.ok and result.message == "下载已取消":
+                break
+            results.append(result)
+            report(result)
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        indexed: dict[int, DownloadResult] = {}
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="video-dl") as pool:
+            futures = {
+                pool.submit(run_one, index, video, episode, quality): index
+                for index, (video, episode, quality) in enumerate(items, start=1)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                result = future.result()
+                with lock:
+                    indexed[index] = result
+                    done_count[0] += 1
+                    if on_progress:
+                        on_progress(done_count[0], len(items),
+                                    f"已处理 {done_count[0]}/{len(items)}")
+                report(result)
+        # 返回顺序与入参一致（并发完成顺序是乱的，UI 与测试都依赖稳定顺序）
+        results = [indexed[index] for index in sorted(indexed)]
     if on_progress:
         on_progress(len(results), len(items), f"已处理 {len(results)}/{len(items)}")
     return results

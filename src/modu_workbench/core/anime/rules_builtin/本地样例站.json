@@ -1,0 +1,16 @@
+{
+  "api": "8",
+  "type": "anime",
+  "name": "本地样例站",
+  "version": "1.0",
+  "baseURL": "http://127.0.0.1:8000/",
+  "searchMode": "xpath",
+  "chapterMode": "xpath",
+  "searchURL": "http://127.0.0.1:8000/search?wd=@keyword",
+  "searchList": "//div[@class='module-items']//div[@class='module-item']",
+  "searchName": "//a[@class='module-item-title']/@title",
+  "searchResult": "//a[@class='module-item-cover']/@href",
+  "chapterRoads": "//div[@class='module-play-list']",
+  "chapterResult": "//a/@href",
+  "notes": "这是写给本地 fixture（http://127.0.0.1:8000/）的示例规则，不是真实站点。用途是离线跑通「搜索 → 详情 → 选集 → 嗅探 → 播放」全链路；规则页的「试跑」也可以拿它验证选择器是否被正确求值。请把 baseURL / searchURL 换成自己搭的假站点地址。"
+}

@@ -202,6 +202,17 @@ $required = @(
     "modu_workbench.core.video.sources",
     "modu_workbench.core.video.sources.providers.cms_vod",
     "modu_workbench.core.video.downloader",
+    # v1.1.0：影视播放/下载链路重写的关键模块（代理 + ABR + 并发分片下载 + 共享媒体层）
+    "modu_workbench.core.video.abr",
+    "modu_workbench.core.video.segment_downloader",
+    "modu_workbench.services.media_proxy.server",
+    "modu_workbench.services.media_proxy.upstream",
+    "modu_workbench.services.media_proxy.cache",
+    "modu_workbench.ui_kit.media.player",
+    "modu_workbench.ui_kit.media.surface",
+    "modu_workbench.ui_kit.media.decode",
+    "modu_workbench.ui_kit.media.danmaku_bridge",
+    "modu_workbench.ui_kit.media.rule_sources",
     "modu_workbench.boards.gallery.board",
     "modu_workbench.boards.gallery.widgets",
     "modu_workbench.boards.gallery.editor",
@@ -223,7 +234,18 @@ $required = @(
     "modu_workbench.core.document.plugins",
     "modu_workbench.core.llm.router",
     "modu_workbench.ui_kit.settings.llm",
-    "modu_workbench.ui_kit.settings.document"
+    "modu_workbench.ui_kit.settings.document",
+    # v1.1.0 第七板块：动漫（规则驱动采集 + 追番/进度 + 只读弹幕 + 设置页）
+    "modu_workbench.boards.anime.board",
+    "modu_workbench.boards.anime.context",
+    "modu_workbench.boards.anime.search",
+    "modu_workbench.boards.anime.detail",
+    "modu_workbench.boards.anime.library_page",
+    "modu_workbench.boards.anime.rules_page",
+    "modu_workbench.boards.anime.history",
+    "modu_workbench.boards.anime.widgets",
+    "modu_workbench.core.anime",
+    "modu_workbench.ui_kit.settings.anime"
 )
 $missing = @()
 foreach ($name in $required) {

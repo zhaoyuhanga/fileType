@@ -35,7 +35,11 @@ from modu_workbench.core.video import (
 from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 
-from .widgets import DetailWorker, HdSearchWorker, QualityWorker
+from .widgets import DetailWorker, HdSearchWorker, QualityWorker, load_pixmap
+
+# 封面缩略图尺寸（2:3 海报比例）。写死是有意的：详情页不该因为一张网络图
+# 改变自身最小宽度，图来了再等比缩放进这个框。
+COVER_SIZE = (132, 186)
 
 
 class VideoDetailDialog(QDialog):
@@ -55,6 +59,7 @@ class VideoDetailDialog(QDialog):
         self._detail_worker: DetailWorker | None = None
         self._quality_worker: QualityWorker | None = None
         self._hd_worker: HdSearchWorker | None = None
+        self._cover_worker = None          # 封面取图线程：必须留着引用，别让它被回收
         self._qualities: list[Quality] = []
         self._variants_loaded = False
         self._last_variants: list = []
@@ -72,13 +77,25 @@ class VideoDetailDialog(QDialog):
 
         header = QHBoxLayout()
         header.setSpacing(12)
+        # 海报：远程图统一过本机图片代理（防盗链 403 会让 <img> 变破图）。
+        # 取图是异步的，失败就给一句可读说明 —— 详情页不因为一张图弹错误框。
+        self._cover = QLabel("封面加载中…")
+        self._cover.setObjectName("readerStatus")
+        self._cover.setFixedSize(*COVER_SIZE)
+        self._cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cover.setWordWrap(True)
+        header.addWidget(self._cover, 0, Qt.AlignmentFlag.AlignTop)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(4)
         self._title = QLabel("")
         self._title.setObjectName("pageTitle")
         self._title.setWordWrap(True)
-        header.addWidget(self._title, 1)
+        title_box.addWidget(self._title)
         self._status = QLabel("")
         self._status.setObjectName("readerStatus")
-        header.addWidget(self._status)
+        title_box.addWidget(self._status)
+        title_box.addStretch(1)
+        header.addLayout(title_box, 1)
         layout.addLayout(header)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -172,6 +189,30 @@ class VideoDetailDialog(QDialog):
             parts.append(f"导演：{remote.director}")
         parts.append(f"来源：{remote.source}")
         self._meta.setText(" · ".join(parts))
+        self._load_cover(remote)
+
+    def _load_cover(self, remote: RemoteVideo) -> None:
+        """异步加载海报（走本机图片代理）。失败只留一句说明，不弹错误框。"""
+        url = str(getattr(remote, "cover_url", "") or "").strip()
+        if not url:
+            self._cover.setText("暂无封面")
+            self._cover.setToolTip("")
+            return
+        self._cover.setText("封面加载中…")
+        self._cover.setToolTip("")
+        self._cover_worker = load_pixmap(
+            url, remote.source or "", COVER_SIZE, parent=self,
+            on_loaded=self._on_cover_loaded,
+        )
+
+    def _on_cover_loaded(self, pixmap) -> None:  # noqa: ANN001
+        if pixmap is None or (hasattr(pixmap, "isNull") and pixmap.isNull()):
+            # 占位而不是破图：用户至少知道"这张图没取到"，而不是看到一块裂图
+            self._cover.setText("封面加载失败")
+            self._cover.setToolTip("海报可能已失效或源站禁止外链（可换源重试）")
+            return
+        self._cover.setPixmap(pixmap)
+        self._cover.setToolTip(self._remote.title)
 
     def _load_episodes(self, remote: RemoteVideo) -> None:
         if remote.episodes:
@@ -418,7 +459,7 @@ class VideoDetailDialog(QDialog):
         Qt 会以「QThread: Destroyed while thread is still running」终止整个进程。
         所以这里先耐心等待，实在等不到就强杀，绝不留下运行中的线程。
         """
-        for attr in ("_detail_worker", "_quality_worker", "_hd_worker"):
+        for attr in ("_detail_worker", "_quality_worker", "_hd_worker", "_cover_worker"):
             worker = getattr(self, attr, None)
             if worker is None:
                 continue

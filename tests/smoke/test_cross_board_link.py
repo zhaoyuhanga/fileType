@@ -44,7 +44,8 @@ def test_settings_dialog_has_all_board_pages(qapp: QApplication) -> None:
     from modu_workbench.ui_kit.settings import PAGE_FACTORIES
 
     keys = [key for key, _title, _icon, _factory in PAGE_FACTORIES]
-    assert keys == ["general", "llm", "book", "convert", "document", "music", "video", "gallery"]
+    assert keys == ["general", "llm", "book", "convert", "document", "music", "video",
+                    "gallery", "anime"]
 
     dialog = SettingsDialog(initial="gallery")
     try:

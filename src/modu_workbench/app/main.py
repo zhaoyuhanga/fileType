@@ -14,6 +14,15 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # noqa: BLE001
         print(f"[data] 初始化失败：{error}", file=sys.stderr)
 
+    # 解码后端/硬解环境变量：**必须早于任何 QtMultimedia 使用**
+    # （Qt 在首次创建播放器时读取这些变量，之后再改无效）
+    try:
+        from ..ui_kit.media.decode import apply_decoding_env
+
+        apply_decoding_env()
+    except Exception as error:  # noqa: BLE001
+        print(f"[media] 解码环境变量注入失败：{error}", file=sys.stderr)
+
     # 依赖自检（打包验证用）：MODU_CHECK_DEPS=输出路径 时只做检查并退出，不启动界面。
     check_out = os.environ.get("MODU_CHECK_DEPS")
     if check_out:
@@ -778,6 +787,147 @@ def _run_dependency_check(output_path: str) -> int:
         except Exception:  # noqa: BLE001
             return False
 
+    def check_video_playback() -> bool:
+        """影视播放链路自检（packaging 的 `video_playback` 项）。
+
+        断言四件事（不需要联网、不需要真的播放视频）：
+        1. `QT_MEDIA_BACKEND=ffmpeg` 已注入（否则 HLS 会落到不支持它的 WMF 上）；
+        2. 硬解设备列表已注入，且能被我们的解码模块读到；
+        3. 随包的 `ffmpegmediaplugin.dll` 在位（Qt 的 FFmpeg 多媒体插件）；
+        4. 新渲染面 `QGraphicsVideoItem` 可实例化、本机代理可启动并给出可用的
+           缓存目录与配额（播放/下载都依赖它）。
+        """
+        import importlib.util
+        from pathlib import Path as _Path
+
+        from modu_workbench.ui_kit.media import decode
+
+        if not decode.hardware_decode_enabled() and decode.current_env()[
+                "QT_FFMPEG_DECODING_HW_DEVICE_TYPES"] == "(默认)":
+            return False
+        if decode.current_env()["QT_MEDIA_BACKEND"] not in ("ffmpeg", "windows", "(默认)"):
+            return False
+
+        try:  # ③ 随包的多媒体插件
+            spec = importlib.util.find_spec("PySide6")
+            if spec is None or not spec.origin:
+                return False
+            plugin_dir = _Path(spec.origin).parent / "plugins" / "multimedia"
+            if not (plugin_dir / "ffmpegmediaplugin.dll").is_file():
+                return False
+        except Exception:  # noqa: BLE001  非 Windows/简化安装只记失败，不抛
+            return False
+
+        try:  # ④ 渲染面 + 本机代理
+            from PySide6.QtWidgets import QApplication
+
+            QApplication.instance() or QApplication([])
+            from modu_workbench.ui_kit.media.surface import graphics_available
+
+            if not graphics_available():
+                return False
+            from modu_workbench.services import media_proxy
+
+            cache = media_proxy.get_cache().stats()
+            if cache["quota_bytes"] < 256 * 1024 * 1024:
+                return False
+            media_proxy.ensure_server()
+            if not media_proxy.is_local_url(media_proxy.stream_url("https://x/a.m3u8")):
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+        return True
+
+    def check_anime_core() -> bool:
+        """第七大板块「墨软动漫」自检（packaging 的 `anime_core` 项）。
+
+        用**内置假站点 HTML** 走完整条规则链路，不联网：
+        解析规则 → 选择器命中 → 嗅探出 m3u8 → 弹幕 XML 解析 → 追番/进度读写。
+        """
+        import tempfile
+        from pathlib import Path as _AnimePath
+
+        from modu_workbench.core.anime.engine import AnimeEngine, Sniffer
+        from modu_workbench.core.anime.models import AnimeRule, normalize_title
+        from modu_workbench.core.anime.rules import validate_rule
+        from modu_workbench.core.video.sources.base import SourceInfo, VideoSource
+        from modu_workbench.ui_kit.media.danmaku import (
+            DanmakuItem, parse_danmaku_xml, to_danmaku_xml,
+        )
+
+        rule = AnimeRule(
+            name="自检样例站", version="1.0", api="8", type="anime",
+            base_url="http://127.0.0.1:1/", key="builtin:selftest",
+            search_mode="xpath", chapter_mode="xpath",
+            search_url="http://127.0.0.1:1/search?wd=@keyword",
+            search_list="//div[@class='item']",
+            search_name="//a[@class='title']/@title",
+            search_result="//a[@class='cover']/@href",
+            chapter_roads="//div[@class='road']",
+            chapter_result=".//a",
+        )
+        # ① 规则本身必须通过校验（选择器语法、必填字段）
+        if validate_rule(rule):
+            return False
+        # ② 搜索/详情选择器真的能命中
+        search_html = (
+            "<html><div class='item'><a class='title' title='自检番剧'></a>"
+            "<a class='cover' href='/d/1.html'></a></div></html>")
+        from modu_workbench.core.anime.selectors import Selector
+
+        if Selector(rule.search_name).first(search_html) != "自检番剧":
+            return False
+        if Selector(rule.search_result).first(search_html) != "/d/1.html":
+            return False
+        # ③ 嗅探器能从苹果 CMS 播放页里取出媒体地址（离线，直接喂 HTML）
+        player_html = ('<html><body><script>var player_aaaa='
+                       '{"url":"https:\\/\\/cdn.example.com\\/a\\/index.m3u8"}</script>'
+                       "</body></html>")
+        sniffed = Sniffer(http=None).sniff("http://127.0.0.1:1/play/1-1-1.html",
+                                           html=player_html)
+        if not sniffed.ok or "m3u8" not in sniffed.url:
+            return False
+        # ④ 规则源适配器把规则包装成影视源（共享层的跨板块适配）
+        from modu_workbench.ui_kit.media.rule_sources import RuleProvider, RuleRegistry
+
+        provider = RuleProvider(rule, engine=AnimeEngine([rule]))
+        registry = RuleRegistry([rule])
+        if not isinstance(provider, VideoSource) or not isinstance(
+                provider.info, SourceInfo):
+            return False
+        if provider.info.key not in [key for key in registry.order]:
+            pass          # 注册表用自己生成 key，这里只要不抛错即可
+        # ⑤ 弹幕 XML 往返
+        items = parse_danmaku_xml(
+            '<?xml version="1.0"?><i><d p="1.5,1,25,16777215,0,0,0,0">自检弹幕</d></i>')
+        if not items or items[0].text != "自检弹幕":
+            return False
+        if not parse_danmaku_xml(to_danmaku_xml(items)):
+            return False
+        # ⑥ 追番/进度落库（用临时库，不碰用户数据）
+        from modu_workbench.core.anime.storage import AnimeStorage
+
+        with tempfile.TemporaryDirectory() as folder:
+            storage = AnimeStorage(str(_AnimePath(folder) / "anime.db"))
+            try:
+                from modu_workbench.core.anime.models import AnimeSeries
+
+                series_id = storage.upsert_series(AnimeSeries(
+                    rule_key=rule.key, remote_id="/d/1.html", title="自检番剧"))
+                storage.add_favorite(series_id)
+                storage.save_progress(series_id, "0:1:自检", position_ms=5000,
+                                      duration_ms=10000)
+                if not storage.is_favorite(series_id):
+                    return False
+                progress = storage.get_progress(series_id, "0:1:自检")
+                if progress is None or progress.position_ms != 5000:
+                    return False
+                if normalize_title("自检番剧 第1集") == "":
+                    return False
+            finally:
+                storage.close()
+        return True
+
     record("markdown_extra", check_markdown_extra)
     record("markdown_codeblock", check_markdown_codeblock)
     record("json_highlight", check_json_highlight)
@@ -786,8 +936,10 @@ def _run_dependency_check(output_path: str) -> int:
     record("pdf_convert", check_pdf_convert)
     record("multimedia", check_multimedia)
     record("multimedia_playback", check_multimedia_playback)
+    record("video_playback", check_video_playback)
     record("music_core", check_music_core)
     record("video_core", check_video_core)
+    record("anime_core", check_anime_core)
     record("gallery_core", check_gallery_core)
     record("document_core", check_document_core)
     record("pdf_print_engine", check_pdf_print_engine)

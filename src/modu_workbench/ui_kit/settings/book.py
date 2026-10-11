@@ -44,9 +44,13 @@ class BookSettingsPage(SettingsPage):
             ("书库数据库", str(config.library_db_path())),
             ("数据目录", str(config.app_data_dir())),
         ):
-            entry = QLabel(value)
+            # 路径标签必须**主动插入零宽断点**：QLabel 即使开了 wordWrap，
+            # minimumSizeHint 仍按"最长不可断行"算，而 Windows 路径几乎找不到断点 ——
+            # 长路径会把整页最小宽度顶到 750px 以上，默认窗口下直接出横向滚动条。
+            entry = QLabel((value or "").replace("\\", "\\\u200b").replace("/", "/\u200b"))
             entry.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             entry.setWordWrap(True)
+            entry.setToolTip(value)
             form.addRow(label, entry)
 
         layout.addLayout(form)

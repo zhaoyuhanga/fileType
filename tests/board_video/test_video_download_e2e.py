@@ -39,13 +39,24 @@ def _make_hls(ffmpeg: str, work: Path) -> Path | None:
     return source
 
 
-def test_ffmpeg_download_produces_a_playable_file(tmp_path: Path) -> None:
-    """真实 ffmpeg + 本地 HLS：下载必须产出非空、可识别的 MP4。"""
+def test_ffmpeg_download_produces_a_playable_file(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """真实 ffmpeg + 本地 HLS：下载必须产出非空、可识别的 MP4。
+
+    注意：`_ffmpeg_download` 会把分片改写成**本机代理**地址（跨 ffmpeg 版本最稳），
+    而本用例的上游就在 127.0.0.1 上 —— v1.1.0 起代理默认拒绝环回/私网目标
+    （SSRF 收口 V1-q），所以这里显式打开 `MODU_MEDIA_ALLOW_PRIVATE`。
+    """
     from modu_workbench.core.video import downloader as downloader_module
 
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         pytest.skip("本机没有 ffmpeg")
+
+    monkeypatch.setenv("MODU_MEDIA_ALLOW_PRIVATE", "1")
+    from modu_workbench.services import media_proxy
+
+    media_proxy.reset_client()
+    media_proxy.reset_cache()
 
     source = _make_hls(ffmpeg, tmp_path)
     if source is None:

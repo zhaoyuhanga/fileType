@@ -9,7 +9,7 @@
 | 决策 | 选择 | 理由 |
 |---|---|---|
 | 库数量 | **单库** `modu.db` | 备份/迁移只需复制一个文件；跨板块（历史/统计/收藏）可联表查询 |
-| 隔离方式 | **板块前缀分表**（`book_`/`music_`/`video_`/`gallery_`/`doc_`/`llm_`） | 单库仍能一眼看出归属；板块删除/搬迁互不影响 |
+| 隔离方式 | **板块前缀分表**（`book_`/`music_`/`video_`/`gallery_`/`doc_`/`anime_`/`llm_`） | 单库仍能一眼看出归属；板块删除/搬迁互不影响 |
 | 设置 | 统一 `app_settings`，键带命名空间（`music/sources/enabled`） | 免去每个板块各建一张 key/value 表；板块读写由 `settings_namespace` 自动加前缀 |
 | 结构演进 | 版本化迁移（`schema_migrations`） | 老用户升级可平滑；`CREATE TABLE IF NOT EXISTS` 无法改列 |
 | 旧数据 | 首次启动自动导入 5 个旧分库，旧文件改名 `*.imported.bak` | 不删用户数据，可人工回退 |
@@ -82,6 +82,27 @@
 > 板块设置（输出目录、默认模板、AI 权限、脱敏规则、循环上限）走 `app_settings` 的 `document/` 命名空间，
 > 不单独建表 —— 与其它板块一致。
 
+### 墨软动漫（`anime_`，迁移 v3）
+
+| 表 | 关键字段 |
+|---|---|
+| `anime_rules` | 规则**索引**（规则 JSON 文件是唯一真相）：`key`(唯一) `name` `version` `kind`(`xpath`/`api`) `path` `builtin` `enabled` `source_url` `test_state` `test_note` `updated_at`；文件消失时把 `path` 清空并置 `test_state='missing'`（**不删行**，保住用户的启用状态与试跑记录） |
+| `anime_series` | 番剧库：`rule_key`+`remote_id`(复合唯一，同一作品在不同规则下是两行) `title` `title_norm` `cover` `year` `summary` `bangumi_id` `total_episodes` `latest_episode` `air_weekday`(-1 未知) `created_at` `updated_at`；索引 `idx_anime_series_rule` |
+| `anime_favorites` | 追番：`series_id`(唯一) `note` `created_at`；`ON CONFLICT DO UPDATE` 只更新备注（重复追番是幂等的，`created_at` 不变） |
+| `anime_progress` | 按集进度：`series_id`+`episode_key` 复合唯一、`episode_name` `episode_index` `position_ms` `duration_ms` `watched` `updated_at`；索引 `idx_anime_progress_time`；播放器每 5 秒上报一次，唯一约束保证幂等 |
+| `anime_history` | 播放历史（**快照式**：自带 `title`/`episode_name`，番剧行删掉后仍可读）：`series_id` `rule_key` `title` `episode_name` `source` `played_at`；索引 `idx_anime_history_time` |
+| `anime_danmaku` | 弹幕**索引**（弹幕本体是磁盘 xml/json）：`series_id`+`episode_key`+`provider` 复合唯一、`episode_id` `count` `path` `fetched_at` |
+| `anime_download_tasks` | 下载任务：`series_id`+`episode_key` 去重、`episode_name` `rule_key` `url` `dest_path` `parts_dir` `total_parts` `done_parts` `state`(`pending`/`running`/`paused`/`failed`/`done`) `message` `updated_at`；索引 `idx_anime_download_state` |
+
+> 动漫**刻意不建外键**：番剧行的 `remote_id` 来自站点（换规则会重建），级联删除会在"清规则索引"
+> 时连带删掉用户追番与进度；清理统一走 `AnimeStorage.delete_series()`（显式删追番/进度/弹幕索引，
+> 保留历史与下载任务）。
+>
+> 板块设置（启用的规则、订阅清单 `anime/rule_subscriptions`）走 `app_settings` 的 `anime/` 命名空间。
+> 追番进度导出/导入为 JSON（`AnimeStorage.export_payload()`/`import_payload()`），
+> 只导出**用户资产**（番剧 + 追番 + 进度 + 启用规则 + 订阅），不导出历史与下载任务
+> （后者绑定本机文件路径，导到别的机器只会变成失败任务）。
+
 ### 大模型（`llm_`）
 
 | 表 | 关键字段 |
@@ -97,13 +118,20 @@ from modu_workbench.core.platform.db import SqliteStore
 store = SqliteStore(app_db_path())          # 自动 migrate 到最新版本
 
 # 新增一次结构变更
-# 1) core/platform/migrations/v2_xxx.py：VERSION / NOTE / apply(conn)
+# 1) core/platform/migrations/v3_xxx.py：VERSION / NOTE / apply(conn)
 # 2) 在 migrations/__init__.py 的 MIGRATIONS 注册
-# 3) tests/test_db_schema.py + docs/DATABASE.md 同步
+# 3) tests/platform/test_db_schema.py + docs/DATABASE.md 同步
 ```
 
 已发布迁移：`v1_initial`（单库初始结构）、`v2_document`（墨软文档板块的 `doc_*` 五张表，
-纯增量、可重复执行、不需要数据搬迁）。
+纯增量、可重复执行、不需要数据搬迁）、`v3_anime`（墨软动漫板块的 `anime_*` 七张表 + 四个索引，
+同样是纯增量：`core/anime/*` 的规则文件、弹幕缓存都在文件系统里，DB 只放索引与用户资产）。
+
+> **v1.1.0 没有新增表/迁移**：影视板块这一版新增的运行时数据都**不落库** ——
+> 分片磁盘缓存在文件系统里（`数据目录/video/cache/<sha1 前2位>/<sha1>.bin` + 同名 `.meta`，
+> 设置页「缓存→清空分片缓存」即删除，随用随重建），
+> 新增的播放/下载参数走 `app_settings` 的 `video/*` 键（无需 DDL）。
+> 计划里的 `video_download_tasks` / `video_play_events` 两张表属于后续阶段，届时再加迁移。
 
 旧分库导入（`core/platform/legacy.py`，首次启动执行一次）：
 

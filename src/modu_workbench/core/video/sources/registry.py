@@ -11,19 +11,34 @@
 from __future__ import annotations
 
 import json
+import random
+import threading
 import time
-from typing import Iterable, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Callable, Iterable, List
 
 from ..models import Episode, Quality, RemoteVideo
 from .base import ResolvedPlay, SourceHealth, SourceInfo, VideoSource
 from .http import SourceError, guess_referer
 from .matcher import best_match
+from .probe import (
+    DEFAULT_PROBE_KEYWORD,
+    PROBE_TIMEOUT,
+    ProbeResult,
+    probe_source,
+)
 from .providers import DEFAULT_PROVIDER_ORDER, build_default_providers
 
 SETTING_ENABLED = "sources/enabled"
 SETTING_ORDER = "sources/priority"
 SETTING_SOURCE_URLS = "sources/urls"      # 用户覆盖的采集接口地址 {key: url}
 SETTING_VERSION = "sources/version"       # 源清单版本（升级时迁移用户的启用/排序设置）
+
+# 测速参数（计划 3.3.5：并发 3、最多测 20 个源 = 权重最高的前 5 + 剩余随机 15）
+SPEED_TEST_CONCURRENCY = 3
+SPEED_TEST_MAX_SOURCES = 20
+SPEED_TEST_TOP_SOURCES = 5
 
 # 源清单版本：改动内置源（下线失效源、新增可用源）时递增。
 # 递增后，旧的「启用集合/排序」不再直接套用 —— 否则新加的源会默认处于停用状态，
@@ -34,14 +49,58 @@ SOURCES_VERSION = 3
 DEGRADE_AFTER = 3
 DEGRADE_SECONDS = 120.0
 
+# 权重刻度：顺序第 1 位 = 100 分，之后每往后一位减 `WEIGHT_MAX / (n-1)`，
+# 最后一位正好 0 分。借打分公式里 `weight` 的 0–100 语义
+# （`1 + (weight - 50) * 0.005`），50 分对应"排在正中间"的源。
+WEIGHT_MAX = 100.0
+
+
+@dataclass
+class SpeedResult:
+    """批量测速里单个源的结果（`measure_sources` 的返回值）。
+
+    字段与 `probe.ProbeResult` 对齐，另加权重与最终评分，方便界面一次拿全。
+    `error` 为空表示延迟和速度都测到了；非空也可能是"部分成功"（比如只测到延迟）。
+    """
+
+    key: str
+    label: str = ""
+    ok: bool = False
+    latency_ms: float = 0.0
+    mbit_per_s: float = 0.0
+    height: int = 0
+    resolution: str = ""
+    weight: float = 50.0
+    score: float = 0.0
+    error: str = ""
+
+    @property
+    def speed_mbytes(self) -> float:
+        """吞吐（MB/s），界面展示用。"""
+        return self.mbit_per_s / 8.0
+
+    def as_text(self) -> str:
+        """一行摘要：延迟 / 速度 / 评分（源设置的「测速」列）。"""
+        latency = f"{self.latency_ms:.0f} ms" if self.latency_ms > 0 else "延迟 --"
+        speed = f"{self.speed_mbytes:.1f} MB/s" if self.mbit_per_s > 0 else "速度 --"
+        return f"{latency} / {speed} / 评分 {self.score:.2f}"
+
 
 class VideoRegistry:
     """多视频源注册表（应用级单例，见 services.app_context.video_registry）。"""
 
-    def __init__(self, providers: Iterable[VideoSource] | None = None):
+    def __init__(self, providers: Iterable[VideoSource] | None = None,
+                 *, rng: random.Random | None = None):
         self._providers: dict[str, VideoSource] = {}
         self._order: list[str] = []
         self._health: dict[str, SourceHealth] = {}
+        self._health_lock = threading.Lock()
+        # 「按测速结果排序」开关的运行时状态：由设置页/源设置对话框同步进来
+        # （核心层不读 QSettings，保持可离线测试）。默认关，行为与旧版完全一致。
+        self._sort_by_speed = False
+        # 测速要"从剩余源里随机取 15 个"：用实例级 Random，测试可注入固定种子，
+        # 生产上也不去动全局 random（别影响应用里其他地方的可复现性）。
+        self._rng = rng or random.Random()
         if providers is None:
             # 内置源：默认按 DEFAULT_PROVIDER_ORDER 启用（磁盘配置会覆盖）
             self._enabled: set[str] = set(DEFAULT_PROVIDER_ORDER)
@@ -69,6 +128,52 @@ class VideoRegistry:
     @property
     def order(self) -> list[str]:
         return [key for key in self._order if key in self._providers]
+
+    def ordered_keys(self, *, by_speed: bool = False,
+                     enabled_only: bool = True) -> list[str]:
+        """源的最终顺序：默认**原样返回用户顺序**，`by_speed=True` 时按评分重排。
+
+        - 用户顺序 = 「源设置」里上下移动出来的顺序（`SETTING_ORDER`）；
+        - 评分 = `SourceHealth.health_score()`（分辨率 40% + 速度 40% + 延迟 20%，
+          再乘权重加成），**只在测过速的源之间有意义**；
+        - 排序用稳定排序：分数相同的源保持用户顺序，结果可预期（不会每次刷新都跳）。
+
+        为什么默认不按测速排序（`video/sort_by_speed` 默认 false，见计划 3.3.5 末条）：
+        测速结果会随网络波动，按它排序会让"搜索先后 / 去重保留谁"悄悄改变；
+        用户明确打开这个开关才承担这个不确定性。搜索与解析在没有显式要求时
+        必须继续用用户顺序。
+        """
+        keys = self.order
+        if enabled_only:
+            keys = [key for key in keys if key in self._enabled]
+        if not by_speed:
+            return list(keys)
+        weights = self._weights(keys)
+        scores = {key: self.health(key).health_score(weight=weights[key]) for key in keys}
+        return sorted(keys, key=lambda key: scores[key], reverse=True)
+
+    def _weights(self, keys: Iterable[str] | None = None) -> dict[str, float]:
+        """把「用户顺序」折成 0–100 权重：第 1 位 100 分，最后一位 0 分，等步长递减。
+
+        注册表本身没有"权重"概念（计划里的 `weight` 来自 LunaTV-EE 的源权重配置），
+        这里直接用顺序推导：让排在前面的源在打分里拿到最多 1.25 倍、最后一名拿 0.75 倍。
+        只有一个源时给它中性值 50（不因"只有它"而被加成或惩罚）。
+        """
+        keys = list(keys if keys is not None else self.order)
+        if not keys:
+            return {}
+        if len(keys) == 1:
+            return {keys[0]: WEIGHT_MAX / 2}
+        step = WEIGHT_MAX / (len(keys) - 1)
+        return {key: WEIGHT_MAX - index * step for index, key in enumerate(keys)}
+
+    def weight_of(self, key: str) -> float:
+        """某个源的权重（0–100），界面与测试用。"""
+        return self._weights().get(key, WEIGHT_MAX / 2)
+
+    def score_of(self, key: str) -> float:
+        """某个源当前的评分（未测速时是"只有延迟项为 0 的保守分"）。"""
+        return self.health(key).health_score(weight=self.weight_of(key))
 
     def providers(self, *, enabled_only: bool = True) -> list[VideoSource]:
         items = [self._providers[key] for key in self.order if key in self._providers]
@@ -120,21 +225,18 @@ class VideoRegistry:
 
     # ---------- 健康度（熔断） ----------
 
-    def record_success(self, key: str) -> None:
+    def record_success(self, key: str, latency: float | None = None) -> None:
+        """记一次成功；给了 `latency`（秒）就顺手进延迟滑动窗口（见 3.3.5 第一条）。"""
         health = self.health(key)
-        health.successes += 1
-        health.consecutive_failures = 0
-        health.degraded_until = 0.0
-        health.last_ok_at = time.time()
-        health.last_error = ""
+        with self._health_lock:
+            health.note_success(latency)
 
     def record_failure(self, key: str, error: Exception | str = "") -> None:
         health = self.health(key)
-        health.failures += 1
-        health.consecutive_failures += 1
-        health.last_error = str(error)[:200]
-        if health.consecutive_failures >= DEGRADE_AFTER:
-            health.degraded_until = time.time() + DEGRADE_SECONDS
+        with self._health_lock:
+            health.note_failure(error)
+            if health.consecutive_failures >= DEGRADE_AFTER:
+                health.degraded_until = time.time() + DEGRADE_SECONDS
 
     def degraded_keys(self) -> list[str]:
         now = time.time()
@@ -144,18 +246,157 @@ class VideoRegistry:
         for key in self.order:
             self._health[key] = SourceHealth()
 
+    # ---------- 排序开关（`video/sort_by_speed`） ----------
+
+    @property
+    def sort_by_speed(self) -> bool:
+        """是否按测速评分排序（对应设置键 `video/sort_by_speed`，默认 False）。
+
+        核心层不直接读 QSettings（那会让离线测试依赖 Qt 配置），
+        由设置页/源设置对话框把用户选择同步到这里；默认 False 保证
+        「搜索先后、去重保留谁、换源顺序」与旧版本完全一致。
+        """
+        return self._sort_by_speed
+
+    @sort_by_speed.setter
+    def sort_by_speed(self, enabled: bool) -> None:
+        self._sort_by_speed = bool(enabled)
+
+    def set_sort_by_speed(self, enabled: bool) -> None:
+        """`sort_by_speed` 的方法写法（界面里 `.connect` 用着更顺手）。"""
+        self.sort_by_speed = enabled
+
+    # ---------- 测速（v3-e，计划 3.3.5） ----------
+
+    def select_speed_test_keys(self, keys: Iterable[str] | None = None, *,
+                               limit: int = SPEED_TEST_MAX_SOURCES,
+                               top: int = SPEED_TEST_TOP_SOURCES) -> list[str]:
+        """挑出要测的源：**用户顺序最靠前的 `top` 个 + 其余随机补足 `limit` 个**。
+
+        这是计划里写的 LunaTV-EE 口径（权重最高前 5 + 剩余随机 15）。
+        随机用的是实例级 RNG（构造时可注入固定种子），但注意**每调用一次 RNG 流就往前走**：
+        同一实例连续两次调用，"随机补足的那 15 个"可能不同；前 5 个永远不变。
+        返回顺序已按用户顺序排好（便于并发结果落库时保持可读顺序）。
+        """
+        ordered = self.ordered_keys(enabled_only=False)
+        if keys is not None:
+            wanted = [key for key in keys if key in self._providers]
+            # 显式指定时按用户顺序归一，避免调用方给的顺序把优先级打乱
+            ordered = [key for key in ordered if key in set(wanted)]
+        limit = max(0, int(limit))
+        if limit == 0 or not ordered:
+            return []
+        top = max(0, min(int(top), limit))
+        chosen = ordered[:top]
+        rest = ordered[top:]
+        room = limit - len(chosen)
+        if room > 0 and rest:
+            chosen.extend(self._rng.sample(rest, min(room, len(rest))))
+        picked = set(chosen)
+        return [key for key in ordered if key in picked]
+
+    def measure_sources(self, keys: Iterable[str] | None = None, *,
+                        concurrency: int = SPEED_TEST_CONCURRENCY,
+                        limit: int = SPEED_TEST_MAX_SOURCES,
+                        keyword: str = DEFAULT_PROBE_KEYWORD,
+                        timeout: float = PROBE_TIMEOUT,
+                        cancel=None, on_progress: Callable | None = None) -> List[SpeedResult]:
+        """批量测速：并发 `concurrency`（默认 3）、最多 `limit`（默认 20）个源。
+
+        结果同时写进 `SourceHealth`（延迟进滑动窗口、吞吐与分辨率进测速字段），
+        因此之后的 `ordered_keys(by_speed=True)` 与源设置界面都能直接用。
+
+        - 跑在 `ThreadPoolExecutor` 里，每个源的失败只体现在它自己的 `SpeedResult.error`，
+          **一个坏源不会让整批失败**，也从 `measure_sources` 里抛不出去；
+        - 任务是"取一个跑一个"（不是一次性全提交）：取消一旦发生，还没开工的源根本不会
+          发请求，被跳过的源以 `error="已取消"` 返回，UI 能交代清楚"哪些没测"；
+        - `on_progress(result, done, total)` 每完成一个源回调一次，回调抛异常不影响其他源；
+        - 不传 `keys` 时按 `select_speed_test_keys()` 的"前 5 + 随机 15"挑选。
+        """
+        picked = self.select_speed_test_keys(keys, limit=limit, top=SPEED_TEST_TOP_SOURCES)
+        results: list[SpeedResult] = []
+        if not picked:
+            return results
+        index = {key: position for position, key in enumerate(self.order)}
+        total = len(picked)
+        done = 0
+        workers = max(1, min(int(concurrency), total))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="video-speed") as pool:
+            for key in picked:
+                if cancel is not None and cancel.is_set():
+                    skipped = SpeedResult(key=key, label=self._label(key), error="已取消")
+                    results.append(skipped)
+                    if on_progress is not None:
+                        self._notify(on_progress, skipped, len(results), total)
+                    continue
+                provider = self._providers.get(key)
+                if provider is None:
+                    continue
+                try:
+                    result = pool.submit(self._probe_one, key, provider, keyword,
+                                         timeout, cancel).result()
+                except Exception as error:  # noqa: BLE001  兜底：绝不让一个源炸掉整批
+                    result = SpeedResult(key=key, label=self._label(key),
+                                         error=str(error)[:200])
+                results.append(result)
+                done += 1
+                if on_progress is not None:
+                    self._notify(on_progress, result, done, total)
+        # 按用户顺序返回（完成的先后是随机的，界面与测试都需要稳定顺序）
+        results.sort(key=lambda item: index.get(item.key, len(index)))
+        return results
+
+    def _probe_one(self, key: str, provider: VideoSource, keyword: str,  # noqa: ANN001
+                   timeout: float, cancel) -> SpeedResult:  # noqa: ANN001
+        """单个源的测速 + 落库（在池里的工作线程上跑，所以这里可以自由阻塞）。"""
+        probe: ProbeResult = probe_source(
+            provider, keyword, http=getattr(provider, "http", None),
+            timeout=timeout, cancel=cancel,
+        )
+        weight = self.weight_of(key)
+        health = self.health(key)
+        with self._health_lock:
+            if probe.latency_ms > 0:
+                health.note_success(probe.latency_ms / 1000.0,
+                                    speed_mbps=probe.mbit_per_s, height=probe.height)
+            elif probe.mbit_per_s > 0:
+                # 有吞吐但没拿到延迟样本（理论上不会发生）：仍算成功，只是不进延迟窗口
+                health.note_success(speed_mbps=probe.mbit_per_s, height=probe.height)
+            else:
+                health.note_failure(probe.error or "测速失败")
+                if health.consecutive_failures >= DEGRADE_AFTER:
+                    health.degraded_until = time.time() + DEGRADE_SECONDS
+            health.measured_height = probe.height or health.measured_height
+            score = health.health_score(weight=weight)
+        return SpeedResult(
+            key=key, label=self._label(key), ok=probe.ok,
+            latency_ms=probe.latency_ms, mbit_per_s=probe.mbit_per_s,
+            height=probe.height, resolution=probe.resolution,
+            weight=weight, score=score, error=probe.error,
+        )
+
+    @staticmethod
+    def _notify(on_progress: Callable, result: SpeedResult, done: int, total: int) -> None:
+        """进度回调：`on_progress(result, done, total)`；回调异常不影响测速本身。"""
+        try:
+            on_progress(result, done, total)
+        except Exception:  # noqa: BLE001  界面槽函数出问题不该毁掉后台任务
+            pass
+
     # ---------- 搜索 ----------
 
     def search_one(self, key: str, keyword: str, kind: str = "all", limit: int = 30,
                    page: int = 1) -> List[RemoteVideo]:
         provider = self.require(key)
         provider.require_available()
+        started = time.monotonic()
         try:
             videos = provider.search(keyword, kind=kind, limit=limit, page=page)
         except SourceError as error:
             self.record_failure(key, error)
             raise
-        self.record_success(key)
+        # 耗时顺手记进延迟窗口（3.3.5 第一条）：不额外发探针请求，成本为零
+        self.record_success(key, latency=time.monotonic() - started)
         return videos
 
     def search_all(self, keyword: str, kind: str = "all", limit: int = 20,
@@ -166,6 +407,10 @@ class VideoRegistry:
 
         默认跳过被熔断的源；显式指定 sources 时按指定来（忽略熔断）。
         结果按「标题+年份」去重，保留先出现的源（即优先级更高的源）。
+
+        源顺序默认就是用户的顺序；只有用户把 `video/sort_by_speed` 打开
+        （即 `registry.sort_by_speed is True`）时才改成按测速评分降序 ——
+        "测速结果会波动"这件事必须由用户显式同意，否则搜索行为不可预期。
         """
         errors: List[str] = []
         now = time.time()
@@ -173,9 +418,9 @@ class VideoRegistry:
             # 直链类源只在「关键词本身就是一个地址」时才参与聚合，
             # 否则每次搜索都会多出一条「请输入 http(s):// 开头的地址」的噪音错误
             keyword_is_url = (keyword or "").strip().lower().startswith(("http://", "https://"))
-            chosen = [p.key for p in self.providers()
-                      if (p.supports_keyword_search() or keyword_is_url)
-                      and (include_degraded or not self.health(p.key).is_degraded(now))]
+            chosen = [key for key in self.ordered_keys(by_speed=self._sort_by_speed)
+                      if (self._providers[key].supports_keyword_search() or keyword_is_url)
+                      and (include_degraded or not self.health(key).is_degraded(now))]
         else:
             chosen = [key for key in sources if key in self._providers]
 
@@ -187,6 +432,7 @@ class VideoRegistry:
                 continue
             if not provider.available():
                 continue
+            started = time.monotonic()
             try:
                 found = provider.search(keyword, kind=kind, limit=limit, page=page)
             except SourceError as error:
@@ -197,7 +443,7 @@ class VideoRegistry:
                 self.record_failure(key, error)
                 errors.append(f"{provider.label}：{error}")
                 continue
-            self.record_success(key)
+            self.record_success(key, latency=time.monotonic() - started)
             for video in found:
                 fingerprint = f"{video.title.strip().lower()}|{video.year}"
                 if fingerprint in seen:
@@ -283,7 +529,8 @@ class VideoRegistry:
             raise SourceError(primary_error or "该条目没有可用的播放地址")
 
         candidate_keys = [
-            key for key in (sources if sources is not None else self.order)
+            key for key in (sources if sources is not None
+                            else self.ordered_keys(by_speed=self._sort_by_speed))
             if key != video.source and key in self._providers
             and self.is_enabled(key) and key not in excluded
         ]

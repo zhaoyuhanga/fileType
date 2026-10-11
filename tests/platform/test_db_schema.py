@@ -24,12 +24,14 @@ EXPECTED_TABLES = {
     "gallery_images", "gallery_albums", "gallery_album_items", "gallery_tags",
     "gallery_image_tags", "gallery_edits", "gallery_ai_tasks",
     "doc_documents", "doc_versions", "doc_merge_reports", "doc_ai_calls", "doc_audit",
+    "anime_rules", "anime_series", "anime_favorites", "anime_progress", "anime_history",
+    "anime_danmaku", "anime_download_tasks",
     "llm_profiles", "llm_calls",
     "schema_migrations",
 }
 
 # 板块前缀：所有业务表都必须带前缀，防止再次混进通用名
-BOARD_PREFIXES = ("book_", "music_", "video_", "gallery_", "doc_", "llm_")
+BOARD_PREFIXES = ("book_", "music_", "video_", "gallery_", "doc_", "anime_", "llm_")
 PLATFORM_TABLES = {"app_settings", "schema_migrations"}
 
 

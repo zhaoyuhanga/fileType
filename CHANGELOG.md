@@ -3,6 +3,133 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v1.1.0 — 第六大板块「墨软影视」播放/下载链路重写（A 阶段：共享层）
+
+这一版**只为解决三个用户感知最强的症状**：帧率低、播放卡、下载慢。
+根因排查（全部带 `文件:行` 证据）见 `docs/VIDEO_ANIME_PLAN.md` 第 1.2 节 ——
+**三个症状的根因都在我们自己的链路上，不是"源不好"**。
+
+### 症状 → 根因 → 修法
+
+| 症状 | 原来的根因 | 现在 |
+|---|---|---|
+| **帧率低** | 全仓没有任何硬解/后端配置（`QT_FFMPEG_DECODING_HW_DEVICE_TYPES`/`QT_MEDIA_BACKEND` 零命中），1080p H.264 全靠软解，CPU 打满 | `ui_kit/media/decode.py`：启动时（早于任何 QtMultimedia 使用）注入 `QT_MEDIA_BACKEND=ffmpeg` + `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=d3d11va,d3d12va,dxva2`；设置页可关硬解/可回退纹理转换 |
+| **播放卡**（网络） | 代理每分片 `requests.get` 新开 TLS、`upstream.content` 全量缓冲、所有响应 `no-store`、失败还带 3 次 0.6s 退避 | `services/media_proxy/`：每主机一个 `Session`（连接池 8/16）+ `iter_content` 流式转发 + 分片磁盘 LRU 缓存（配额/预取/清单短缓存/预热）+ 分层超时与重试（分片失败 ≤150ms 快速 502） |
+| **播放卡**（选路） | `library._lock_best_variant()` 永远锁最高码率（`max(rank)`） | `core/video/abr.py`：`BandwidthMeter`（P50 滑动窗口）+ `pick_variant`（策略 `auto/highest/1080p/720p/lowest`）+ 卡顿降档最多 2 次后换源 |
+| **起播卡死** | `player._check_native_started()` 等 20s 只改一行文字 | 三段自愈 3s 降档 / 8s 换源 / 20s 建议先下后播（`stallDetected(reason)` 信号），判定从"看 mediaStatus"改为"看 position 是否前进" |
+| **下载慢** | `download_many` 逐条串行；分片严格串行 + 每片新连接；无断点续传；走 ffmpeg 时分片仍过 Python 代理 | `core/video/segment_downloader.py`：并发 6（可配 2–16）+ **每线程一个 Session** + **单写线程保序落盘** + `.parts` 断点续传 + 坏片重试（3 次退避）+ 令牌桶限速 + 速度/ETA；`download_many` 集间并发 2；ffmpeg 路径**优先直连**（探测到 `-headers` 就跳过本机代理），并补齐 `-reconnect*` 等按版本探测的网络参数 |
+
+### 新增/搬移的模块
+
+| 模块 | 说明 |
+|---|---|
+| `services/media_proxy/{server,upstream,cache,playlist,config,stats,state}.py` | 代理实现（旧 `services/media_server.py` 变成**同名同签名转发壳**） |
+| `core/video/abr.py` | 带宽估算 + 档位选择 + 降/升档控制 |
+| `core/video/segment_downloader.py` | 并发分片下载器（续传/重试/限速/合并/remux） |
+| `ui_kit/media/{surface,player,danmaku,subtitle,decode}.py` | 共享媒体层：视频面、播放器窗口、弹幕轨道与性能分级、外挂字幕、硬解注入 |
+
+**为什么播放器搬到 `ui_kit/media/`**：架构闸门禁止板块之间互相引用，而第七大板块
+「墨软动漫」必须复用同一个播放器 —— 共享层是唯一合规落点（方案 4.0）。
+`boards/video/player.py` 保留为转发壳，旧调用方与旧测试不受影响。
+
+### 渲染与体验
+
+- 渲染路径从 `QVideoWidget`（原生窗口，**无法叠加任何东西**）换成
+  `QGraphicsView + QGraphicsVideoItem`：这是字幕/弹幕/诊断浮层的前提；
+  `video/render_path=widget` 可一键回退，`auto` 时构造失败自动回退；
+- 弹幕：性能分级（借 LunaTV-EE 公式 → 同屏 25/40/60）、轨道分配器（不重叠、放不下就丢）、
+  关键词 + `/正则/` 屏蔽（只读弹弹play，默认关闭）；
+- 字幕：外挂 `.srt/.vtt` 解析 + 同名自动匹配（内嵌字幕轨 Qt 无 API，**不做**，文档如实标注）；
+- 自动连播（3 秒倒计时可取消）+ `F12` 播放诊断（后端/硬解/代理命中率/卡顿次数，可复制导出）；
+- 新快捷键：`N`/`P` 上下一集、`D` 弹幕、`[`/`]` 调速、`Ctrl+S` 复制诊断。
+
+### 设置项（新增）
+
+`video/media_backend`、`video/hw_decode`、`video/hw_texture_conversion`、`video/hw_profile_mismatch`、
+`video/render_path`、`video/quality_policy`、`video/auto_downgrade`、`video/auto_upgrade`、
+`video/auto_next`、`video/buffer_mode`（省流/均衡/高质）、`video/cache_quota_mb`、
+`video/prefetch_segments`、`video/proxy_concurrency`、`video/segment_concurrency`、
+`video/download_parallel`、`video/download_speed_limit_mbps`、`video/segment_concurrency_enabled`、
+`video/ffmpeg_direct`、`video/danmaku_*`。默认值都偏向"接近现状但不卡"。
+
+### 性能预算（`tests/board_video/test_video_nonfunctional.py`）
+
+代理吞吐 ≥ 60 MB/s、缓存命中 ≥ 60 MB/s 且**不回源**、分片下载 ≥ 40 MB/s、
+代理首字节 < 120 ms、1000 条弹幕轨道分配 < 50 ms、2000 行清单改写 < 200 ms。
+
+### 测试
+
+新增 4 个测试文件（`test_video_proxy.py`、`test_video_segment_downloader.py`、
+`test_video_abr.py`、`test_video_media_shared.py`）+ 1 个性能预算文件；
+`pytest tests/board_video tests/architecture` 全绿。旧用例中"锁最高清晰度"那条改为
+显式使用 `quality_policy=highest`（回归安全阀），并新增自动策略用例。
+
+### 兼容性与边界（诚实标注）
+
+- 旧 API（`media_server.*`、`VideoPlayerDialog`）全部保留，行为默认不变，只是更快；
+- **硬解是进程级环境变量**：改设置后需重开播放窗口（必要时重启应用）才生效；
+- 代理默认**拒绝访问环回/私网目标**（SSRF 收口）：本机 fixture 需 `MODU_MEDIA_ALLOW_PRIVATE=1`；
+  缓存目录可用 `MODU_VIDEO_CACHE_DIR` 覆盖；
+- 代理只做"**逐源开关 + Referer 三段回退**"，**不做**服务端转码（对标项目也都没有）。
+
+## v1.1.0 — 第七大板块「墨软动漫」（规则驱动采集 + 追番 + 弹幕）
+
+新增第七大板块，与影视板块**定位不重叠、数据不干扰、共享同一套播放/代理/下载**。
+
+### 新增能力
+
+| 能力 | 落地 |
+|---|---|
+| **规则驱动的番剧采集** | `core/anime/{rules,selectors,engine,sniffer}.py`：字段与 Kazumi 规则一一对应（便于直接吃 KazumiRules 仓库的 API 规则）、同时支持 **XPath / CSS / JSONPath 子集**、`@keyword`/`@source`/`@roadIndex`/`@episodeIndex` 等占位符、`api` 等级门控（超版灰显）、`deprecated` 灰显、`useWebview` 明确提示"可能解析失败" |
+| **播放页静态嗅探** | `sniffer.py`：苹果 CMS `player_aaaa` → `/player/` 接口 → JSON 扫描 → 正则（含 `atob`/`unescape`/`\uXXXX` 解码）→ iframe 递归（≤3 层）；失败给**可读原因** |
+| **多规则搜索与合并** | 搜索页**边搜边出**（每条规则完成即插卡），同一归一化标题的多规则结果合并成一张卡（可展开选来源） |
+| **番剧库 / 追番 / 继续观看** | `anime_series`/`anime_favorites`/`anime_progress`/`anime_history` 四张表 + **更新提醒**（`update_check.py` 并发 2、可取消，正确处理"总集数变多"）—— 这是对标项目 Kazumi **还没做**的差异项 |
+| **规则管理** | 规则页：启停 / 导入（文件·剪贴板·URL·批量）/ 导出 / 编辑 / 删除 / **试跑面板**（逐步显示 搜索 URL → 命中 N 条 → 作品名与链接 → 详情线路数与集数 → 第一集解析结果与嗅探策略，失败给出具体原因）/ 订阅（拉取→逐条校验→**校验失败保留旧版本**） |
+| **弹幕（只读）** | `core/anime/danmaku.py`：弹弹play 官方接口 + 签名鉴权 + 标题/集数匹配 + XML 缓存（TTL 6h/72h）+ 本地 XML 导入导出；渲染用共享层（性能分级 60/40/25 + 轨道分配 + `/正则/` 屏蔽） |
+| **Bangumi 元数据** | `bangumi.py`：只读、约 1 req/s 限速、内存 TTL 缓存；拿不到降级为规则数据（如实标注"元数据是可选项"） |
+| **下载** | 复用共享下载器（并发 6 + `.parts` 断点续传 + 限速），`anime_download_tasks` 记录任务，支持整季下载（集间并发 2） |
+| **数据可携带** | 追番/进度/设置的 **JSON 导出/导入**（不做 WebDAV —— Kazumi 的 WebDAV 是缺陷最密集的功能） |
+
+### 新增结构（迁移 `v3_anime`，纯增量）
+
+七张表：`anime_rules` / `anime_series` / `anime_favorites` / `anime_progress` /
+`anime_history` / `anime_danmaku` / `anime_download_tasks`（索引 4 个，全部 `idx_anime_` 前缀）。
+
+### 新增共享层（两个板块共用，架构闸门要求）
+
+`ui_kit/media/{player,danmaku,danmaku_bridge,rule_sources,subtitle,surface,decode}.py` ——
+播放器与弹幕桥、规则源适配器都住在共享层，因为**板块之间不得互相引用**。
+`core/anime/providers.py` 保留为转发壳。
+
+### 与影视板块同时补齐的收尾项
+
+- **V3-e 源测速与排序**：`SourceHealth` 增加延迟 P50 与实测速度，打分公式
+  `分辨率 40% + 速度 40% + 延迟 20%` × 权重加成（借 LunaTV-EE），源设置里可**测速**并可选排序（默认关，保持行为可预期）；
+- **V3-f 图片代理**：搜索/详情/番剧库/历史的海报统一走 `media_proxy.image_url()`，防盗链 403 不再破图；
+- **V2-c 暂停/继续 + 失败重试**：下载工具栏加「暂停下载/继续下载」与「重试失败项」，
+  暂停后已下载分片保留在 `.parts/`，继续即续传；
+- **V3-c 弹幕取数**：影视板块播放器接上弹弹play（只读）+ 本地 XML 导入导出（弹幕按钮右键菜单）；
+- **P2 广告分片跳过**（实验性、默认关）：只跳"时长明显短于中位且与前一 jump 片不同目录"的分片，最多 3 片，并明确提示跳了哪些。
+
+### 测试
+
+新增 `tests/board_anime/` 九个测试文件（约 3 900 行），覆盖规则/选择器/嗅探/引擎/存储/
+更新检查/弹幕/Bangumi/规则源适配/界面；`tests/board_video/test_video_danmaku.py` 覆盖影视侧弹幕接线；
+`tests/platform/test_db_schema.py` 守住 `anime_*` 七张表；`app/main.py` 新增自检 `anime_core`
+（18 项自检全部通过）。
+
+### 修掉的两个真实缺陷（集成测试暴露）
+
+1. `engine.resolve(detail, road, episode)` 的形参错位：把 `road` 当成了剧集，
+   导致 `_episode_url` 永远返回空串、解析必然报"该集没有可用的播放页地址"；
+2. 设置页长路径标签把整页最小宽度顶到 750px 以上（`QLabel` 开了 wordWrap 也按最长
+   不可断行算），默认窗口下出现横向滚动条 —— 现在在路径分隔符后插入零宽断点。
+
+### 明确不做（如实标注）
+
+不内置浏览器内核/不执行页面 JS（**纯 JS 渲染站点无法支持**）、不做实时 Anime4K 超分
+（改离线 ffmpeg 增强）、**不发送弹幕**、不做 DLNA/一起看、不做 WebDAV 同步、不做自动过验证码。
+
 ## v1.0.5 — 第六大板块：墨软文档（含三批自查修复）
 
 新增第六大板块「墨软文档」（一站式文档工作台），并新增 `doc_*` 五张表（迁移 `v2_document`，

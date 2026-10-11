@@ -349,15 +349,31 @@ def test_home_grid_reflows_with_window_width(qapp: QApplication) -> None:
 
 
 def test_home_last_row_fills_remaining_width(qapp: QApplication) -> None:
-    """最后一行只有一张卡时必须横向铺满，避免右下角空白。"""
+    """最后一行没铺满时，幽灵卡必须跨列占满，避免右下角空白。
+
+    注意：卡片数正好整除列数时（当前 7 个板块 + 1 张幽灵卡 = 8 张，宽窗口 4 列）
+    最后一行本来就是满的 —— 这时"跨列"无从谈起。因此断言按实际列数计算，
+    不能写死"一定有跨列卡"（第七板块加入后就是这么失效的）。
+    """
     page = HomePage()
-    page.resize(1600, 900)
-    page._reflow()                                   # noqa: SLF001
     layout = page.findChild(QGridLayout)
     assert layout is not None
 
-    ghosts = [layout.itemAt(index) for index in range(layout.count())]
-    spans = [layout.getItemPosition(index) for index in range(layout.count())]
-    assert any(span[3] > 1 for span in spans), "幽灵卡应跨列铺满"
-    assert all(item is not None for item in ghosts)
+    # 宽窗口（4 列）：8 张卡正好两行铺满，末行没有剩余列
+    page.resize(1600, 900)
+    page._reflow()                                   # noqa: SLF001
+    columns = page._columns                          # noqa: SLF001
+    index = len(page._cards) - 1                     # noqa: SLF001
+    _row, column, _rowspan, colspan = layout.getItemPosition(layout.count() - 1)
+    assert colspan == columns - (index % columns), "幽灵卡要吃掉本行的剩余列"
+    assert all(layout.itemAt(i) is not None for i in range(layout.count()))
+
+    # 窄一点（3 列）：8 张卡最后一行只有 2 张 → 幽灵卡必须跨 2 列
+    page.resize(900, 900)
+    page._reflow()                                   # noqa: SLF001
+    columns = page._columns                          # noqa: SLF001
+    index = len(page._cards) - 1                     # noqa: SLF001
+    _row, column, _rowspan, colspan = layout.getItemPosition(layout.count() - 1)
+    assert columns - (index % columns) == colspan
+    assert colspan > 1, "最后一行没铺满时幽灵卡必须跨列"
     page.close()

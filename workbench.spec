@@ -122,6 +122,8 @@ a = Analysis(
         "modu_workbench.core.video.library",
         "modu_workbench.core.video.hls",
         "modu_workbench.core.video.downloader",
+        "modu_workbench.core.video.abr",
+        "modu_workbench.core.video.segment_downloader",
         "modu_workbench.core.video.sources",
         "modu_workbench.core.video.sources.http",
         "modu_workbench.core.video.sources.base",
@@ -130,6 +132,26 @@ a = Analysis(
         "modu_workbench.core.video.sources.providers",
         "modu_workbench.core.video.sources.providers.cms_vod",
         "modu_workbench.core.video.sources.providers.public",
+        # v1.1.0 共享媒体层：本机代理 + 播放器/视频面/弹幕/字幕/硬解注入
+        # （影视与动漫两个板块共用，住在 services/ 与 ui_kit/ 下）
+        "modu_workbench.services.media_server",
+        "modu_workbench.services.media_proxy",
+        "modu_workbench.services.media_proxy.server",
+        "modu_workbench.services.media_proxy.upstream",
+        "modu_workbench.services.media_proxy.cache",
+        "modu_workbench.services.media_proxy.playlist",
+        "modu_workbench.services.media_proxy.config",
+        "modu_workbench.services.media_proxy.stats",
+        "modu_workbench.services.media_proxy.state",
+        "modu_workbench.ui_kit.media",
+        "modu_workbench.ui_kit.media.surface",
+        "modu_workbench.ui_kit.media.player",
+        "modu_workbench.ui_kit.media.danmaku",
+        "modu_workbench.ui_kit.media.subtitle",
+        "modu_workbench.ui_kit.media.decode",
+        # v1.1.0 跨板块适配层（影视 ↔ 动漫共用）：弹幕取数 + 规则源包装
+        "modu_workbench.ui_kit.media.danmaku_bridge",
+        "modu_workbench.ui_kit.media.rule_sources",
         # 墨软图库：板块页面、核心引擎与分板块设置页
         "modu_workbench.boards.gallery.board",
         "modu_workbench.boards.gallery.widgets",
@@ -173,6 +195,22 @@ a = Analysis(
         "modu_workbench.core.document.templates",
         "modu_workbench.core.document.plugins",
         "modu_workbench.core.document.ocr",
+        # 墨软动漫：板块页面 + 核心规则驱动采集（追番/进度/弹幕/更新检查）＋设置页
+        # 说明：`modu_workbench.core.anime` 的子模块（engine/library/...）随包时由
+        # PyInstaller 顺着包内 import 一起收进来；这里显式列出板块页与设置页，
+        # 其余由 `core.anime` 包名带入。
+        "modu_workbench.boards.anime",
+        "modu_workbench.boards.anime.board",
+        "modu_workbench.boards.anime.context",
+        "modu_workbench.boards.anime.search",
+        "modu_workbench.boards.anime.detail",
+        "modu_workbench.boards.anime.library_page",
+        "modu_workbench.boards.anime.schedule",
+        "modu_workbench.boards.anime.rules_page",
+        "modu_workbench.boards.anime.history",
+        "modu_workbench.boards.anime.widgets",
+        "modu_workbench.core.anime",
+        "modu_workbench.ui_kit.settings.anime",
         # 大模型能力中心：多类型/多配置/优先级降级
         "modu_workbench.core.llm.models",
         "modu_workbench.core.llm.router",

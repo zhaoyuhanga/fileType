@@ -54,6 +54,10 @@ from .registry import (
     SETTING_SOURCE_URLS,
     SETTING_VERSION,
     SOURCES_VERSION,
+    SPEED_TEST_CONCURRENCY,
+    SPEED_TEST_MAX_SOURCES,
+    SPEED_TEST_TOP_SOURCES,
+    SpeedResult,
     VideoRegistry,
 )
 
@@ -111,6 +115,9 @@ __all__ = [
     "SETTING_SOURCE_URLS",
     "SETTING_VERSION",
     "SOURCES_VERSION",
+    "SPEED_TEST_CONCURRENCY",
+    "SPEED_TEST_MAX_SOURCES",
+    "SPEED_TEST_TOP_SOURCES",
     "ArchiveOrgVideoSource",
     "CmsVodSource",
     "CustomVodSource",
@@ -120,6 +127,7 @@ __all__ = [
     "SourceError",
     "SourceHealth",
     "SourceInfo",
+    "SpeedResult",
     "VideoRegistry",
     "VideoSource",
     "WikimediaVideoSource",

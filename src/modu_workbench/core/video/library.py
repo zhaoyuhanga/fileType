@@ -17,6 +17,7 @@ from modu_workbench.core.platform.media import (
     probe_duration_ms as _probe_duration_ms,
 )
 
+from .abr import pick_variant
 from .downloader import DownloadResult, copy_local, download_episode, download_many
 from .models import (
     VIDEO_EXTENSIONS,
@@ -31,6 +32,24 @@ from .sources import ResolvedPlay, SourceError, VideoRegistry, registry as defau
 from .storage import VideoStorage, remote_to_video
 
 ProgressFn = Callable[[int, int, str], None]
+
+
+def _quality_policy() -> str:
+    """清晰度策略：`video/quality_policy`（auto/highest/1080p/720p/lowest）。
+
+    读取顺序「QSettings → 默认 auto」：这是**界面偏好**，界面保存后立即可见；
+    读不到（无 Qt / 打包自检）时回落到 `auto`，绝不影响播放。
+    """
+    try:
+        from PySide6.QtCore import QSettings
+
+        value = QSettings("ModuWorkbench", "modu-workbench").value(
+            "video/quality_policy", "auto", type=str)
+        if value:
+            return str(value)
+    except Exception:  # noqa: BLE001
+        pass
+    return "auto"
 
 
 @dataclass
@@ -288,27 +307,39 @@ class VideoLibrary:
         return record.url if record else ""
 
     def _lock_best_variant(self, resolved: ResolvedPlay) -> ResolvedPlay:
-        """用户没指定画质时，尽量把地址锁定到最高清晰度。
+        """**兼容入口**：保留旧名字，内部走 ABR 选路（见 `_pick_variant`）。
 
-        主清单直接交给播放器时「选哪一路」由播放器/ffmpeg 决定，行为不可控；
-        锁定最高变体既能保证画质，也避免播放过程中的码率切换抖动。
+        旧名字之所以保留：`boards/video/*` 与既有测试都可能引用它，
+        而"锁最高清晰度"是 v1.0.x 的行为，现在由 `video/quality_policy` 决定
+        （默认 `auto` = 按实测带宽选，没有历史时目标 720P）。
+        """
+        return self._pick_variant(resolved)
 
-        两条路径，先便宜后昂贵：
-        1. 源自己声明了多个带地址的清晰度 → 直接用最高的（零网络开销）；
-        2. 否则探测 m3u8 主清单 —— 用**短超时**客户端（拿源的默认头，避免被 403）。
-        任何失败都保持原样：绝不因为"锦上添花"让播放失败或变慢。
+    def _pick_variant(self, resolved: ResolvedPlay) -> ResolvedPlay:
+        """用户没指定画质时，按 ABR 策略挑一个清晰度。
+
+        为什么不再"永远锁最高"：慢网下锁最高 = 持续 stall（这是"播放卡"的主因之一）。
+        现在的三段式（方案 3.1.5）：
+
+        1. 源自己声明了多个带地址的清晰度 → 直接按策略挑（零网络开销）；
+        2. 否则探测 m3u8 主清单（短超时客户端，拿源的默认头避免 403）；
+        3. 任何失败都保持原样：绝不因为"锦上添花"让播放失败或变慢。
+
+        `policy=highest` 时行为与 v1.0.x 完全一致（回归安全阀）。
         """
         if resolved.quality is not None or not resolved.url:
             return resolved
 
+        policy = _quality_policy()
         episode = resolved.episode
         declared = [item for item in ((episode.qualities if episode is not None else []) or [])
                     if getattr(item, "url", "")]
         if len(declared) >= 2:
-            best = max(declared, key=lambda item: item.rank)
-            if best.url and best.url != resolved.url:
-                resolved.url = best.url
-            resolved.quality = best
+            chosen = pick_variant(declared, policy=policy)
+            if chosen is not None and getattr(chosen, "url", ""):
+                if chosen.url != resolved.url:
+                    resolved.url = chosen.url
+                resolved.quality = chosen
             return resolved
 
         if not resolved.is_hls:
@@ -324,11 +355,11 @@ class VideoLibrary:
             return resolved
         if len(variants) < 2:
             return resolved
-        best_variant = max(variants, key=lambda item: item.rank)
-        if not best_variant.url:
+        chosen = pick_variant(variants, policy=policy)
+        if chosen is None or not getattr(chosen, "url", ""):
             return resolved
-        resolved.url = best_variant.url
-        resolved.quality = Quality(label=best_variant.display, url=best_variant.url)
+        resolved.url = chosen.url
+        resolved.quality = Quality(label=chosen.display, url=chosen.url)
         return resolved
 
     def find_higher_quality(
@@ -483,12 +514,19 @@ class VideoLibrary:
         on_task_done: Callable[[DownloadResult], None] | None = None,
         cancel: threading.Event | None = None,
         allow_cross_source: bool = True,
+        pause_event: threading.Event | None = None,
+        parallel: int | None = None,
     ) -> List[DownloadResult]:
-        """批量下载（逐集），完成后统一入库。"""
+        """批量下载（集间并发 2、集内分片并发 6），完成后统一入库。
+
+        `pause_event` 为 set 时暂停：已完成的分片保留在 `.parts/`，
+        清除后重新调用同一批任务会**接着下**（断点续传，见 segment_downloader）。
+        """
         target_dir = Path(dest_dir) if dest_dir else self.video_dir
         results = download_many(
             tasks, target_dir, on_progress=on_progress, on_task_done=on_task_done,
             cancel=cancel, registry=self.registry, allow_cross_source=allow_cross_source,
+            pause_event=pause_event, parallel=parallel,
         )
         self.import_download_results(results)
         return results

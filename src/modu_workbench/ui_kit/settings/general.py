@@ -63,9 +63,20 @@ class GeneralSettingsPage(SettingsPage):
 
     @staticmethod
     def _pickable(text: str) -> QLabel:
-        label = QLabel(text)
+        """可选中复制的路径标签。
+
+        **必须主动插入换行**：`QLabel` 即使开了 `setWordWrap`，它的
+        `minimumSizeHint` 仍然按"最长不可断行"计算；而 Windows 路径用 `\\` 分隔，
+        中文/空格又少，Qt 很难找到断点 —— 于是一条长路径就能把整页最小宽度顶到
+        750px 以上，默认窗口宽度下直接出现横向滚动条（实测过：
+        `%TEMP%\\pytest-of-xxx\\...` 这种长路径必现）。
+        在分隔符后插入零宽断点，既保持"可复制"又让它可以换行。
+        """
+        wrapped = (text or "").replace("\\", "\\\u200b").replace("/", "/\u200b")
+        label = QLabel(wrapped)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setWordWrap(True)
+        label.setToolTip(text)
         return label
 
     def load(self) -> None:
