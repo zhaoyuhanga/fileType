@@ -409,6 +409,30 @@ def extract_player_aaaa(text: str) -> dict | None:
     return None
 
 
+def _player_block_reason(text: str) -> str:
+    """页面里有 `player_aaaa` 但取不到地址时，说明**具体原因**（便于用户判断）。
+
+    真机实测（如 2kdm.com 这类"mute"系站）：`player_aaaa` 存在、`encrypt` 是
+    `3`/`4` —— 那是**站点自己 JS 里的私有加密**（我们刻意不执行页面 JS），
+    明文地址在客户端由站点脚本还原，静态嗅探拿不到。这种情况下"换个规则"没用，
+    只能换线路、用外部播放器打开，或在浏览器里复制地址。
+    """
+    import re as _re
+
+    match = _re.search(r"player_aaaa\s*=\s*(\{)", text or "")
+    if not match:
+        return ""
+    payload = extract_player_aaaa(text)
+    if not isinstance(payload, dict):
+        return "对象无法解析"
+    encrypt_text = str(payload.get("encrypt", "")).strip()
+    if payload.get("url"):
+        if encrypt_text and encrypt_text not in ("0", "1", "base64", "true", ""):
+            return f"站点自定义加密 encrypt={encrypt_text}（需站点自身 JS 解密）"
+        return "url 字段不是可识别的媒体地址"
+    return "缺少 url 字段"
+
+
 def _player_payload(data: dict) -> tuple[str, str] | None:
     """从 `player_aaaa` 对象里取出地址并解码，返回 `(地址, 说明)`。
 
@@ -505,7 +529,10 @@ class Sniffer:
         result = self._try_player_aaaa(text, referer)
         if result is not None:
             return result
-        failures.append("player_aaaa")
+        # 记下"为什么没成"：真机实测里最常见的是**站点自定义加密**（encrypt=3/4），
+        # 泛泛地说"没找到地址"会让用户以为是我们没实现，说不清楚就没法排查。
+        blocked = _player_block_reason(text)
+        failures.append(f"player_aaaa（{blocked}）" if blocked else "player_aaaa")
 
         # 3) /player/ 播放器接口
         result = self._try_player_api(url, text, depth, visited)

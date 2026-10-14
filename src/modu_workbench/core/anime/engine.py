@@ -284,13 +284,15 @@ class AnimeEngine:
         body = _template_dict(_pick(request, "body", "request.body", default=None), variables)
         headers = _plain_dict(_pick(request, "headers", "request.headers", default={}))
         method = str(_pick(request, "method", "request.method", default="GET") or "GET").upper()
+        # Kazumi 的 `bodyType`：决定 POST 的 body 怎么发。真实规则三种都出现过
+        # （xfdmnext 用 json、部分站点用 form、少数直接把 JSON 文本当 raw body），
+        # 所以必须显式读它，而不是"有 dict 就按 json 发"。
+        body_type = str(_pick(request, "bodyType", "body_type", default="") or "").lower()
 
         if method == "POST":
             kwargs = {"headers": headers} if headers else {}
-            if isinstance(body, dict) and body:
-                kwargs["json"] = body
-            elif query:
-                kwargs["data"] = query
+            sent = _post_body_kwargs(body_type, body, query)
+            kwargs.update(sent)
             payload = self._require_json(rule, url, method="POST", **kwargs)
         else:
             if not url.startswith(("http://", "https://")):
@@ -745,20 +747,63 @@ def _pick(data: dict | None, *names: str, default=None):
     return default
 
 
+def _post_body_kwargs(body_type: str, body, query: dict) -> dict:  # noqa: ANN001
+    """按 Kazumi 的 `bodyType` 决定 POST body 的发送方式。
+
+    | `bodyType` | 发送方式 |
+    |---|---|
+    | `json`，或未写且 body 是 dict | `json=body`（`Content-Type: application/json`） |
+    | `form` / `form-data` / `urlencoded` | `data=body`（表单编码） |
+    | `text` / `raw` / `plain` | `data=` 原始文本（body 是 dict 时序列化成 JSON 文本） |
+    | 都没有 | 退回 `query` 当表单字段（与旧行为一致，不破坏既有规则） |
+
+    **为什么要显式判 `bodyType`**：早先的实现是"body 是 dict 就按 json 发"，
+    对 `bodyType: "form"`/`"text"` 的规则会发错 Content-Type —— 这类站点通常直接 400/415。
+    `bodyType` 缺失时保持旧行为，因此不影响已经在用的规则。
+    """
+    import json as _json
+
+    kind = (body_type or "").strip().lower()
+    if kind in ("form", "form-data", "formdata", "urlencoded", "x-www-form-urlencoded"):
+        return {"data": body if body else query}
+    if kind in ("text", "raw", "plain"):
+        if isinstance(body, (dict, list)):
+            body = _json.dumps(body, ensure_ascii=False)
+        return {"data": body if body not in (None, "") else query}
+    if kind in ("json", "application/json"):
+        return {"json": body if body is not None else {}}
+    # 未写 bodyType：body 优先、退回 query（旧行为）
+    if isinstance(body, dict) and body:
+        return {"json": body}
+    return {"data": query} if query else {}
+
+
 def _template_dict(value, variables: dict, renderer=substitute) -> dict:
     """替换模板字典里的 `@变量`。
 
-    URL 用 `substitute_url`（`@keyword` 要 URL 编码），query/body 用 `substitute`
-    （**不能**编码：表单字段交给 requests 编码，手工再编一次就变成双重编码，
-    站点收到的是 `%2520` 这种垃圾，搜索永远为空——这是真机踩过的坑）。
+    两条约定（都是真机踩过的坑）：
+
+    - URL 用 `substitute_url`（`@keyword` 要 URL 编码），query/body 用 `substitute`
+      ——**不能**编码：表单字段交给 requests 编码，手工再编一次就变成双重编码，
+      站点收到 `%2520` 这种垃圾，搜索永远为空；
+    - **没有占位符的标量保留原类型**（bool/int/float）。真实规则里有
+      `"enabled": true`、`"sortDesc": false`、`"page": 1`
+      （如 KazumiRules 的 sorani），一律转字符串会把它们送成 `"false"`/`"1"`，
+      严格校验类型的接口会直接 400 或行为异常。
     """
     if not isinstance(value, dict):
         return {}
-    rendered: dict[str, str] = {}
+    rendered: dict[str, Any] = {}
     for key, item in value.items():
         if isinstance(item, (dict, list)):
             continue
-        rendered[str(key)] = renderer(str(item), variables)
+        text = str(item)
+        if isinstance(item, str) and "@" in item:
+            rendered[str(key)] = renderer(text, variables)
+        elif isinstance(item, (bool, int, float)) or not isinstance(item, str):
+            rendered[str(key)] = item
+        else:
+            rendered[str(key)] = text
     return rendered
 
 

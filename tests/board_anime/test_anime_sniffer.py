@@ -405,3 +405,31 @@ def test_sniff_failure_note_mentions_depth_for_inner_page(depth: int) -> None:
         result = Sniffer(max_iframe_depth=depth).sniff(fixture.url("/l0.html"))
     assert result.strategy == "failed"
     assert "JS" in result.note
+
+
+def test_sniff_reports_site_specific_encryption() -> None:
+    """真机实测：站点用私有加密（encrypt=3）时必须说清**具体原因**。
+
+    这类站（如 2kdm.com 这种mute系）player_aaaa 存在、encrypt 是 3/4，
+    明文地址由站点自己的 JS 还原 —— 我们刻意不执行页面 JS，静态嗅探必然拿不到。
+    泛泛地说没找到地址会让用户以为是我们没实现，说不清楚就没法排查。
+    """
+    from modu_workbench.core.anime.sniffer import Sniffer, _player_block_reason
+
+    html = '<script>var player_aaaa={"encrypt":3,"url":"mute-amHuRt0ecfHuMn"}</script>'
+    assert "encrypt=3" in _player_block_reason(html)
+
+    result = Sniffer().sniff("https://example.com/vodplay/1-1-1.html", html=html)
+    assert result.strategy == "failed"
+    assert "encrypt=3" in result.note, "必须指出是站点自定义加密，而不是含糊的失败"
+    assert "player_aaaa" in result.note
+
+
+def test_player_block_reason_distinguishes_cases() -> None:
+    from modu_workbench.core.anime.sniffer import _player_block_reason
+
+    assert "不是可识别的媒体地址" in _player_block_reason(
+        '<script>var player_aaaa={"encrypt":0,"url":"https://x/a.html"}</script>')
+    assert "缺少 url" in _player_block_reason(
+        '<script>var player_aaaa={"encrypt":0}</script>')
+    assert _player_block_reason("<html>no player here</html>") == ""
