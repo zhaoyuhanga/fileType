@@ -348,6 +348,43 @@ def test_home_grid_reflows_with_window_width(qapp: QApplication) -> None:
     page.close()
 
 
+# ---------------------------------------------------------------- 板块与文案一致性
+
+
+def test_app_slogan_mentions_every_active_board() -> None:
+    """副标题必须覆盖**所有**在用板块。
+
+    这个坑真实发生过：第七板块「墨软动漫」接入后，主窗口标题与顶栏副标题仍是
+    "本地离线 · 阅读 · 转换 · 音乐 · 影视 · 图库"——只有五个板块（连第六板块「文档」
+    都漏了）。窗口标题就是用户第一眼看到的东西，漏板块属于"界面在说谎"。
+
+    这里按"板块 → 文案里的关键词"逐个核对，并且要求关键词**按板块顺序出现**
+    （副标题的顺序语义就是板块顺序）；未登记关键词的板块用标题去匹配。
+    """
+    from modu_workbench import APP_SLOGAN
+    from modu_workbench.app.registry import ACTIVE_BOARDS
+
+    keywords = {
+        "book": "阅读",
+        "convert": "转换",
+        "music": "音乐",
+        "video": "影视",
+        "gallery": "图库",
+        "document": "文档",
+        "anime": "动漫",
+    }
+    positions: list[int] = []
+    for board in ACTIVE_BOARDS:
+        keyword = keywords.get(board.key, board.title)
+        index = APP_SLOGAN.find(keyword)
+        assert index >= 0, (
+            f"板块「{board.title}」（{board.key}）没有出现在副标题里：{APP_SLOGAN!r}")
+        positions.append(index)
+    assert positions == sorted(positions), (
+        f"副标题里的板块顺序与 ACTIVE_BOARDS 不一致：{APP_SLOGAN!r}")
+    assert APP_SLOGAN.startswith("本地离线"), "副标题要保留「本地离线」这个定位"
+
+
 def test_home_last_row_fills_remaining_width(qapp: QApplication) -> None:
     """最后一行没铺满时，幽灵卡必须跨列占满，避免右下角空白。
 
