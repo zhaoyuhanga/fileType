@@ -50,7 +50,22 @@ def looks_like_jsonpath(expression: str) -> bool:
 
 
 class XPathSelector:
-    """XPath 1.0（lxml）。兼容 Kazumi 要求的"以 `//` 开头"，同时更宽松。"""
+    """XPath 1.0（lxml）。兼容 Kazumi 要求的"以 `//` 开头"，同时更宽松。
+
+    **以 `//` 开头的表达式在子节点上求值时会"就地作用域化"**（自动补成 `.//`）。
+    这是照 Kazumi 的语义来的，也是真机踩出来的：
+
+    Kazumi 规则里的 `searchName` / `searchResult` / `chapterResult` 普遍写成
+    `//div/a[2]`、`//a` 这种**绝对路径**。XPath 规范里 `//x` 等价于
+    `/descendant-or-self::node()/x`，在某个元素上求值时会跳到**整个文档**去找 ——
+    于是每条搜索结果拿到的都是"全页第一个匹配"，实测表现为
+    `searchName` 取到站点头部的 `IOS用户使用欧路Via浏览器…全功能拦截`、
+    `searchResult` 取到空 `<a>`，标题全是垃圾、链接全空 → **搜索命中 0 条**。
+
+    处理顺序：**先按原样求值，只有结果为空时才用作用域化表达式重试**。
+    这样 `//a/@href`（确实要跨节点取）这类写法不受影响，而
+    "本想取当前条目"的写法能正常工作。
+    """
 
     def __init__(self, expression: str) -> None:
         self.expression = (expression or "").strip()
@@ -58,18 +73,63 @@ class XPathSelector:
     # -- 求值 --------------------------------------------------------------
 
     def _evaluate(self, data: Any) -> list:
+        """求值。
+
+        **元素 + 绝对路径 → 先作用域化**（`//x` 当 `.//x` 用）。
+
+        这条规则与 `engine._scoped()` 是同一个语义，也是真实站点逼出来的：
+        XPath 规范里 `//x` 是"从文档根找"，**即使在元素上求值也一样**。
+        于是规则的 `searchName: "//div/a[2]"`、`chapterResult: "//a/@href"`
+        会给每条命中/每条线路都返回"全页第一个匹配" —— 实测表现为标题取到站点头部的
+        `IOS用户使用欧路Via浏览器…全功能拦截`、所有线路的剧集一模一样、搜索命中 0 条。
+
+        只有"先作用域化拿到东西"或"作用域化拿不到、原样能拿到"时才用原样结果；
+        两者都空就返回空。字符串输入（整页 HTML）不受影响，仍按文档语义求值。
+        """
         from lxml import etree, html
 
         root = self._root(data)
         if root is None:
             return []
+        if self.expression in ("//", "/", ".", "./", ""):
+            # 真规则里出现过 `"searchResult": "//"`（KazumiRules 的 aafun）——
+            # 这是**合法 JSON 但非法 XPath**。以前会让整条规则直接抛 XPathError，
+            # 一条写坏的字段把整站搜索打掉；现在当成"该字段没写"（返回空）。
+            return []
+        is_element = isinstance(root, (etree._Element, etree._ElementTree))  # noqa: SLF001
+        expression = self.expression
+        if is_element and expression.startswith("/"):
+            scoped = "." + expression
+            try:
+                scoped_result = root.xpath(scoped)
+            except etree.XPathError:
+                scoped_result = None
+            if scoped_result:
+                return scoped_result if isinstance(scoped_result, list) else [scoped_result]
         try:
-            result = root.xpath(self.expression)
+            result = root.xpath(expression)
         except etree.XPathError as error:
             raise SelectorError(f"XPath 语法错误：{self.expression}（{error}）") from error
         if not isinstance(result, list):
-            return [result]
-        return result
+            result = [result]
+        if result or not is_element or not expression.startswith("/"):
+            return result
+        scoped = self.scoped_expression
+        if scoped == expression:
+            return result
+        try:
+            retry = root.xpath(scoped)
+        except etree.XPathError:
+            return result
+        return retry if isinstance(retry, list) else [retry]
+
+    @property
+    def scoped_expression(self) -> str:
+        """`//x/y` → `.//x/y`（只在"就某个子节点"求值时有意义）。"""
+        expr = self.expression
+        if expr.startswith("/"):
+            return "." + expr
+        return expr
 
     @staticmethod
     def _root(data: Any):  # noqa: ANN401
@@ -112,13 +172,29 @@ class XPathSelector:
 
 
 def _stringify(item: Any) -> str:  # noqa: ANN401
-    """把 XPath 结果项转成字符串（元素取文本、属性已是字符串）。"""
+    """把 XPath 结果项转成字符串（元素取文本、属性已是字符串）。
+
+    **`<a>` 优先取 `href`**：规则里的"结果/剧集"选择器普遍写成 `//h2/a` 这种
+    **元素**形态（Kazumi 的 `searchResult` / `chapterResult` 都是这个约定），
+    而它们的语义就是"链接"。若按元素取文本，拿到的是标题文字 —— 实测表现为
+    hit 的地址变成 `https://站/葬送的芙莉莲`，接着详情 404、选集全空。
+    显式写 `@href` / `text()` 的规则不受影响（那时返回的已经是字符串）。
+    """
     if item is None:
         return ""
     if isinstance(item, str):
         return item.strip()
     if isinstance(item, (int, float)):
         return str(item)
+    href = None
+    getter = getattr(item, "get", None)
+    if callable(getter):
+        try:
+            href = getter("href")
+        except Exception:  # noqa: BLE001
+            href = None
+    if href and getattr(item, "tag", "") in ("a", "A"):
+        return str(href).strip()
     text = getattr(item, "text_content", None)
     if callable(text):
         try:

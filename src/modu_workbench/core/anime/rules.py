@@ -233,6 +233,42 @@ def rule_checksum(rule: AnimeRule) -> str:
 # --------------------------------------------------------------------------- 校验
 
 
+def is_template_base_url(base_url: str) -> bool:
+    """判断 baseURL 是不是"示例/占位"地址（这类规则永远搜不到内容）。
+
+    覆盖随包示例与常见占位写法：`example.com/org/net`、`localhost`、
+    `127.0.0.1`、`0.0.0.0`、RFC 2606 的 `.invalid`/`.test`/`.example`。
+
+    **注意这是"提醒"不是"错误"**：示例规则必须能正常导入（用户要照它改），
+    所以只进 `rule_warnings()`，不进 `validate_rule()` 的失败列表 ——
+    否则"导入示例规则"会被判失败，反而挡住正常用法。
+    """
+    from urllib.parse import urlsplit
+
+    host = (urlsplit((base_url or "").strip()).hostname or "").lower()
+    if not host:
+        return False
+    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        return True
+    return (host == "example.com" or host.endswith(".example.com")
+            or host == "example.org" or host.endswith(".example.org")
+            or host == "example.net" or host.endswith(".example.net")
+            or host.endswith(".invalid") or host.endswith(".test")
+            or host.endswith(".example") or host == "example")
+
+
+def rule_warnings(rule: AnimeRule) -> list[str]:
+    """**不阻断使用**的提醒（导入照样成功，但要告诉用户"这样搜不到东西"）。"""
+    warnings: list[str] = []
+    if is_template_base_url(rule.base_url):
+        warnings.append(
+            f"baseURL 是示例/占位地址（{rule.base_url}）：这是模板，搜索必然是 0 条。"
+            "请换成真实站点，或在规则页用「导入」加入真实规则")
+    if getattr(rule, "use_webview", False):
+        warnings.append("该规则标注 useWebview：播放地址依赖网页渲染，静态嗅探可能拿不到")
+    return warnings
+
+
 def validate_rule(rule: AnimeRule, *, require_play: bool = True) -> list[str]:
     """校验规则；返回问题列表（空 = 通过）。
 
@@ -631,4 +667,6 @@ __all__ = [
     "rule_checksum", "rule_from_dict", "rule_to_dict", "rule_to_json",
     "safe_rule_filename", "save_subscriptions", "subscriptions_key", "substitute",
     "substitute_url", "user_rules_dir", "validate_rule", "validate_rule_dict",
+    is_template_base_url,
+    rule_warnings,
 ]

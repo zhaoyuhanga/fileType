@@ -179,6 +179,33 @@ def decode_media_literal(value: str) -> str:
     return text if looks_like_media(text) else ""
 
 
+def _decode_any_literal(value: str) -> str:
+    """解码字面量但**不要求结果是媒体地址**（用于"解出来是另一个播放页"的场景）。
+
+    `decode_media_literal` 会把非媒体结果判成空串（那是给播放地址用的），
+    这里需要一个宽松版本：只要解出个可用的 http(s) 地址就返回。
+    """
+    text = (value or "").strip()
+    if not text:
+        return ""
+    for _ in range(3):
+        match = _WRAPPER_CALL.search(text)
+        if not match:
+            break
+        text = match.group(2)
+    text = _strip_quotes(text)
+    text = _unescape_js(text)
+    if re.search(r"%[0-9a-fA-F]{2}", text):
+        from urllib.parse import unquote
+
+        text = unquote(text)
+    if _is_encoded_media(text):
+        decoded = _base64_decode(text)
+        if decoded:
+            text = _unescape_js(decoded)
+    return text.strip().strip("\"'").strip()
+
+
 def _clean_url(candidate: str) -> str:
     """补全 `//host/...` 协议相对地址，去掉尾部标点。"""
     text = (candidate or "").strip().rstrip(_TRAILING)
@@ -526,7 +553,7 @@ class Sniffer:
                                     referer=self.referer or self._origin(url), note="")
 
         # 2) 苹果 CMS v10 的 player_aaaa
-        result = self._try_player_aaaa(text, referer)
+        result = self._try_player_aaaa(text, referer, url, depth)
         if result is not None:
             return result
         # 记下"为什么没成"：真机实测里最常见的是**站点自定义加密**（encrypt=3/4），
@@ -570,15 +597,43 @@ class Sniffer:
             candidates.append(_strip_quotes(stripped))
         return candidates
 
-    def _try_player_aaaa(self, text: str, referer: str) -> SniffedMedia | None:
+    def _try_player_aaaa(self, text: str, referer: str, url: str = "",
+                         depth: int = 0) -> SniffedMedia | None:
+        """苹果 CMS 播放器脚本 → 地址。
+
+        真实站点上这条路径有**两种**结果（实测 moonci.com）：
+
+        1. 解出来就是媒体地址（`encrypt: 0/1` 且明文里是 `.m3u8`）→ 直接用；
+        2. 解出来是**另一个播放页**（`encrypt: 1` 但值是百分号编码的
+           `https://next.xifanacg.com/anime/3252/play/…`）→ 必须再嗅探一层。
+
+        第 2 种以前会被当成失败：`decode_media_literal` 只接受"像媒体地址"的结果，
+        遇到播放页就返回空串，于是整条链路报"没找到地址"。现在对这种情况
+        递归嗅探一次解码出的地址（受 `max_iframe_depth` 限制，避免打转）。
+        """
         if "player_aaaa" not in text:
             return None
-        payload = _player_payload(extract_player_aaaa(text) or {})
-        if payload is None:
+        data = extract_player_aaaa(text) or {}
+        raw = str(data.get("url") or "").strip()
+        payload = _player_payload(data)
+        if payload is not None:
+            decoded, how = payload
+            return SniffedMedia(url=decoded, strategy="player_aaaa", referer=referer,
+                                note=f"苹果 CMS player_aaaa 的 url 字段（{how}）")
+        # 不是媒体地址：看看是不是"再跳一层播放页"
+        if not raw or depth >= self.max_iframe_depth or not url:
             return None
-        decoded, how = payload
-        return SniffedMedia(url=decoded, strategy="player_aaaa", referer=referer,
-                            note=f"苹果 CMS player_aaaa 的 url 字段（{how}）")
+        inner = _decode_any_literal(raw)
+        if not inner or not inner.startswith(("http://", "https://")):
+            return None
+        inner = urljoin(url, inner)
+        nested = self._sniff(inner, "", depth + 1, [url], offline=False)
+        if nested.ok:
+            nested.strategy = "player_aaaa"
+            nested.note = (f"player_aaaa 的 url 是另一个播放页（{inner[:80]}），"
+                           f"继续嗅探后命中：{nested.note or '已取得地址'}")
+            return nested
+        return None
 
     def _try_player_api(self, url: str, text: str, depth: int,
                         visited: list[str]) -> SniffedMedia | None:

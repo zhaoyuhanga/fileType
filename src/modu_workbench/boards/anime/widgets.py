@@ -212,10 +212,16 @@ def rule_source_label(rule) -> str:  # noqa: ANN001
 def rule_warning(rule) -> str:  # noqa: ANN001
     """规则的诚实边界提示；返回空串表示没有已知限制。
 
-    三种情况必须显式说出来，不能让用户对着"搜不到"猜：
+    四种情况必须显式说出来，不能让用户对着"搜不到"猜：
     1. `api` 高于客户端 → 灰显 + "该规则需要更新的客户端"；
     2. `deprecated` → "已退役"（KazumiRules 用 CI 打这个标记）；
-    3. `useWebview` → "依赖网页渲染，可能解析失败"（我们无浏览器内核）。
+    3. `useWebview` → "依赖网页渲染，可能解析失败"（我们无浏览器内核）；
+    4. **baseURL 是示例/占位地址** → "这是模板，搜索必然 0 条"。
+
+    第 4 条来自真实反馈：用户导入了我们文档里的示例规则，界面显示导入成功、
+    校验"通过"（字段齐全、语法合法），但搜索永远是 0 条 —— 因为 `example.com`
+    根本没有内容。这一条**不能**做成校验失败（示例规则必须能导入供人照抄改），
+    所以走提醒。
     """
     parts: list[str] = []
     if not rule_supported(rule):
@@ -224,6 +230,13 @@ def rule_warning(rule) -> str:  # noqa: ANN001
         parts.append("已退役")
     if bool(getattr(rule, "use_webview", False)):
         parts.append("依赖网页渲染，可能解析失败")
+    try:
+        from modu_workbench.core.anime.rules import is_template_base_url
+
+        if is_template_base_url(str(getattr(rule, "base_url", "") or "")):
+            parts.append("这是示例/模板地址，搜索必定 0 条：请换成真实站点")
+    except Exception:  # noqa: BLE001  后端 rules 还没就绪时不影响列表渲染
+        pass
     return "；".join(parts)
 
 
