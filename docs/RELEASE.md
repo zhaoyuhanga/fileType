@@ -64,6 +64,14 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 
 - **Smart App Control**：Windows 11 开启该功能时，未签名 exe 会被拦（`An Application Control
   policy has blocked this file`）。此时需关闭 Smart App Control、或对 exe 签名、或改用源码运行。
+  实测表现是**新写入的文件会被拦一段时间、之后自动放行**（同一份 `dist` 里的 exe，
+  构建完立刻跑被拦，等约 20 秒后同样文件就能跑），所以打包后的自检偶发"跑不起来"
+  不一定是构建有问题 —— 先等一会再试。
+- **卸载前请先退出程序**：NSIS 卸载器删不掉**正在被占用**的文件。实测：
+  应用还开着时卸载，`Uninstall.exe`、`ModuWorkbench.exe` 与 `_internal/` 会留在
+  `%LOCALAPPDATA%\Programs\墨软工作台`（约 128MB），卸载器自身也被删掉，
+  需先结束进程再手工删目录。注册表项、桌面/开始菜单快捷方式仍会被清干净；
+  用户数据（`%APPDATA%\ModuWorkbench\modu.db`）不动 —— 这是刻意设计。
 - **防火墙**：本机媒体流服务只监听 `127.0.0.1` 随机端口（用于 <video>/ffmpeg 取流），无需放行入站。
 
 ## 5. 数据与兼容

@@ -123,8 +123,36 @@ v1.1.0 按 `docs/VIDEO_ANIME_PLAN.md` 逐条改掉：
 | `tests/board_video/test_video_segment_downloader.py` | 分片下载器：并发保序/续传/坏片/暂停/限速 |
 | `tests/board_video/test_video_ui.py` | 板块界面测试 |
 | `tests/board_video/test_video_sources.py` | 内置源清单结构自检（离线，不探测接口存活） |
+| `tests/board_video/test_video_search_budget.py` | **聚合搜索时间预算**：死源不阻塞/部分结果先回报/源顺序与去重语义不变 |
+| `tests/board_video/test_video_self_heal.py` | 卡顿自愈选路：只降一档、认不出当前档就换源 |
+| `tests/board_video/test_video_enhance.py` | 离线画质增强（含真 ffmpeg 端到端） |
+| `tests/board_video/test_video_settings.py` | 影视设置页新增键的默认值与往返 |
 
 冒烟清单见 `docs/TESTING.md` 第 5 节。
+
+## 4.0 搜索为什么会"一直搜索中"（真实故障与修法）
+
+用户反馈"墨软影视搜索一直搜索中，没有反馈"。根因**不是界面**：
+
+- 13 个内置源里 `archive.org` 从本机完全不可达，它自己的客户端要
+  "15s × 3 次 + 退避"才放弃（实测单源 >45 秒）；
+- 原来的 `search_all` 是**顺序遍历且没有单源超时** → 整条搜索被它拖住约 50 秒；
+- 而且结果要等**所有**源结束才上屏 → 界面只有"搜索中…"，一条都不出。
+
+修法（`registry.py`）：
+
+1. **并发跑**所有源（默认 8 线程）；
+2. **单源时间预算** `DEFAULT_SEARCH_TIMEOUT = 9s`（依据：11/13 个源实测 ≤5 秒返回，
+   含最慢的采集站 4.9 秒），超时的源记一次失败并跳过；
+3. **显式 `shutdown(wait=False)`** —— 不能用 `with ThreadPoolExecutor(...)`：
+   `__exit__` 会 `shutdown(wait=True)`，把那个卡住的源**又 join 回来**。
+   实测：9 秒判完，但 `with` 退出时又等了 84 秒，总耗时 93.8s，用户端依旧卡住。
+   改成不等待后 **93.8s → 9.0s**；
+4. **边搜边显示**：`on_partial` 每完成一个源回报一次 → `SearchWorker.progressed` /
+   `partialResults` → 状态栏显示"已查 4/11 个源，已找到 12 条…"，表格即时上屏
+   （实测第一个源 **0.7 秒**就有结果）；
+5. **顺序语义不变**：结果按源顺序归并（不是完成先后），
+   所以 `sort_by_speed` 与"同名保留高优先级源"的行为与改前完全一致。
 
 ## 4.1 内置采集源维护
 

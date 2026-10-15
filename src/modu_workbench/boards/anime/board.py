@@ -383,6 +383,9 @@ class AnimeBoardPage(QWidget):
             self._schedule_page.reload()
         elif key == RULES_KEY:
             self._rules_page.reload()
+            # 首次进规则页且一条可用规则都没有 → 自动从官方仓库导入（无需手动操作）。
+            # 只试一次（标记文件记住），失败也不弹窗，只写在状态栏。
+            self._rules_page.maybe_auto_import_official()
         elif key == HISTORY_KEY:
             self._history_page.reload()
         elif key == SEARCH_KEY:

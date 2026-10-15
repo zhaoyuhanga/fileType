@@ -263,13 +263,51 @@ class VideoSearchPage(QWidget):
         self._worker.finishedResults.connect(self._on_results)
         self._worker.failed.connect(self._on_search_failed)
         self._worker.finished.connect(self._on_search_finished)
+        # 进度与"边搜边显示"是 v1.1.0 新增的：老替身 worker 没有这两个信号，
+        # 静默跳过而不是直接崩（与 `board._connect_self_heal` 同样的容错口径）。
+        if hasattr(self._worker, "progressed"):
+            self._worker.progressed.connect(self._on_search_progress)
+        if hasattr(self._worker, "partialResults"):
+            self._worker.partialResults.connect(self._on_search_partial)
         self._worker.start()
 
-    def _on_results(self, videos: list, errors: list) -> None:
+    def _on_search_progress(self, done: int, total: int, count: int) -> None:
+        """搜索进度：让用户看到"在动"，而不是一直"搜索中"。
+
+        实测依据：最慢的源会用到 9 秒预算上限，但**第一个源 0.7 秒就返回了**，
+        没有这条反馈用户只会以为程序卡死（这就是反馈里"一直搜索中，没有反馈"）。
+        """
+        if count:
+            self._busy(f"已查 {done}/{total} 个源，已找到 {count} 条…（继续搜索中）")
+        else:
+            self._busy(f"已查 {done}/{total} 个源…（暂未命中，继续搜索中）")
+
+    def _on_search_partial(self, videos: list, errors: list) -> None:
+        """边搜边显示：拿到就上屏，不等所有源。
+
+        为什么值得做：13 个内置源里有 4 个（爱坤/最大/如意/U酷）本机不可达、
+        archive.org 要 50 秒才放弃。等全部完成再显示 = 用户盯着空表最多 9 秒；
+        而第一个源 0.7 秒就有结果。这里只更新表格与计数，状态栏仍由进度信号负责，
+        避免两条信号互相覆盖提示文字。
+        """
+        if not videos:
+            return
+        self._fill_results_table(videos, errors)
+        self._busy(f"已找到 {len(videos)} 条…（仍在查询其它源）")
+
+    def _fill_results_table(self, videos: list, errors: list) -> None:
         self._results = list(videos)
         self._table.setRowCount(len(self._results))
         for index, remote in enumerate(self._results):
             fill_remote_row(self._table, index, remote)
+        self._result_chip.setText(f"{len(self._results)} 条结果")
+        self._empty.setVisible(not self._results)
+        self._table.setVisible(bool(self._results))
+        self._actions_row.setVisible(bool(self._results))
+        self._set_tail_stretch(not self._results)
+
+    def _on_results(self, videos: list, errors: list) -> None:
+        self._fill_results_table(videos, errors)
         select_all(self._table, False)
         message = f"共 {len(self._results)} 条结果"
         if errors:

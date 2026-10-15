@@ -165,6 +165,34 @@ class RuleSearchWorker(QThread):
         self.finishedAll.emit()
 
 
+class OfficialRepoWorker(QThread):
+    """从 Kazumi 官方规则仓库拉取全部规则并落地成本地文件。
+
+    为什么必须放在线程里：实测本机可用源是 GitHub API，拉全部 17 条要 **28 秒**；
+    放 UI 线程就是一次 28 秒的假死。
+    """
+
+    progressed = Signal(int, int, str)   # (已完成, 总数, 当前规则名)
+    finishedImport = Signal(object)      # ImportResult
+    failed = Signal(str)
+
+    def __init__(self, manager, parent: QWidget | None = None):  # noqa: ANN001
+        super().__init__(parent)
+        self._manager = manager
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            from modu_workbench.core.anime.rule_repo import import_from_repo
+
+            result = import_from_repo(
+                self._manager,
+                on_progress=lambda done, total, name: self.progressed.emit(done, total, name))
+        except Exception as error:  # noqa: BLE001
+            self.failed.emit(str(error) or error.__class__.__name__)
+            return
+        self.finishedImport.emit(result)
+
+
 class RuleUrlWorker(QThread):
     """从 URL 导入规则：先下载文本，再交给后端导入（下载必须离开 UI 线程）。"""
 
@@ -299,6 +327,8 @@ class AnimeRulesPage(QWidget):
         self._rules: list = []
         self._trial_worker: RuleSearchWorker | None = None
         self._url_worker: RuleUrlWorker | None = None
+        self._repo_worker: OfficialRepoWorker | None = None
+        self._repo_reason = ""
         self._tail_stretch = False
         self._fallback_status = QLabel("就绪。")
 
@@ -314,6 +344,15 @@ class AnimeRulesPage(QWidget):
 
         # ---- 列表 ----
         self._count_chip = chip("0 条")
+        # 「导入官方规则库」：用户反馈"动漫还是没有规则"—— 空着手进来没法用。
+        # 一键从上游 KazumiRules 拉取并落地成本地文件（不把别人的规则打进安装包，
+        # 见 core/anime/rule_repo.py 的模块说明）。
+        self._repo_button = primary_button("⤓ 导入官方规则库")
+        self._repo_button.setToolTip(
+            "从 Kazumi 官方规则仓库（Predidit/KazumiRules）拉取全部规则并存成本地文件。\n"
+            "注意：这批规则多数标注 useWebview，能搜到番、能看到剧集列表，\n"
+            "但播放地址依赖网页脚本 —— 取不到时请用「用外部播放器打开」。")
+        self._repo_button.clicked.connect(self._import_official_repo)
         import_file = ghost_button("导入文件")
         import_file.clicked.connect(self._import_file)
         import_clip = ghost_button("导入剪贴板")
@@ -336,8 +375,9 @@ class AnimeRulesPage(QWidget):
         self._list_card = SectionCard(
             "规则列表", actions=[self._count_chip],
             hint="灰显＝需要更新的客户端；「已退役」不再参与搜索")
-        self._list_card.add(row(import_file, import_clip, import_url, export, edit,
-                                delete, subscribe, reload_button, stretch_last=True))
+        self._list_card.add(row(self._repo_button, import_file, import_clip, import_url,
+                                export, edit, delete, subscribe, reload_button,
+                                stretch_last=True))
 
         self._table = QTableWidget()
         self._table.setColumnCount(len(COLUMNS))
@@ -425,7 +465,117 @@ class AnimeRulesPage(QWidget):
             layout.takeAt(layout.count() - 1)
             self._tail_stretch = False
 
+    # ------------------------------------------------------------------ 官方规则库
+
+    def _import_official_repo(self) -> None:
+        """手动触发：从 Kazumi 官方规则仓库拉取全部规则。"""
+        self._start_official_import(reason="手动")
+
+    def _start_official_import(self, *, reason: str) -> None:
+        if self._repo_worker is not None and self._repo_worker.isRunning():
+            self._toaster.info("官方规则库正在导入中，请稍候…")
+            return
+        manager = self._rules_manager
+        if manager is None:
+            try:
+                from modu_workbench.core.anime.rules import RuleManager
+
+                manager = RuleManager()
+            except Exception as error:  # noqa: BLE001
+                self._toaster.error(f"动漫后端未就绪，无法导入规则库：{error}")
+                return
+        self._repo_button.setEnabled(False)
+        self._report_status("正在从 Kazumi 官方规则仓库拉取规则…（首次可能需要 20–30 秒）", 0, 1)
+        worker = OfficialRepoWorker(manager, self)
+        worker.progressed.connect(self._on_repo_progress)
+        worker.finishedImport.connect(self._on_repo_finished)
+        worker.failed.connect(self._on_repo_failed)
+        worker.finished.connect(self._on_repo_thread_finished)
+        self._repo_worker = worker
+        self._repo_reason = reason
+        worker.start()
+
+    def _on_repo_progress(self, done: int, total: int, name: str) -> None:
+        self._report_status(f"正在导入官方规则：{done}/{total}（{name}）…", done, total)
+
+    def _on_repo_finished(self, result) -> None:  # noqa: ANN001
+        self.reload()
+        if not getattr(result, "ok", False):
+            self._report_status("官方规则库导入失败：没有取到任何规则")
+            self._toaster.error("官方规则库导入失败：没有取到任何规则")
+            return
+        message = f"官方规则库导入完成：{result.summary()}"
+        self._report_status(message)
+        # 如实把边界说出来（这批规则多半点播放打不开），别让用户以为坏了
+        if getattr(result, "failed", None):
+            names = "、".join(name for name, _reason in result.failed[:3])
+            self._toaster.info(f"{message}；失败：{names} 等")
+        else:
+            self._toaster.success(message)
+        for warning in getattr(result, "warnings", []) or []:
+            self._toaster.info(warning)
+
+    def _on_repo_failed(self, message: str) -> None:
+        self._report_status(f"官方规则库导入失败：{message}")
+        self._toaster.error(f"官方规则库导入失败：{message}")
+
+    def _on_repo_thread_finished(self) -> None:
+        self._repo_worker = None
+        self._repo_button.setEnabled(True)
+
+    def is_importing_repo(self) -> bool:
+        return self._repo_worker is not None and self._repo_worker.isRunning()
+
     # ------------------------------------------------------------------ 规则列表
+
+    def maybe_auto_import_official(self) -> bool:
+        """首次进入且**一条规则都没有**时，自动导入官方规则库（用户诉求：无需手动操作）。
+
+        只在"真的一条都没有"时触发一次，并且用**标记文件**记住已经试过：
+
+        - 有内置示例规则也算"有规则"，但那是模板、搜不到东西，所以这里看的是
+          "用户规则 + 订阅规则是否为空"（内置示例不算数）；
+        - 试过就写标记（成功或失败都写）—— 否则用户手动删光规则后每次进页面都会
+          重新联网导入，那是骚扰；
+        - 失败也不弹错误框，只把原因写进状态栏（首次自动行为不该用弹窗打断）。
+
+        返回是否真的发起了导入。
+        """
+        if self._library is None or self._repo_worker is not None:
+            return False
+        try:
+            manager = self._rules_manager
+            if manager is None:
+                from modu_workbench.core.anime.rules import RuleManager
+
+                manager = RuleManager()
+                self._rules_manager = manager
+            if self._auto_marker().exists():
+                return False
+            # 只看"用户自己的规则 + 订阅规则"：内置的两条示例是模板
+            # （baseURL 指向 example.com），有它们也等于没有可用的源。
+            own = [rule for rule in manager.discover()
+                   if not bool(getattr(rule, "builtin", False))]
+            if own or list(manager.subscription_dir.glob("*/*.json")):
+                return False
+            self._write_auto_marker()
+        except Exception:  # noqa: BLE001  自动行为绝不能因为探测失败而报错
+            return False
+        self._start_official_import(reason="首次自动")
+        return True
+
+    def _auto_marker(self):
+        from pathlib import Path
+
+        manager = self._rules_manager
+        base = getattr(manager, "user_dir", None) or Path(".")
+        return Path(base) / "official-import.attempted"
+
+    def _write_auto_marker(self) -> None:
+        try:
+            self._auto_marker().write_text("1", encoding="utf-8")
+        except OSError:
+            pass
 
     def reload(self) -> None:
         rules: list = []

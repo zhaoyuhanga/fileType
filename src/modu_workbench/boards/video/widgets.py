@@ -452,13 +452,25 @@ class CollectionPicker(QDialog):
 
 
 class SearchWorker(QThread):
-    """跨源聚合搜索。"""
+    """跨源聚合搜索（并发 + 单源时间预算 + 进度回报）。
 
+    三条信号对应三种可见状态，别让用户对着"搜索中…"干等：
+
+    - `progressed(done, total, count)`：每完成一个源回报一次（"已查 4/11 个源，
+      已找到 12 条…"）。实测最慢的源会拖到 9 秒预算上限，而**第一个源 0.7 秒就有结果**，
+      没有这条信号用户就以为卡死了。
+    - `finishedResults(videos, errors)`：全部结束（或预算用尽）后的最终结果。
+    - `failed(message)`：整体异常（单个源失败走 `errors`，不算整体失败）。
+    """
+
+    progressed = Signal(int, int, int)         # (已完成源数, 参与源数, 累计结果数)
+    partialResults = Signal(object, object)    # (List[RemoteVideo], List[str]) 边搜边给
     finishedResults = Signal(object, object)   # (List[RemoteVideo], List[str] errors)
     failed = Signal(str)
 
     def __init__(self, keyword: str, kind: str = "all", source_key: str = "all",
-                 limit: int = 30, page: int = 1, parent=None, library=None):
+                 limit: int = 30, page: int = 1, parent=None, library=None,
+                 per_source_timeout: float | None = None):
         super().__init__(parent)
         self._keyword = keyword
         self._kind = kind
@@ -466,6 +478,7 @@ class SearchWorker(QThread):
         self._limit = limit
         self._page = page
         self._library = library
+        self._per_source_timeout = per_source_timeout
 
     def _registry(self):  # noqa: ANN202
         """优先用注入的库（便于测试隔离与将来的多库扩展），否则回退到应用级单例。"""
@@ -477,8 +490,12 @@ class SearchWorker(QThread):
         try:
             registry = self._registry()
             if self._source_key == "all":
+                kwargs = {}
+                if self._per_source_timeout is not None:
+                    kwargs["per_source_timeout"] = self._per_source_timeout
                 videos, errors = registry.search_all(
-                    self._keyword, kind=self._kind, limit=self._limit, page=self._page
+                    self._keyword, kind=self._kind, limit=self._limit, page=self._page,
+                    on_partial=self._on_partial, **kwargs,
                 )
             else:
                 videos = registry.search_one(
@@ -489,6 +506,11 @@ class SearchWorker(QThread):
             self.finishedResults.emit(videos, errors)
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
+
+    def _on_partial(self, done: int, total: int, videos: list, errors: list) -> None:
+        """从工作线程回调；信号由 Qt 排队到 UI 线程，这里不碰界面。"""
+        self.progressed.emit(int(done), int(total), len(videos))
+        self.partialResults.emit(list(videos), list(errors))
 
 
 class DetailWorker(QThread):

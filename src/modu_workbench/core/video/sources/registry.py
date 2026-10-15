@@ -15,6 +15,7 @@ import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from typing import Callable, Iterable, List
 
@@ -39,6 +40,17 @@ SETTING_VERSION = "sources/version"       # 源清单版本（升级时迁移用
 SPEED_TEST_CONCURRENCY = 3
 SPEED_TEST_MAX_SOURCES = 20
 SPEED_TEST_TOP_SOURCES = 5
+
+# 聚合搜索的单源时间预算与并发度。
+#
+# 真实故障（本机实测）：`archive.org` 完全不可达，它自己的客户端要"15s × 3 次 + 退避"
+# 才会放弃；而原来的 `search_all` 是**顺序遍历且没有单源超时**，整条搜索被它拖住约 50 秒，
+# 界面上表现为一直"搜索中"、一条结果都不出。用户看到的就是"卡死了"。
+#
+# 9 秒的依据：13 个内置源里 11 个实测 ≤ 5 秒返回（含最慢的采集站 4.9 秒），
+# 所以 9 秒足够覆盖正常抖动，又不会让死源拖住整体。
+DEFAULT_SEARCH_TIMEOUT = 9.0
+DEFAULT_SEARCH_WORKERS = 8
 
 # 源清单版本：改动内置源（下线失效源、新增可用源）时递增。
 # 递增后，旧的「启用集合/排序」不再直接套用 —— 否则新加的源会默认处于停用状态，
@@ -84,6 +96,14 @@ class SpeedResult:
         latency = f"{self.latency_ms:.0f} ms" if self.latency_ms > 0 else "延迟 --"
         speed = f"{self.speed_mbytes:.1f} MB/s" if self.mbit_per_s > 0 else "速度 --"
         return f"{latency} / {speed} / 评分 {self.score:.2f}"
+
+
+def _safe_partial(callback, done: int, total: int, videos: list, errors: list) -> None:  # noqa: ANN001
+    """回调 `on_partial`；回调自己炸了不能影响搜索（进度提示是锦上添花）。"""
+    try:
+        callback(done, total, list(videos), list(errors))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class VideoRegistry:
@@ -402,15 +422,28 @@ class VideoRegistry:
     def search_all(self, keyword: str, kind: str = "all", limit: int = 20,
                    sources: Iterable[str] | None = None,
                    include_degraded: bool = False,
-                   page: int = 1) -> tuple[List[RemoteVideo], List[str]]:
+                   page: int = 1,
+                   per_source_timeout: float | None = DEFAULT_SEARCH_TIMEOUT,
+                   on_partial=None, workers: int | None = None,
+                   ) -> tuple[List[RemoteVideo], List[str]]:
         """跨源搜索：返回 (结果, 错误说明列表)。
 
         默认跳过被熔断的源；显式指定 sources 时按指定来（忽略熔断）。
-        结果按「标题+年份」去重，保留先出现的源（即优先级更高的源）。
+        结果按「标题+年份」去重、**保留在用户源顺序里更靠前的那一条**。
 
-        源顺序默认就是用户的顺序；只有用户把 `video/sort_by_speed` 打开
-        （即 `registry.sort_by_speed is True`）时才改成按测速评分降序 ——
-        "测速结果会波动"这件事必须由用户显式同意，否则搜索行为不可预期。
+        **并发 + 每个源独立时间预算**（默认 `DEFAULT_SEARCH_TIMEOUT`）。
+
+        为什么非改不可（真实故障）：原实现是**顺序遍历**每个源且没有单源超时。
+        本机实测 `archive.org` 完全不可达，它自己的客户端要"15s × 3 次 + 退避"，
+        于是整条搜索被它一个人拖住约 50 秒 —— 界面上就是一直"搜索中"、什么都不出。
+        现在：并发跑 + 单源按时放弃 + 每完成一个源就通过 `on_partial` 回报，
+        慢源/死源再也拖不住已经拿到结果的源。
+
+        `on_partial(done, total, collected, errors)` 在每个源结束后各调一次
+        （**从工作线程调用**，调用方自己负责切回 UI 线程）。
+
+        顺序语义保持不变：结果按 `chosen` 的源顺序归并，而不是按完成先后，
+        这样 `sort_by_speed` 与"用户顺序优先去重"的行为与改前完全一致。
         """
         errors: List[str] = []
         now = time.time()
@@ -424,33 +457,99 @@ class VideoRegistry:
         else:
             chosen = [key for key in sources if key in self._providers]
 
-        collected: List[RemoteVideo] = []
-        seen: set[str] = set()
-        for key in chosen:
+        # 可用性筛选放在开线程之前（开线程了才发现"这个源不可用"很浪费）
+        runnable: list[tuple[int, str, object]] = []
+        for position, key in enumerate(chosen):
             provider = self._providers.get(key)
-            if provider is None:
+            if provider is None or not provider.available():
                 continue
-            if not provider.available():
-                continue
+            runnable.append((position, key, provider))
+        if not runnable:
+            return [], []
+
+        budget = 0.0 if per_source_timeout is None else float(per_source_timeout)
+        pool_size = workers or min(DEFAULT_SEARCH_WORKERS, len(runnable))
+        slot: dict[str, tuple[list, str | None]] = {}
+        done = 0
+        timed_out: list[str] = []
+
+        def _run(key: str, provider) -> tuple[list, str | None]:  # noqa: ANN001
             started = time.monotonic()
             try:
                 found = provider.search(keyword, kind=kind, limit=limit, page=page)
             except SourceError as error:
                 self.record_failure(key, error)
-                errors.append(f"{provider.label}：{error}")
-                continue
+                return [], f"{provider.label}：{error}"
             except Exception as error:  # noqa: BLE001  单个源异常不能拖垮聚合搜索
                 self.record_failure(key, error)
-                errors.append(f"{provider.label}：{error}")
-                continue
+                return [], f"{provider.label}：{error}"
             self.record_success(key, latency=time.monotonic() - started)
+            return list(found or []), None
+
+        # 注意：**不要用 `with ThreadPoolExecutor(...)`**。
+        # `__exit__` 会 `shutdown(wait=True)` —— 那个卡住的源（实测 archive.org 要 ~50 秒
+        # 才放弃）会把我们已经算好的结果**再拖回去**。实测：9 秒预算判定完成、
+        # 但 `with` 退出时又等了 84 秒，总耗时 93.8s，用户端依旧是"卡住"。
+        # 这里改成显式 shutdown(wait=False)：线程自己在后台收尾，调用方立刻拿到结果。
+        pool = ThreadPoolExecutor(max_workers=max(1, pool_size),
+                                  thread_name_prefix="video-search")
+        futures = {pool.submit(_run, key, provider): key
+                   for _position, key, provider in runnable}
+        try:
+            for future in as_completed(futures, timeout=budget if budget > 0 else None):
+                key = futures[future]
+                try:
+                    slot[key] = future.result()
+                except Exception as error:  # noqa: BLE001  理论到不了；防御性兜底
+                    label = getattr(self._providers.get(key), "label", key)
+                    slot[key] = ([], f"{label}：{error}")
+                done += 1
+                if on_partial is not None:
+                    _safe_partial(on_partial, done, len(runnable),
+                                  self._merge(slot, runnable), self._partial_errors(slot))
+        except FuturesTimeoutError:
+            # 超预算：还没回来的源记一次失败并**直接放弃**（不 join，避免又被拖住）
+            for future, key in futures.items():
+                if key in slot:
+                    continue
+                timed_out.append(key)
+                label = getattr(self._providers.get(key), "label", key)
+                message = (f"{label}：搜索超过 {budget:g} 秒仍未返回，已跳过"
+                           "（该源可能不可达；可在「源设置」里关掉或换地址）")
+                slot[key] = ([], message)
+                self.record_failure(key, message)
+                done += 1
+            if on_partial is not None:
+                _safe_partial(on_partial, done, len(runnable),
+                              self._merge(slot, runnable), self._partial_errors(slot))
+        finally:
+            # 不等待未完成的源；同时取消还没开始跑的（队列里排队的那些）
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        for _position, key, _provider in runnable:
+            found, error = slot.get(key, ([], None))
+            if error:
+                errors.append(error)
+        return self._merge(slot, runnable), errors
+
+    @staticmethod
+    def _partial_errors(slot: dict) -> List[str]:
+        return [error for _found, error in slot.values() if error]
+
+    @staticmethod
+    def _merge(slot: dict, runnable: list) -> List[RemoteVideo]:
+        """按**源顺序**归并已完成的结果（与顺序遍历的语义一致）。"""
+        merged: List[RemoteVideo] = []
+        seen: set[str] = set()
+        for _position, key, _provider in runnable:
+            found, _error = slot.get(key, ([], None))
             for video in found:
                 fingerprint = f"{video.title.strip().lower()}|{video.year}"
                 if fingerprint in seen:
                     continue
                 seen.add(fingerprint)
-                collected.append(video)
-        return collected, errors
+                merged.append(video)
+        return merged
 
     # ---------- 详情 ----------
 
