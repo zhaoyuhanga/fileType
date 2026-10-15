@@ -506,8 +506,10 @@ class AnimeRulesPage(QWidget):
             return
         message = f"官方规则库导入完成：{result.summary()}"
         self._report_status(message)
-        # 如实把边界说出来（这批规则多半点播放打不开），别让用户以为坏了
-        if getattr(result, "failed", None):
+        # 全部是最新（没真下载）时别说"成功导入 N 条"——那是误导
+        if getattr(result, "skipped", None) and not getattr(result, "installed", None):
+            self._toaster.info(f"官方规则库已是最新（{len(result.skipped)} 条），无需重新下载")
+        elif getattr(result, "failed", None):
             names = "、".join(name for name, _reason in result.failed[:3])
             self._toaster.info(f"{message}；失败：{names} 等")
         else:

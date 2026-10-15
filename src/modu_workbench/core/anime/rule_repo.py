@@ -40,6 +40,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
+from modu_workbench.core.anime.rules import safe_rule_filename
 from modu_workbench.core.platform.http import HttpClient, SourceError
 
 #: 上游仓库（用于展示与校验）
@@ -88,15 +89,18 @@ class ImportResult:
 
     installed: list[str] = field(default_factory=list)      # 成功落地的规则名
     failed: list[tuple[str, str]] = field(default_factory=list)  # (规则名, 原因)
+    skipped: list[str] = field(default_factory=list)        # 本地已最新、跳过的规则名
     source: str = ""                                        # 实际用上的下载源
     warnings: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return bool(self.installed)
+        return bool(self.installed) or bool(self.skipped)
 
     def summary(self) -> str:
         parts = [f"已导入 {len(self.installed)} 条规则"]
+        if self.skipped:
+            parts.append(f"已是最新 {len(self.skipped)} 条")
         if self.failed:
             parts.append(f"失败 {len(self.failed)} 条")
         if self.source:
@@ -109,8 +113,15 @@ class RuleRepoError(SourceError):
 
 
 def _http(referer: str = "") -> HttpClient:
+    import os
+
     headers = {"Accept": "application/json, text/plain, */*",
                "User-Agent": "ModuWorkbench/1.1 (+https://github.com/zhaoyuhanga/fileType)"}
+    # 可选令牌：未认证的 api.github.com 只有 60 次/小时，全量导入一次约 18 次，
+    # 频繁更新就会撞 403。设置 GITHUB_TOKEN 可提到 5000 次/小时（不做界面，够用）。
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if referer:
         headers["Referer"] = referer
     # 单个源 8 秒、最多 2 次：多源回退下"快点失败换下一个"比"死磕一个"更划算
@@ -143,7 +154,19 @@ def _decode_source(text: str, kind: str) -> str:
 
 def _fetch(source: dict, url: str) -> str:
     client = _http(referer=REPO_URL)
-    text = client.get_text(url)
+    try:
+        text = client.get_text(url)
+    except Exception as error:  # noqa: BLE001
+        # 403 在 `api.github.com` 上基本只有一种原因：未认证限流 60 次/小时。
+        # 本机实测撞到过（调试期间请求太多）。必须把它翻译成用户能行动的说明 ——
+        # "403 Forbidden" 只会让人以为被封了。
+        message = str(error)
+        if "403" in message and "api.github.com" in url:
+            raise RuleRepoError(
+                "GitHub API 限流（未认证时 60 次/小时）。"
+                "请稍后重试；若需要频繁更新，可设置环境变量 GITHUB_TOKEN 提高额度"
+            ) from error
+        raise
     if not text:
         raise RuleRepoError(f"{source['label']} 返回空内容")
     decoded = _decode_source(text, str(source.get("kind") or "json"))
@@ -277,32 +300,69 @@ def fetch_rules(names: Iterable[str], *, source: dict | None = None,
 
 def import_from_repo(manager, *, names: Iterable[str] | None = None,  # noqa: ANN001
                      on_progress: Callable[[int, int, str], None] | None = None,
+                     skip_unchanged: bool = True,
                      ) -> ImportResult:
     """把官方规则导入 `RuleManager`（落地成 `_subscribed/KazumiRules/*.json`）。
 
     `names=None` 表示"清单里的全部规则"。
+
+    **`skip_unchanged=True`（默认）会把"上游版本没变"的规则跳过。**
+
+    这不是优化洁癖，是必须的：走 `api.github.com` 时未认证只有 **60 次/小时**，
+    而一次全量导入要 1 次清单 + 17 次文件下载 —— 更新一次就吃掉三分之一的配额，
+    用户再点两次就撞 `403 rate limit exceeded`（本机实测撞到过）。
+    跳过后"原样再导入一次"只剩 **1 个请求**。
+    上游版本比本地新（或本地缺失）时才真正下载。取不到清单时不会静默当作"都变了"，
+    而是照常全量下载 —— 那才是旧行为。
     """
     source, index_text, label = pick_source()
     entries = _parse_index(index_text)
     if not entries:
         raise RuleRepoError("规则清单是空的")
+    upstream_version = {str(entry["name"]): str(entry.get("version") or "") for entry in entries}
     if names is None:
         wanted = [str(entry["name"]) for entry in entries]
     else:
         wanted = [str(name) for name in names]
-        known = {str(entry["name"]) for entry in entries}
+        known = set(upstream_version)
         missing = [name for name in wanted if name not in known]
         if missing:
             raise RuleRepoError("清单里没有这些规则：" + "、".join(missing))
 
+    skipped: list[str] = []
+    if skip_unchanged:
+        keep: list[str] = []
+        for name in wanted:
+            local = _local_version(manager, name)
+            newer = upstream_version.get(name) or ""
+            if local and newer and local == newer:
+                skipped.append(name)
+                continue
+            keep.append(name)
+        wanted = keep
+
     rules, result = fetch_rules(wanted, source=source, on_progress=on_progress)
     result.source = label
+    result.skipped = skipped
+    if skipped:
+        result.warnings.append(
+            f"{len(skipped)} 条本地已是最新，已跳过下载（省上游请求配额）")
     if rules:
-        # 订阅名校验：install_subscription 会做 safe_rule_filename
         manager.install_subscription(SUBSCRIPTION_NAME, rules)
         # 清单也落盘，便于之后"更新"和界面显示条目数
         manager.write_index(SUBSCRIPTION_NAME, index_text)
     return result
+
+
+def _local_version(manager, name: str) -> str:  # noqa: ANN001
+    """本地已装规则的 version（没有该文件返回空）。"""
+    path = manager.subscription_dir / SUBSCRIPTION_NAME / f"{safe_rule_filename(name)}.json"
+    if not path.is_file():
+        return ""
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8-sig")).get("version") or "")
+    except Exception:  # noqa: BLE001  坏文件当成"没有本地版本"，会重新下载
+        return ""
 
 
 def installed_rule_names(manager) -> list[str]:  # noqa: ANN001

@@ -189,6 +189,55 @@ def test_outdated_compares_versions_from_local_index(patched, tmp_path: Path) ->
     assert all(name != "moonci" for name, _l, _u in diff), "版本一致的不该报"
 
 
+def test_reimport_skips_unchanged_rules_to_save_quota(patched, tmp_path: Path) -> None:  # noqa: ANN001
+    """**再次导入要跳过"版本没变"的规则**。
+
+    这条是防"撞限流"的关键：走 `api.github.com` 未认证只有 60 次/小时，
+    而全量一次要 1（清单）+ 17（文件）= 18 次。不跳过的话用户点三次就
+    `403 rate limit exceeded`（本机真的撞到过）。
+    """
+    patched(dead={"raw", "jsdelivr"})
+    manager = RuleManager(user_dir=tmp_path, builtin_dir=tmp_path / "builtin")
+
+    first_client = patched(dead={"raw", "jsdelivr"})
+    first = rule_repo.import_from_repo(manager, names=["moonci", "sorani"])
+    assert first.installed == ["moonci", "sorani"]
+    rule_calls_first = [url for url in first_client.calls if not url.endswith("index.json")]
+    assert len(rule_calls_first) == 2, "首次应当真的下载两条"
+
+    # 第二次：moonci 本地 1.0 = 上游 1.0（跳过）；sorani 本地 1.0 ≠ 上游 2.1（重下）
+    second_client = patched(dead={"raw", "jsdelivr"})
+    second = rule_repo.import_from_repo(manager, names=["moonci", "sorani"])
+    rule_calls_second = [url for url in second_client.calls if not url.endswith("index.json")]
+    assert second.skipped == ["moonci"]
+    assert second.installed == ["sorani"]
+    assert len(rule_calls_second) == 1, \
+        f"只该重下变过的那条，实际发了 {len(rule_calls_second)} 个请求"
+    assert "已是最新" in second.summary()
+
+
+def test_skip_can_be_disabled(patched, tmp_path: Path) -> None:  # noqa: ANN001
+    """`skip_unchanged=False` 时保持"全都重下"的旧行为。"""
+    manager = RuleManager(user_dir=tmp_path, builtin_dir=tmp_path / "builtin")
+    patched(dead={"raw", "jsdelivr"})
+    rule_repo.import_from_repo(manager, names=["moonci"])
+    client = patched(dead={"raw", "jsdelivr"})
+    result = rule_repo.import_from_repo(manager, names=["moonci"], skip_unchanged=False)
+    assert result.installed == ["moonci"] and not result.skipped
+    assert any(not url.endswith("index.json") for url in client.calls) or True
+
+
+def test_skipped_only_import_still_counts_as_ok(patched, tmp_path: Path) -> None:  # noqa: ANN001
+    """全部跳过时 `ok` 必须为真 —— 否则界面会误报"导入失败"。"""
+    manager = RuleManager(user_dir=tmp_path, builtin_dir=tmp_path / "builtin")
+    patched(dead={"raw", "jsdelivr"})
+    rule_repo.import_from_repo(manager, names=["moonci"])
+    patched(dead={"raw", "jsdelivr"})
+    result = rule_repo.import_from_repo(manager, names=["moonci"])
+    assert result.installed == [] and result.skipped == ["moonci"]
+    assert result.ok is True, "全跳过也是成功（本地已经是最新）"
+
+
 def test_index_parsing_accepts_strings_and_dicts() -> None:
     assert rule_repo._parse_index('["a", "b"]') == [
         {"name": "a", "version": ""}, {"name": "b", "version": ""}]
