@@ -417,3 +417,67 @@ def test_library_rules_refresh_parameter(qapp, tmp_path: Path) -> None:  # noqa:
     manager.install_subscription(rule_repo.SUBSCRIPTION_NAME, [_rule("新规则")])
     assert len(library.rules()) == 1, "默认仍读缓存"
     assert len(library.rules(refresh=True)) == 2, "refresh=True 必须看到新文件"
+
+
+# --------------------------------------------------------------------------- 业务库挂了也要能看规则
+
+
+def test_rules_page_lists_rules_without_library(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+    """**用户报告的第二个真实缺陷**：业务库构造失败时，规则页连能读的文件都不显示。
+
+    截图现场：状态栏"动漫后端未就绪：核心模块还没装上"，
+    规则页"还没有规则 / 0 条"，可磁盘上躺着 21 条（导入是成功的）。
+
+    根因：`reload()` 开头是 `if self._library is None: 直接放弃渲染`。
+    但**规则列表只依赖 `RuleManager`（磁盘 JSON）**，业务库负责的是搜索/追番/下载/DB。
+    业务库挂了不该让规则文件也看不见 —— 那样用户连删/改/试跑都做不了。
+    """
+    from modu_workbench.boards.anime.rules_page import AnimeRulesPage
+
+    manager, _library = _real_env(tmp_path)
+    manager.install_subscription(rule_repo.SUBSCRIPTION_NAME,
+                                 [_rule(f"站{index}") for index in range(5)])
+
+    page = AnimeRulesPage(None, manager, None)      # library=None，复现截图状态
+    page.reload()
+    assert page._table.rowCount() == 6, (
+        f"业务库缺失时必须退回直接读规则文件（应为 6 行），实际 {page._table.rowCount()}")
+    assert page._count_chip.text() == "6 条"
+    assert page._empty.isVisible() is False
+    assert "未就绪" not in page._fallback_status.text(), \
+        "能读到规则就不该报'未就绪'"
+    page.deleteLater()
+
+
+def test_rules_page_with_neither_backend_reports_honestly(qapp) -> None:  # noqa: ANN001
+    """真的两个都没有时，消息要给出可行动的说明（规则文件仍在磁盘上）。"""
+    from modu_workbench.boards.anime.rules_page import AnimeRulesPage
+
+    page = AnimeRulesPage(None, None, None)
+    page.reload()
+    assert page._table.rowCount() == 0
+    text = page._fallback_status.text()
+    assert "未就绪" in text
+    assert "anime/rules" in text, "要告诉用户文件在哪、重启即可见"
+    page.deleteLater()
+
+
+def test_backend_failure_reason_reaches_the_status_bar(qapp, monkeypatch) -> None:  # noqa: ANN001
+    """业务库构造失败的真实原因必须显示出来。
+
+    上一版只把它塞在 chip 的 tooltip 里，用户截图里只能看到"后端未就绪" ——
+    我因此查了很久才定位。真实原因必须写到用户能看见的地方。
+    """
+    import modu_workbench.boards.anime.context as context
+    from modu_workbench.boards.anime.board import AnimeBoardPage
+
+    def boom():
+        raise RuntimeError("模拟懒加载失败")
+
+    monkeypatch.setattr(context, "anime_library", boom)
+    page = AnimeBoardPage()
+    assert page._library is None
+    assert "模拟懒加载失败" in page._backend_error
+    note = page._task_bar._label.text() if hasattr(page._task_bar, "_label") else ""
+    assert "模拟懒加载失败" in note, f"状态栏应当带上真实原因，实际：{note!r}"
+    page.deleteLater()

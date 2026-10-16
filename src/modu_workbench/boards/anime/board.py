@@ -349,6 +349,11 @@ class AnimeBoardPage(QWidget):
             self._backend_hint.setText("后端未就绪")
             self._backend_hint.setToolTip(
                 f"{SEARCH_NO_BACKEND}\n原因：{self._backend_error or '未知'}")
+            # 把真实原因写进状态栏：只藏在 tooltip 里，用户既看不到也没法反馈
+            # （上一版就是这样，截图里只能看到"未就绪"，我查了半天才定位）。
+            self._task_bar.note(
+                f"动漫后端未就绪：{self._backend_error or '原因未知'}"
+                "（规则列表仍可正常使用：它只依赖规则文件）")
             return
         count = ""
         try:

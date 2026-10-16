@@ -580,11 +580,27 @@ class AnimeRulesPage(QWidget):
             pass
 
     def reload(self) -> None:
+        """刷新规则列表。
+
+        **规则列表只依赖 `RuleManager`（磁盘上的 JSON），不依赖业务库。**
+
+        这是用户报告的真实故障：截图里规则页显示"还没有规则 / 0 条"，
+        状态栏写着"动漫后端未就绪：核心模块还没装上"，可磁盘上明明躺着 21 条规则
+        （导入是成功的 —— 导入路径本来就有 `RuleManager()` 兜底，所以写文件没问题）。
+        原因是这里写成了 `if self._library is None: 直接放弃渲染`：
+        业务库（`AnimeLibrary`，负责搜索/追番/下载/DB）构造失败时，
+        **明明能读的规则文件也一并看不见了**，用户还没法删/改/试跑。
+
+        正确口径：
+        - 先问业务库（它带 DB 里的启用状态与试跑结果）；
+        - 业务库不可用时**退回 `RuleManager.discover()`**，让列表照常显示；
+        - 只有"业务库和规则管理器都没有"才算真的没后端。
+        """
         rules: list = []
         reason = ""
-        if self._library is None:
-            reason = "动漫后端未就绪：核心模块还没装上，规则列表暂时为空"
-        else:
+        errors: list = []
+
+        if self._library is not None:
             try:
                 # `refresh=True` 必须给：导入/删除/订阅安装之后磁盘变了，
                 # 而 `rules()` 默认可能直接返回旧缓存 —— 那正是"提示导入成功
@@ -594,12 +610,25 @@ class AnimeRulesPage(QWidget):
                     rules = list(self._library.rules(enabled_only=False, refresh=True) or [])
                 except TypeError:
                     rules = list(self._library.rules(enabled_only=False) or [])
-                # 扫描阶段失败的坏规则也要让用户看见原因，而不是静默少几条
                 errors = list(getattr(self._library, "rule_errors", []) or [])
-                if errors:
-                    reason = "有规则没加载成功：" + "；".join(str(item) for item in errors[:2])
             except Exception as error:  # noqa: BLE001
-                reason = f"读取规则失败：{error}"
+                reason = f"业务库读取规则失败，已退回直接读规则文件：{error}"
+                rules = []
+
+        if not rules and self._rules_manager is not None:
+            # 业务库缺失/为空 → 直接读磁盘。规则文件是唯一真相。
+            try:
+                rules = list(self._rules_manager.discover() or [])
+                errors = errors or list(getattr(self._rules_manager, "last_errors", []) or [])
+            except Exception as error:  # noqa: BLE001
+                reason = reason or f"读取规则文件失败：{error}"
+
+        if not rules and self._library is None and self._rules_manager is None:
+            reason = ("动漫后端未就绪：规则管理器与业务库都没能构造，规则列表暂时为空。"
+                      "规则文件仍在数据目录的 anime/rules 下，重启应用后可见")
+
+        if errors and not reason:
+            reason = "有规则没加载成功：" + "；".join(str(item) for item in errors[:2])
         self._rules = rules
         self._fill_table(rules)
         self._fill_trial_combo(rules)
