@@ -245,6 +245,20 @@ $required = @(
     "modu_workbench.boards.anime.history",
     "modu_workbench.boards.anime.widgets",
     "modu_workbench.core.anime",
+    # `core/anime/*` 是**懒加载**的（PEP 562），只查父包名查不出漏模块 ——
+    # 必须逐个查子模块（实测漏过 `core.anime.library`，打包后点开板块就是"后端未就绪"）
+    "modu_workbench.core.anime.models",
+    "modu_workbench.core.anime.rules",
+    "modu_workbench.core.anime.rule_repo",
+    "modu_workbench.core.anime.selectors",
+    "modu_workbench.core.anime.sniffer",
+    "modu_workbench.core.anime.engine",
+    "modu_workbench.core.anime.providers",
+    "modu_workbench.core.anime.storage",
+    "modu_workbench.core.anime.library",
+    "modu_workbench.core.anime.danmaku",
+    "modu_workbench.core.anime.bangumi",
+    "modu_workbench.core.anime.update_check",
     "modu_workbench.ui_kit.settings.anime"
 )
 $missing = @()

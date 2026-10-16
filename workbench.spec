@@ -196,9 +196,14 @@ a = Analysis(
         "modu_workbench.core.document.plugins",
         "modu_workbench.core.document.ocr",
         # 墨软动漫：板块页面 + 核心规则驱动采集（追番/进度/弹幕/更新检查）＋设置页
-        # 说明：`modu_workbench.core.anime` 的子模块（engine/library/...）随包时由
-        # PyInstaller 顺着包内 import 一起收进来；这里显式列出板块页与设置页，
-        # 其余由 `core.anime` 包名带入。
+        #
+        # **必须逐个列出 `core.anime.*` 子模块**（这是实测踩出来的打包缺陷）：
+        # `core/anime/__init__.py` 用 PEP 562 懒加载（`__getattr__` + `_LAZY` 映射），
+        # `AnimeLibrary` 这类名字在**运行时**才 `import_module("...library")`。
+        # PyInstaller 的静态分析看不到这种导入，只写父包名带不进来 ——
+        # 实测症状：源码运行一切正常，**打包后点开动漫板块**右上角显示"后端未就绪"，
+        # 状态栏给出真实原因 `No module named 'modu_workbench.core.anime.library'`
+        # （导入规则库还是成功的，因为那条路径用了同包内的 `rules`，恰好被打进去了）。
         "modu_workbench.boards.anime",
         "modu_workbench.boards.anime.board",
         "modu_workbench.boards.anime.context",
@@ -210,6 +215,18 @@ a = Analysis(
         "modu_workbench.boards.anime.history",
         "modu_workbench.boards.anime.widgets",
         "modu_workbench.core.anime",
+        "modu_workbench.core.anime.models",
+        "modu_workbench.core.anime.rules",
+        "modu_workbench.core.anime.rule_repo",
+        "modu_workbench.core.anime.selectors",
+        "modu_workbench.core.anime.sniffer",
+        "modu_workbench.core.anime.engine",
+        "modu_workbench.core.anime.providers",
+        "modu_workbench.core.anime.storage",
+        "modu_workbench.core.anime.library",
+        "modu_workbench.core.anime.danmaku",
+        "modu_workbench.core.anime.bangumi",
+        "modu_workbench.core.anime.update_check",
         "modu_workbench.ui_kit.settings.anime",
         # 大模型能力中心：多类型/多配置/优先级降级
         "modu_workbench.core.llm.models",

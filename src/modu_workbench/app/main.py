@@ -859,9 +859,34 @@ def _run_dependency_check(output_path: str) -> int:
 
         用**内置假站点 HTML** 走完整条规则链路，不联网：
         解析规则 → 选择器命中 → 嗅探出 m3u8 → 弹幕 XML 解析 → 追番/进度读写。
+
+        **第 ① 步是"懒加载模块是否真的打进包了"的守门员**（真实打包缺陷）：
+        `core/anime/__init__.py` 用 PEP 562 懒加载，PyInstaller 静态分析看不到
+        `import_module("...library")`，于是只写父包名时**打包后缺模块**。
+        源码运行一切正常、自检也通过，但用户点开板块就是"后端未就绪"，
+        真实原因是 `No module named 'modu_workbench.core.anime.library'`。
+        所以这里必须把 `_LAZY` 映射里的**每个子模块都真的 import 一遍**。
         """
+        import importlib
         import tempfile
         from pathlib import Path as _AnimePath
+
+        # ① 懒加载子模块必须全部可导入（打包漏模块的第一现场）
+        try:
+            from modu_workbench.core.anime import _LAZY
+
+            modules = sorted({module for module in _LAZY.values()})
+            for module in modules:
+                importlib.import_module(f"modu_workbench.core.anime.{module}")
+            # 目录里还有不在映射里的（rule_repo 等）也要在
+            importlib.import_module("modu_workbench.core.anime.rule_repo")
+            # 应用级单例也要能真的构造出来（用户看到"后端未就绪"就是这里失败）
+            from modu_workbench.boards.anime.context import anime_library, anime_storage
+
+            anime_storage()
+            anime_library()
+        except Exception:  # noqa: BLE001
+            return False
 
         from modu_workbench.core.anime.engine import AnimeEngine, Sniffer
         from modu_workbench.core.anime.models import AnimeRule, normalize_title
