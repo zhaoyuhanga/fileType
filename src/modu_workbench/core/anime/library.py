@@ -454,9 +454,19 @@ class AnimeLibrary:
         """最近一次扫描里加载失败的规则文件（"坏规则不致命，但要能看见"）。"""
         return list(self._rule_errors)
 
-    def rules(self, *, enabled_only: bool = False) -> list[AnimeRule]:
-        """规则列表（首次调用时自动扫描）。"""
-        if not self._rule_cache:
+    def rules(self, *, enabled_only: bool = False, refresh: bool = False) -> list[AnimeRule]:
+        """规则列表（首次调用时自动扫描）。
+
+        `refresh=True` 强制重新扫描磁盘。
+
+        **为什么需要 `refresh`**（真实故障）：这个方法的旧实现是
+        `if not self._rule_cache: self.reload_rules()` —— 只有"缓存为空"才扫描。
+        于是"一键导入官方规则库"把 17 个文件写到磁盘后，缓存里那 2 条模板规则
+        仍然非空，`rules()` 直接把**旧缓存**返回给界面，用户看到的就是
+        "提示导入成功 17 条，列表还是 0 条 / 还是原来那两条"，必须重启才能看到。
+        导入/删除/订阅安装这类**改变磁盘**的动作之后必须 `refresh=True`。
+        """
+        if refresh or not self._rule_cache:
             self.reload_rules()
         if not enabled_only:
             return list(self._rule_cache)

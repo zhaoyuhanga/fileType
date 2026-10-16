@@ -351,3 +351,69 @@ def test_auto_import_skipped_when_no_library(qapp) -> None:  # noqa: ANN001
     assert page._library is None
     assert page.maybe_auto_import_official() is False
     page.deleteLater()
+
+
+# --------------------------------------------------------------------------- 导入后必须能看见
+
+
+def _real_env(tmp_path: Path):
+    """真 `AnimeLibrary` + 真 SQLite 的小环境（覆盖"缓存不回刷"这条路径）。
+
+    早先的自动导入测试用的是替身库（`rules()` 每次现扫），所以漏掉了缺陷 ——
+    这里刻意用真库。
+    """
+    from modu_workbench.core.anime.library import AnimeLibrary
+    from modu_workbench.core.anime.storage import AnimeStorage
+
+    manager = RuleManager(user_dir=tmp_path / "anime" / "rules",
+                          builtin_dir=tmp_path / "builtin")
+    manager.ensure_dirs()
+    (manager.user_dir / "我的站.json").write_text(
+        json.dumps(_rule("我的站"), ensure_ascii=False), encoding="utf-8")
+
+    storage = AnimeStorage(str(tmp_path / "anime.db"))
+    for name in ("migrate", "ensure_schema", "init_schema"):
+        hook = getattr(storage, name, None)
+        if callable(hook):
+            hook()
+            break
+    return manager, AnimeLibrary(storage, rule_manager=manager)
+
+
+def test_page_shows_rules_imported_behind_its_back(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+    """**用户报告的真实缺陷**：提示"已导入 17 条"，列表却还是旧的。
+
+    根因：`AnimeLibrary.rules()` 旧实现是 `if not self._rule_cache: reload_rules()`
+    —— 缓存里只要有东西（哪怕只有 1 条模板规则）就**永不重扫**。
+    订阅安装只写文件、不清缓存，于是界面拿到的还是导入前的旧列表，
+    用户必须重启才能看到规则。
+    """
+    from modu_workbench.boards.anime.rules_page import AnimeRulesPage
+
+    manager, library = _real_env(tmp_path)
+    page = AnimeRulesPage(library, manager, None)
+    page.reload()
+    before = page._table.rowCount()
+    assert before >= 1, "导入前至少能看到那 1 条模板规则"
+
+    # 模拟"官方规则库导入"：只写文件（`install_subscription` 做的就是这件事）
+    manager.install_subscription(rule_repo.SUBSCRIPTION_NAME,
+                                 [_rule(f"站{index}") for index in range(17)])
+
+    page.reload()
+    assert page._table.rowCount() == before + 17, (
+        f"导入 17 条后列表必须立刻变成 {before + 17} 行，实际 {page._table.rowCount()} 行"
+        "（这就是'提示导入成功但没有规则'的回归）")
+    assert page._count_chip.text() == f"{before + 17} 条"
+    assert page._empty.isVisible() is False
+    page.deleteLater()
+
+
+def test_library_rules_refresh_parameter(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+    """`rules(refresh=True)` 必须重扫；不给参数时保持旧的缓存语义（避免每次都扫盘）。"""
+    manager, library = _real_env(tmp_path)
+    assert len(library.rules()) == 1
+
+    manager.install_subscription(rule_repo.SUBSCRIPTION_NAME, [_rule("新规则")])
+    assert len(library.rules()) == 1, "默认仍读缓存"
+    assert len(library.rules(refresh=True)) == 2, "refresh=True 必须看到新文件"

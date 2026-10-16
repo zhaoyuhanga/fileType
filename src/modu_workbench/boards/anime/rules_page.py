@@ -586,7 +586,18 @@ class AnimeRulesPage(QWidget):
             reason = "动漫后端未就绪：核心模块还没装上，规则列表暂时为空"
         else:
             try:
-                rules = list(self._library.rules(enabled_only=False) or [])
+                # `refresh=True` 必须给：导入/删除/订阅安装之后磁盘变了，
+                # 而 `rules()` 默认可能直接返回旧缓存 —— 那正是"提示导入成功
+                # 但列表还是空"的原因（要重启才能看到）。
+                # 老替身库没有这个关键字参数，退化为不带参数调用（不因此崩页面）。
+                try:
+                    rules = list(self._library.rules(enabled_only=False, refresh=True) or [])
+                except TypeError:
+                    rules = list(self._library.rules(enabled_only=False) or [])
+                # 扫描阶段失败的坏规则也要让用户看见原因，而不是静默少几条
+                errors = list(getattr(self._library, "rule_errors", []) or [])
+                if errors:
+                    reason = "有规则没加载成功：" + "；".join(str(item) for item in errors[:2])
             except Exception as error:  # noqa: BLE001
                 reason = f"读取规则失败：{error}"
         self._rules = rules
