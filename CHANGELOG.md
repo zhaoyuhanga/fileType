@@ -3,6 +3,69 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v2.1.1 — 修复「安装后启动失败」
+
+> **v2.1.0 的安装包是坏的**：装完点图标弹
+> `Unhandled exception in script / No module named 'modu_workbench.boards.book.board'`。
+> 这是我的责任 —— 两个缺陷叠加，而且**四道既有检查全部放过了它**。
+
+### 缺陷 1：板块页的懒导入没进包（v2.0.1 引入，潜伏两个版本）
+
+v2.0.1 为提速把板块页改成「字符串 + `importlib`」懒导入：
+
+```python
+BoardSpec(page_target="modu_workbench.boards.book.board:BookBoardPage")
+# boards/base.py:  importlib.import_module(module_name)
+```
+
+**PyInstaller 的静态分析看不见字符串里的模块名。** 当时 `workbench.spec` /
+`workbench_mac.spec` 里已有 `boards.convert.board`、`boards.music.board` 等，
+唯独漏了：
+
+| 漏掉的模块 | 后果 |
+|---|---|
+| `modu_workbench.boards.book.board` | **首屏点「墨软书库」直接崩**（就是这个报错） |
+| `boards.book.context` | 书库单例初始化失败 |
+| `boards.music.context` / `boards.video.context` / `boards.gallery.context` | 对应板块打开即崩 |
+| `core.llm.context` | 设置页/大模型相关入口崩 |
+| `ui_kit.theme_icons` / `app.selfcheck` | 主题图标、自检在冻结环境里找不到 |
+
+已把 **14 个动态导入目标**逐个补进两个 spec 的 `hiddenimports`。
+
+### 缺陷 2：`theme.py` ↔ `theme_icons.py` 模块级循环导入（v2.1.0 引入）
+
+拆 `theme.py` 时把图标生成挪走，两边**模块级互相 import**：
+
+- `theme.py` → `from .theme_icons import _icon_urls, _image_rule`
+- `theme_icons.py` → `from .theme import ThemeTokens`
+
+源码单测里 `theme` 总是先被导入，所以 1154 个测试全绿；**PyInstaller 冻结后
+`theme_icons` 先被加载** → `ImportError: cannot import name '_icon_urls' from
+partially initialized module`。修法：`theme_icons` 改用 `if TYPE_CHECKING:`，
+运行期不再依赖 `theme`。
+
+### 为什么四道检查都没抓到（每条都补了闸门）
+
+| 检查 | 为什么漏 | 补的闸门 |
+|---|---|---|
+| 1154 个 pytest | 源码导入顺序与冻结后不同；板块页只在**点进去**时才导入 | `tests/architecture/test_no_import_cycles.py`（模块级导入图找环）+ 反向导入顺序的子进程用例 |
+| `$required` 模块核验（40 项） | 它只在 exe 字节流里找**名字**，注释/字符串里的名字也算命中 | `tests/architecture/test_dynamic_imports_bundled.py`（动态导入目标 vs spec hiddenimports 逐项对齐 + 两个 spec 必须一致） |
+| 打包后 `MODU_CHECK_DEPS` 自检（17 项） | 它在创建 `QApplication` **之前**就 return 了，主题组装/板块构造碰不到 | 新增**启动级冒烟** `MODU_SMOKE_BOARDS`：建主壳 + 逐个打开六个板块，写 JSON |
+| 我新加的「GUI 冒烟」 | 只判断"窗口标题非空"，而启动崩溃时 PyInstaller 弹的 `Unhandled exception in script` **也是一个有标题的窗口** | 标题必须含「墨软」；出现崩溃框即失败，并**读出对话框正文**写进构建日志 |
+
+现在的构建顺序是：静态闸门（环 / 动态导入）→ 打包 → 模块核验 40 项 →
+能力自检 17 项 → **板块冒烟（六板块逐个打开）** → **GUI 冒烟（认标题、认崩溃框）** → 安装包。
+任一步不过直接 `Fail`，不会再产出"装完起不来"的包。
+
+### 验证（这一轮是**装完真跑**，不是只看自检）
+
+- 已安装副本（`%LOCALAPPDATA%\Programs\墨软工作台`，388.4 MB）：
+  - `MODU_SMOKE_BOARDS`：`theme_qss / shell / book / convert / music / video / gallery / document` **全部 true**；
+  - `MODU_CHECK_DEPS`：**17/17**；
+  - 真实启动：窗口标题 `墨软·工作台 · 本地离线 · … v2.1.1`，首页 **6 张板块卡**；
+- 全量 `pytest tests -q`：通过（新增 2 个闸门文件 + 5 个用例）；
+- 打包：onedir **388.4 MB** / 安装包 **154.5 MB**，版本资源 2.1.1。
+
 ## v2.1.0 — 单体拆分 + 异常精确化 + 文档收敛
 
 > 这一版**有行为变更**，所以是次版本号而不是补丁号：

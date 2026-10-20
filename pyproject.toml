@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modu-workbench"
-version = "2.1.0"
+version = "2.1.1"
 description = "墨软·工作台：本地离线的一站式阅读、转换与媒体工作台（PySide6 单应用，六大板块）"
 readme = "README.md"
 requires-python = ">=3.10"

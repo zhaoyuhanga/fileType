@@ -299,6 +299,88 @@ if (Test-Path $checkOut2) {
     Write-Warn2 "打包产物未输出自检结果，请手动运行 $exePath 确认首页有六张板块卡。"
 }
 
+# 真正"起一次窗口"：上面的 MODU_CHECK_DEPS 自检在创建 QApplication/主壳**之前**就 return 了，
+# 所以主题组装、板块页构造、循环导入这类问题它一个都测不到。
+# v2.1.0 就栽在这里：theme.py 与 theme_icons.py 模块级互相导入，源码里 theme 总是先导入，
+# 1154 个测试 + 自检 17/17 全绿，但冻结后加载顺序变成 theme_icons 先跑 → 装完点图标启动失败。
+Write-Step "启动 GUI 冒烟（必须真的出窗口）"
+
+$guiOk = $false
+$guiNote = ""
+for ($attempt = 1; $attempt -le 3 -and -not $guiOk; $attempt++) {
+    try {
+        $proc = Start-Process -FilePath $exePath -PassThru -ErrorAction Stop
+    } catch {
+        $guiNote = $_.Exception.Message
+        Start-Sleep -Seconds 20           # 智能应用控制拦新文件后会自动放行
+        continue
+    }
+    # 只认**主窗口**：标题必须含品牌名。
+    # v2.1.0 教训：之前只判断"标题非空"，而启动崩溃时 PyInstaller 会弹一个
+    # 标题为 "Unhandled exception in script" 的对话框 —— 它也是"有标题的窗口"，
+    # 于是闸门绿灯放行、装完却起不来。现在把崩溃框当失败，并尽量读出它的正文。
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 400
+        $live = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+        if (-not $live) { break }
+        $title = $live.MainWindowTitle
+        if ($title -and $title -like "*墨软*") { $guiOk = $true; break }
+        if ($title -and $title -like "*Unhandled exception*") {
+            $guiNote = "启动崩溃：$title → $(Get-PyInstallerDialogText -ProcessId $proc.Id)"
+            break
+        }
+    }
+    if (-not $guiOk -and -not $guiNote) {
+        $live = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+        if ($live) {
+            $guiNote = "进程存活但 60 秒内主窗口没起来（当前标题：'$($live.MainWindowTitle)'）"
+        } else {
+            $guiNote = "进程已退出（退出码 $($proc.ExitCode)）—— 启动期崩溃"
+        }
+    }
+    if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+}
+
+# 启动级冒烟：不止"有没有窗口"，还要**逐个打开六个板块**。
+# 这条覆盖 GUI 冒烟看不到的部分（点板块才触发的懒导入与页面构造）。
+$smokeOut = Join-Path $env:TEMP "modu-board-smoke.json"
+$env:MODU_SMOKE_BOARDS = $smokeOut
+Remove-Item $smokeOut -ErrorAction SilentlyContinue
+$smokeError = ""
+try { & $exePath | Out-Null } catch { $smokeError = $_.Exception.Message }
+Remove-Item Env:\MODU_SMOKE_BOARDS -ErrorAction SilentlyContinue
+
+if ($smokeError) {
+    Write-Warn2 "板块冒烟未能运行：$smokeError"
+} elseif (Test-Path $smokeOut) {
+    $smoke = Get-Content $smokeOut -Raw -Encoding UTF8 | ConvertFrom-Json
+    $smokeBad = @()
+    foreach ($prop in $smoke.PSObject.Properties) {
+        if ($prop.Value -ne $true) { $smokeBad += "$($prop.Name)=$($prop.Value)" }
+    }
+    if ($smokeBad.Count -gt 0) {
+        $smokeBad | ForEach-Object { Write-Warn2 "  - $_" }
+        Fail "板块冒烟失败：有板块在打包产物里打不开（懒导入模块可能没进包，检查 spec 的 hiddenimports）"
+    } else {
+        Write-Ok "板块冒烟通过（主题 + 主壳 + 六个板块全部可打开）"
+    }
+} else {
+    Fail "板块冒烟未输出结果：$smokeOut"
+}
+
+if ($guiOk) {
+    Write-Ok "GUI 冒烟通过（主窗口已出现）"
+} else {
+    Write-Warn2 "这通常意味着打包产物启动期崩溃（循环导入 / 缺模块 / 主题组装失败）。"
+    Write-Warn2 "排查：先用源码跑 .venv\Scripts\python.exe -m modu_workbench 对照；"
+    Write-Warn2 "      或临时把 spec 的 console 改成 True 重新打包以看到 traceback。"
+    Fail "GUI 冒烟失败：$guiNote"
+}
+
 # ---------------------------------------------------------------- 安装包（可选）
 
 if ($Installer) {

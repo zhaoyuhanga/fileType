@@ -208,6 +208,17 @@ a = Analysis(
         "PIL.ExifTags",
         "PySide6.QtMultimedia",
         "PySide6.QtMultimediaWidgets",
+        # v2.1.0 事故修复：以下名字只出现在 importlib 字符串里，
+        # PyInstaller 静态分析看不到；漏了就是『装完启动失败』。
+        # 新增板块/单例时，tests/architecture/test_dynamic_imports_bundled.py 会失败提醒。
+        "modu_workbench.app.selfcheck",
+        "modu_workbench.boards.book.board",
+        "modu_workbench.boards.book.context",
+        "modu_workbench.boards.gallery.context",
+        "modu_workbench.boards.music.context",
+        "modu_workbench.boards.video.context",
+        "modu_workbench.core.llm.context",
+        "modu_workbench.ui_kit.theme_icons",
     ],
     hookspath=[],
     hooksconfig={},

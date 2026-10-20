@@ -7,12 +7,30 @@
 为什么不用二进制资源：QSS 里的箭头/勾选标记只能用 `image:` 指定图片，
 用 border 拼三角形在 Qt 里会渲染成小方块（下拉框显丑的主因）；现画 PNG 到
 数据目录还能随主题换色，且不引入资源文件、不用改打包配置。
+
+## 不要把 `from .theme import ThemeTokens` 写进运行时
+
+`theme.py` 在模块级 `from .theme_icons import _icon_urls, _image_rule`，
+所以这里**只能**用 `TYPE_CHECKING` 引 `ThemeTokens`（仅类型标注，`from __future__
+import annotations` 已让标注不求值）。
+
+v2.1.0 定版时踩过：这里写了真实的运行时导入 → 只要 **`theme_icons` 先被导入**
+（PyInstaller 冻结后的模块加载顺序就是这样）就炸：
+
+    ImportError: cannot import name '_icon_urls' from partially initialized
+    module 'modu_workbench.ui_kit.theme_icons' (most likely due to a circular import)
+
+源码单测里 `theme` 总是先被导入，所以 1154 个测试全绿、打包自检也过，
+只有**装完之后点图标启动**才失败。现在由
+`tests/architecture/test_no_import_cycles.py` 静态拦截这类环。
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .theme import ThemeTokens
+if TYPE_CHECKING:                     # 仅类型检查；运行时不需要 theme 的任何东西
+    from .theme import ThemeTokens
 
 # ---------------------------------------------------------------- 运行时小图标
 #

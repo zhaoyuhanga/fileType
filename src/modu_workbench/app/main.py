@@ -42,6 +42,15 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
     apply_theme(app)
 
+    # 启动级冒烟（打包验证用）：MODU_SMOKE_BOARDS=输出路径
+    # 与 MODU_CHECK_DEPS 的区别 —— 那条在创建 QApplication 之前就 return 了，
+    # 主题组装、板块懒导入、板块页构造全都测不到（v2.1.0 就栽在这个盲区）。
+    smoke_out = os.environ.get("MODU_SMOKE_BOARDS")
+    if smoke_out:
+        from .selfcheck import run_board_smoke
+
+        return run_board_smoke(smoke_out, app=app)
+
     shell = AppShell()
     shell.setWindowTitle(f"{APP_NAME} · {APP_SLOGAN} v{__version__}")
     shell.resize(1180, 760)
