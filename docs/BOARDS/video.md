@@ -2,11 +2,15 @@
 
 > 多源聚合搜索 + 在线播放 + 下载入库
 > 子页：search / library / history / sources / player
+>
+> **v2.0.0 起它是唯一的视频类板块**：原第七板块「墨软动漫」已移除，动漫类内容请用
+> 搜索页的「类型」筛选（电影 / 电视剧 / 动漫 / 综艺）。影视的聚合源是结构化接口
+> （苹果 CMS），播放地址可静态解析，因此**能真的播**——这正是移除动漫板块的核心理由。
 
 ## 0. v1.1.0 播放/下载链路重写（先读这段）
 
 三个用户感知最强的症状（**帧率低、播放卡、下载慢**）根因都在我们自己的链路上，
-v1.1.0 按 `docs/VIDEO_ANIME_PLAN.md` 逐条改掉：
+v1.1.0 按 `docs/VIDEO_PLAN.md` 逐条改掉：
 
 | 症状 | 原来的根因 | 现在 |
 |---|---|---|
@@ -63,15 +67,19 @@ v1.1.0 按 `docs/VIDEO_ANIME_PLAN.md` 逐条改掉：
 | `core/video/sources/registry.py` | 410 |
 | `core/video/storage.py` | 532 |
 
-**共享层（v1.1.0 新增，第六/第七板块共用）**
+**共享层（v1.1.0 新增）**
 
 | 文件 | 职责 |
 |---|---|
 | `services/media_proxy/{server,upstream,cache,playlist,config,stats,state}.py` | 本机媒体代理：连接池/流式/磁盘缓存/预热/安全收口 |
-| `ui_kit/media/{surface,player,danmaku,subtitle,decode}.py` | 视频面/播放器窗口/弹幕轨道与分级/字幕解析/硬解环境注入 |
+| `services/dandanplay.py` | 弹弹play 只读客户端（搜索/匹配/拉取/缓存），v2.0.0 从 `core/anime/` 迁入 |
+| `ui_kit/media/{surface,player,danmaku,subtitle,decode,danmaku_bridge}.py` | 视频面/播放器窗口/弹幕轨道与分级/字幕解析/硬解环境注入/弹幕取数接线 |
+| `core/platform/textutil.py` | 标题归一化与集数解析（弹幕匹配要用），v2.0.0 从 `core/anime/models.py` 迁入 |
 
-> 为什么播放器搬到 `ui_kit/media/`：架构闸门规定「板块不得引用其他板块」，
-> 而第七大板块「墨软动漫」必须复用同一个播放器 —— 共享层是唯一合规的落点（方案 4.0）。
+> 为什么播放器与弹幕在 `ui_kit/media/` / `services/` 而不是本板块：架构闸门规定
+> 「板块不得引用其他板块」，而这些组件在 v1.1.0 需要被两个板块共用 ——
+> 共享层是唯一合规的落点（方案 4.0）。v2.0.0 移除动漫板块后它们仍是共享层的一部分
+> （弹幕、离线增强、代理都可能被后续板块复用），所以**没有搬回** `boards/video/`。
 
 依赖规则：本板块只能引用 `boards/video/`、`core/video/`、`core/platform`、`core/llm`、`ui_kit`、`services`；
 跨板块引用会被 `tests/architecture/test_architecture.py` 拦下。

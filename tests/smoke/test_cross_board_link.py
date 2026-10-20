@@ -45,7 +45,7 @@ def test_settings_dialog_has_all_board_pages(qapp: QApplication) -> None:
 
     keys = [key for key, _title, _icon, _factory in PAGE_FACTORIES]
     assert keys == ["general", "llm", "book", "convert", "document", "music", "video",
-                    "gallery", "anime"]
+                    "gallery"]
 
     dialog = SettingsDialog(initial="gallery")
     try:

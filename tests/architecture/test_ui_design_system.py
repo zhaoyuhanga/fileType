@@ -352,11 +352,12 @@ def test_home_grid_reflows_with_window_width(qapp: QApplication) -> None:
 
 
 def test_app_slogan_mentions_every_active_board() -> None:
-    """副标题必须覆盖**所有**在用板块。
+    """副标题必须覆盖**所有**在用板块，且**不得**提到已移除的板块。
 
-    这个坑真实发生过：第七板块「墨软动漫」接入后，主窗口标题与顶栏副标题仍是
-    "本地离线 · 阅读 · 转换 · 音乐 · 影视 · 图库"——只有五个板块（连第六板块「文档」
-    都漏了）。窗口标题就是用户第一眼看到的东西，漏板块属于"界面在说谎"。
+    这个坑真实发生过：加入「文档」板块后，主窗口标题与顶栏副标题仍只写着五个板块
+    （"本地离线 · 阅读 · 转换 · 音乐 · 影视 · 图库"）——窗口标题是用户第一眼看到的东西，
+    漏板块属于"界面在说谎"。v2.0.0 移除「动漫」后又要及时**收回**：副标题宣称一个
+    不存在的板块，同样是"界面在说谎"。
 
     这里按"板块 → 文案里的关键词"逐个核对，并且要求关键词**按板块顺序出现**
     （副标题的顺序语义就是板块顺序）；未登记关键词的板块用标题去匹配。
@@ -371,7 +372,6 @@ def test_app_slogan_mentions_every_active_board() -> None:
         "video": "影视",
         "gallery": "图库",
         "document": "文档",
-        "anime": "动漫",
     }
     positions: list[int] = []
     for board in ACTIVE_BOARDS:
@@ -383,6 +383,9 @@ def test_app_slogan_mentions_every_active_board() -> None:
     assert positions == sorted(positions), (
         f"副标题里的板块顺序与 ACTIVE_BOARDS 不一致：{APP_SLOGAN!r}")
     assert APP_SLOGAN.startswith("本地离线"), "副标题要保留「本地离线」这个定位"
+    # v2.0.0 已移除「动漫」板块：副标题不得再宣称它
+    assert "动漫" not in APP_SLOGAN, (
+        f"副标题仍提到已移除的「动漫」板块：{APP_SLOGAN!r}")
 
 
 def test_home_last_row_fills_remaining_width(qapp: QApplication) -> None:

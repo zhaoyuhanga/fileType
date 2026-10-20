@@ -212,7 +212,6 @@ $required = @(
     "modu_workbench.ui_kit.media.surface",
     "modu_workbench.ui_kit.media.decode",
     "modu_workbench.ui_kit.media.danmaku_bridge",
-    "modu_workbench.ui_kit.media.rule_sources",
     "modu_workbench.boards.gallery.board",
     "modu_workbench.boards.gallery.widgets",
     "modu_workbench.boards.gallery.editor",
@@ -234,32 +233,7 @@ $required = @(
     "modu_workbench.core.document.plugins",
     "modu_workbench.core.llm.router",
     "modu_workbench.ui_kit.settings.llm",
-    "modu_workbench.ui_kit.settings.document",
-    # v1.1.0 第七板块：动漫（规则驱动采集 + 追番/进度 + 只读弹幕 + 设置页）
-    "modu_workbench.boards.anime.board",
-    "modu_workbench.boards.anime.context",
-    "modu_workbench.boards.anime.search",
-    "modu_workbench.boards.anime.detail",
-    "modu_workbench.boards.anime.library_page",
-    "modu_workbench.boards.anime.rules_page",
-    "modu_workbench.boards.anime.history",
-    "modu_workbench.boards.anime.widgets",
-    "modu_workbench.core.anime",
-    # `core/anime/*` 是**懒加载**的（PEP 562），只查父包名查不出漏模块 ——
-    # 必须逐个查子模块（实测漏过 `core.anime.library`，打包后点开板块就是"后端未就绪"）
-    "modu_workbench.core.anime.models",
-    "modu_workbench.core.anime.rules",
-    "modu_workbench.core.anime.rule_repo",
-    "modu_workbench.core.anime.selectors",
-    "modu_workbench.core.anime.sniffer",
-    "modu_workbench.core.anime.engine",
-    "modu_workbench.core.anime.providers",
-    "modu_workbench.core.anime.storage",
-    "modu_workbench.core.anime.library",
-    "modu_workbench.core.anime.danmaku",
-    "modu_workbench.core.anime.bangumi",
-    "modu_workbench.core.anime.update_check",
-    "modu_workbench.ui_kit.settings.anime"
+    "modu_workbench.ui_kit.settings.document"
 )
 $missing = @()
 foreach ($name in $required) {

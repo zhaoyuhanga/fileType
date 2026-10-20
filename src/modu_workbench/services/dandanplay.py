@@ -1,4 +1,7 @@
-"""弹弹play 开放弹幕网络：搜索 / 匹配 / 拉取弹幕 / 本地缓存。
+"""弹弹play 开放弹幕网络：搜索 / 匹配 / 拉取弹幕 / 本地缓存（`services` 共享层）。
+
+v2.0.0 起从 `core/anime/danmaku.py` 迁到这里：弹幕是「墨软影视」的功能，
+不再挂在已移除的动漫板块下；`ui_kit/media/danmaku_bridge.py` 是唯一调用方。
 
 对接 <https://doc.dandanplay.com/open/> 的 API v2，只用三个端点：
 
@@ -46,15 +49,20 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
-from ...ui_kit.media.danmaku import (
+from modu_workbench.ui_kit.media.danmaku import (
     DanmakuItem,
     load_danmaku_file,
     parse_danmaku_xml,
     to_danmaku_xml,
 )
-from ..platform.http import HttpClient, SourceError, describe_network_error, host_of
-from ..platform.paths import app_data_dir
-from .models import normalize_title, parse_episode_number
+from modu_workbench.core.platform.http import (
+    HttpClient,
+    SourceError,
+    describe_network_error,
+    host_of,
+)
+from modu_workbench.core.platform.paths import app_data_dir
+from modu_workbench.core.platform.textutil import normalize_title, parse_episode_number
 
 #: 弹弹play 开放弹幕网络服务器（v2 API）
 DANDANPLAY_BASE = "https://api.dandanplay.net"
@@ -76,8 +84,11 @@ _RATE_LIMIT_BACKOFF_SECONDS = 2.0
 #: 判定"被限流/被拒绝"的响应特征（HttpClient 会把状态码写进异常文本）
 _RATE_LIMIT_MARKS = ("429", "too many requests", "403", "forbidden", "request limit")
 
-#: 缓存目录相对 `app_data_dir()` 的位置
-_CACHE_SUBDIR = ("anime", "danmaku")
+#: 缓存目录相对 `app_data_dir()` 的位置。
+#: v2.0.0 前是 `("anime", "danmaku")`；动漫板块移除后改挂到 `video/danmaku`，
+#: 与 `ui_kit/media/danmaku_bridge.danmaku_cache_dir()` 保持同一处
+#: （否则会凭空重建一个已经没人在意的 `anime/` 目录）。
+_CACHE_SUBDIR = ("video", "danmaku")
 
 #: 文件名非法字符（Windows 比 POSIX 严格，统一按 Windows 清洗）
 _ILLEGAL_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -139,7 +150,7 @@ def looks_like_rate_limit(error: BaseException) -> bool:
 
 
 def cache_root() -> Path:
-    """弹幕缓存根目录（`%APPDATA%\\ModuWorkbench\\anime\\danmaku`）。"""
+    """弹幕缓存根目录（`%APPDATA%\\ModuWorkbench\\video\\danmaku`）。"""
     path = app_data_dir()
     for part in _CACHE_SUBDIR:
         path = path / part

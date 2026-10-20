@@ -6,7 +6,7 @@
 2. 首片解析、速率换算这些**纯函数**可以完全离线测试
    （见 tests/board_video/test_video_speed.py）。
 
-数值口径（与 docs/VIDEO_ANIME_PLAN.md 3.3.5 / L4 对齐）：
+数值口径（与 docs/VIDEO_PLAN.md 3.3.5 / L4 对齐）：
 
 - 整体超时 3–4 秒（默认 `PROBE_TIMEOUT = 3.5`），到点就放弃，不让一个慢源拖住整批；
 - 速度 = `首块字节 / 耗时`，单位 **Mbit/s**（1 Byte = 8 bit）。算分用 MB/s

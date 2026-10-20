@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 # ---------------------------------------------------------------- 默认值
-#: 分片缓存配额（MB）—— 与 docs/VIDEO_ANIME_PLAN.md 3.4 的 video/cache_quota_mb 一致
+#: 分片缓存配额（MB）—— 与 docs/VIDEO_PLAN.md 3.4 的 video/cache_quota_mb 一致
 DEFAULT_CACHE_QUOTA_MB = 2048
 #: 清单重写时顺手预取的分片数（0 = 关闭）
 DEFAULT_PREFETCH_SEGMENTS = 3
@@ -129,7 +129,7 @@ BUFFER_MODES: dict[str, tuple[int, int]] = {
 
 
 def buffer_mode_defaults(mode: str) -> tuple[int, int]:
-    """缓冲档位预设（见 docs/VIDEO_ANIME_PLAN.md 3.1.5）。未知档位按均衡处理。"""
+    """缓冲档位预设（见 docs/VIDEO_PLAN.md 3.1.5）。未知档位按均衡处理。"""
     return BUFFER_MODES.get((mode or "").strip().lower(), BUFFER_MODES["balanced"])
 
 

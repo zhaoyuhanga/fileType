@@ -146,9 +146,7 @@ a = Analysis(
         "modu_workbench.ui_kit.media.danmaku",
         "modu_workbench.ui_kit.media.subtitle",
         "modu_workbench.ui_kit.media.decode",
-        # v1.1.0 跨板块适配层（影视 ↔ 动漫共用）：弹幕取数 + 规则源包装
         "modu_workbench.ui_kit.media.danmaku_bridge",
-        "modu_workbench.ui_kit.media.rule_sources",
         # 墨软图库
         "modu_workbench.boards.gallery.board",
         "modu_workbench.boards.gallery.widgets",
@@ -192,36 +190,6 @@ a = Analysis(
         "modu_workbench.core.document.templates",
         "modu_workbench.core.document.plugins",
         "modu_workbench.core.document.ocr",
-        # 墨软动漫：板块页面 + 核心规则驱动采集（追番/进度/弹幕/更新检查）＋设置页
-        #
-        # **必须逐个列出 `core.anime.*` 子模块**（实测踩出来的打包缺陷）：
-        # `core/anime/__init__.py` 用 PEP 562 懒加载，PyInstaller 静态分析看不到
-        # `import_module("...library")`，只写父包名带不进来 ——
-        # 打包后点开动漫板块会显示"后端未就绪"（`No module named '...core.anime.library'`）。
-        "modu_workbench.boards.anime",
-        "modu_workbench.boards.anime.board",
-        "modu_workbench.boards.anime.context",
-        "modu_workbench.boards.anime.search",
-        "modu_workbench.boards.anime.detail",
-        "modu_workbench.boards.anime.library_page",
-        "modu_workbench.boards.anime.schedule",
-        "modu_workbench.boards.anime.rules_page",
-        "modu_workbench.boards.anime.history",
-        "modu_workbench.boards.anime.widgets",
-        "modu_workbench.core.anime",
-        "modu_workbench.core.anime.models",
-        "modu_workbench.core.anime.rules",
-        "modu_workbench.core.anime.rule_repo",
-        "modu_workbench.core.anime.selectors",
-        "modu_workbench.core.anime.sniffer",
-        "modu_workbench.core.anime.engine",
-        "modu_workbench.core.anime.providers",
-        "modu_workbench.core.anime.storage",
-        "modu_workbench.core.anime.library",
-        "modu_workbench.core.anime.danmaku",
-        "modu_workbench.core.anime.bangumi",
-        "modu_workbench.core.anime.update_check",
-        "modu_workbench.ui_kit.settings.anime",
         # 大模型能力中心：多类型/多配置/优先级降级
         "modu_workbench.core.llm.models",
         "modu_workbench.core.llm.router",

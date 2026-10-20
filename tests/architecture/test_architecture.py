@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "src" / "modu_workbench"
 PACKAGE = "modu_workbench"
 
-BOARD_KEYS = ("book", "convert", "document", "music", "video", "gallery", "anime")
+BOARD_KEYS = ("book", "convert", "document", "music", "video", "gallery")
 
 # 允许的跨板块依赖（键 = (来源包, 目标包)）：P2 解耦完成后应为空
 PENDING_DECOUPLING: dict[tuple[str, str], str] = {
@@ -165,26 +165,22 @@ def test_board_package_exists(board: str) -> None:
     assert (package / "board.py").is_file(), f"缺少 boards/{board}/board.py"
 
 
-def test_anime_board_does_not_import_video_board() -> None:
-    """动漫板块不得直接引用影视板块（播放器/代理/分片下载已上移到共享层）。
+def test_removed_anime_board_leaves_no_trace() -> None:
+    """v2.0.0 移除了第七板块「墨软动漫」—— 不允许留半成品目录/引用。
 
-    上面 `violations()` 的层级规则其实已经覆盖这一条（`boards.anime` 只允许 `core.anime`），
-    这里单独写一遍是为了在**动到动漫板块**时给出明确的失败信息：
-    第七板块要复用播放器，只能走 `ui_kit/media/` 与 `services/media_proxy/`。
-
-    注意：这里**只**断言 `boards.video`。`core.anime` 允许调用 `core.video`
-    （复用下载器与模型），`boards.anime` 也允许调用 `core.video` —— 那是层级规则的取舍，
-    在这里一并写死会变成一个"后端一换源就要改测试"的假闸门。
+    留一个"还能 import 但没人注册"的 `boards/anime` 比删干净更糟：它会继续被
+    `pyproject` 的打包清单、`hiddenimports`、甚至下次重构误当成活代码。
+    这条闸门同时覆盖"删干净"和"别再引用"两个方向。
     """
-    package = SRC / "boards" / "anime"
+    for stale in (SRC / "boards" / "anime", SRC / "core" / "anime"):
+        assert not stale.exists(), f"应已删除：{stale.relative_to(REPO)}"
+
+    # 代码里不得再 import 已删除的动漫模块（注释/文档字符串里的历史说明不算）
     offenders: list[str] = []
-    for path in sorted(package.rglob("*.py")):
+    for path in sorted(SRC.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
         for name in absolute_targets(path):
-            if target_layer(name) == "boards.video":
+            if target_layer(name) in ("boards.anime", "core.anime"):
                 offenders.append(f"{path.relative_to(REPO)}: {name}")
-    assert offenders == [], (
-        "动漫板块直接引用了影视板块（应改用 ui_kit/media 与 services 共享层）：\n"
-        + "\n".join(offenders)
-    )
+    assert offenders == [], "仍在引用已删除的动漫模块：\n" + "\n".join(offenders)

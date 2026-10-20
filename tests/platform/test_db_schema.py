@@ -24,15 +24,21 @@ EXPECTED_TABLES = {
     "gallery_images", "gallery_albums", "gallery_album_items", "gallery_tags",
     "gallery_image_tags", "gallery_edits", "gallery_ai_tasks",
     "doc_documents", "doc_versions", "doc_merge_reports", "doc_ai_calls", "doc_audit",
-    "anime_rules", "anime_series", "anime_favorites", "anime_progress", "anime_history",
-    "anime_danmaku", "anime_download_tasks",
     "llm_profiles", "llm_calls",
     "schema_migrations",
 }
 
 # 板块前缀：所有业务表都必须带前缀，防止再次混进通用名
-BOARD_PREFIXES = ("book_", "music_", "video_", "gallery_", "doc_", "anime_", "llm_")
+BOARD_PREFIXES = ("book_", "music_", "video_", "gallery_", "doc_", "llm_")
 PLATFORM_TABLES = {"app_settings", "schema_migrations"}
+
+#: v2.0.0 移除了第七板块「墨软动漫」，全新安装**不再创建**这些表。
+#: 从 v1.1.0 升级上来的库里它们仍会存在（见 `migrations/__init__.py` 的说明），
+#: 所以下面用"要么没有、要么全部"来断言，而不是简单要求"不存在"。
+REMOVED_ANIME_TABLES = {
+    "anime_rules", "anime_series", "anime_favorites", "anime_progress",
+    "anime_history", "anime_danmaku", "anime_download_tasks",
+}
 
 
 @pytest.fixture()
@@ -52,6 +58,14 @@ def indexes(store: SqliteStore) -> set[str]:
 
 def test_schema_has_expected_tables(store: SqliteStore) -> None:
     assert tables(store) == EXPECTED_TABLES
+
+
+def test_removed_anime_tables_are_not_created(store: SqliteStore) -> None:
+    """全新安装不得再创建 `anime_*`（板块已移除），老库则允许它们继续存在。"""
+    present = tables(store) & REMOVED_ANIME_TABLES
+    assert present == set(), (
+        f"全新库不该再创建已移除板块的表：{sorted(present)}"
+        "（v2.0.0 起 MIGRATIONS 不再包含 v3_anime）")
 
 
 def test_business_tables_are_board_prefixed(store: SqliteStore) -> None:

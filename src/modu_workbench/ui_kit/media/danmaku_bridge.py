@@ -1,11 +1,11 @@
-"""弹幕接线（V3-c）：读取设置 → 匹配 → 取弹幕 → 交给播放器。
+"""弹幕接线：读取设置 → 匹配 → 取弹幕 → 交给播放器。
 
 **为什么住在共享层（`ui_kit/media/`）而不是影视板块里**：架构闸门
 （`tests/architecture/test_architecture.py`）禁止 `boards/*` 引用 `core/<别的板块>`，
-而弹弹play 客户端住在 `core/anime/`。影视板块要用它就必须经共享层 ——
-这与播放器上移到 `ui_kit/media/` 是同一个理由；第七大板块也直接用这一份。
+而弹弹play 客户端住在 `services/dandanplay.py`（v2.0.0 从 `core/anime/` 迁出）。
+影视板块要用它就必须经共享层 —— 这与播放器上移到 `ui_kit/media/` 是同一个理由。
 
-**只做「能看」**，完整能力在第七大板块「墨软动漫」那边；这里的三条边界：
+**只做「能看」**，三条边界：
 
 1. 数据源**只有弹弹play**（Kazumi 另外接了 BiliBili/Gamer，但那两条没有公开文档
    与稳定约定，我们不猜）；
@@ -32,7 +32,7 @@ CACHE_DIR_NAME = "danmaku"
 
 
 def danmaku_settings():  # noqa: ANN201
-    """应用设置（与设置页共用 QSettings；影视/动漫两个设置页写的是同一组键）。"""
+    """应用设置（与「设置 → 影视 → 弹幕」共用同一组 QSettings 键）。"""
     from PySide6.QtCore import QSettings
 
     return QSettings("ModuWorkbench", "modu-workbench")
@@ -83,13 +83,12 @@ def danmaku_cache_dir() -> Path:
 def episode_number_of(episode) -> int:  # noqa: ANN001
     """从剧集名里解析集数（弹幕匹配要用）；解析不出返回 0。
 
-    放在共享层的原因：影视/动漫两个板块都要它，而它依赖 `core/anime/models`，
-    板块直接引用 `core/<别的板块>` 会被架构闸门拦下。
+    v2.0.0 起解析逻辑在 `core/platform/textutil.py`（共享层），
+    不再依赖已移除的 `core/anime/models`。
     """
     if episode is None:
         return 0
-    # 直接导入子模块：core.anime 的门面是懒加载的，不会连坐拉起引擎/存储
-    from modu_workbench.core.anime.models import parse_episode_number
+    from modu_workbench.core.platform.textutil import parse_episode_number
 
     return parse_episode_number(getattr(episode, "name", "") or "")
 
@@ -98,8 +97,7 @@ def cache_path_for(title: str, episode_label: str = "") -> Path:
     """缓存文件名：标题 + 集数（用归一化后的短 hash，避免超长文件名）。"""
     import hashlib
 
-    # 直接从子模块导入：不拖起 core.anime 包的其它重依赖
-    from modu_workbench.core.anime.models import normalize_title
+    from modu_workbench.core.platform.textutil import normalize_title
 
     key = f"{normalize_title(title)}|{normalize_title(episode_label)}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
@@ -133,18 +131,21 @@ class DanmakuFetcher:
     def client(self):  # noqa: ANN201
         """惰性构造弹弹play 客户端（未配置 AppId/AppSecret 时也返回对象，只是不可用）。
 
-        凭证读两处：**优先「设置 → 影视 → 弹幕」**，其次「设置 → 动漫 → 弹幕」——
-        两个板块最终用的是同一个弹弹play 账号，没必要让用户填两遍。
+        凭证只读「设置 → 影视 → 弹幕」。v2.0.0 移除了动漫设置页，
+        但**保留读取旧键 `anime/danmaku_*` 的兜底**：v1.1.0 用户可能只在那里填过，
+        升级后不该突然"弹幕用不了"。
         """
         if self._client is not None:
             return self._client
         settings = danmaku_settings()
-        app_id = str(settings.value("video/danmaku_app_id", "", type=str) or "") or \
-            str(settings.value("anime/danmaku_app_id", "", type=str) or "")
-        secret = str(settings.value("video/danmaku_app_secret", "", type=str) or "") or \
-            str(settings.value("anime/danmaku_app_secret", "", type=str) or "")
-        # 直接导入子模块：core.anime 包的门面较重，没必要为弹幕把它全拉起来
-        from modu_workbench.core.anime.danmaku import DandanplayClient
+
+        def _pref(new_key: str, legacy_key: str) -> str:
+            return (str(settings.value(new_key, "", type=str) or "")
+                    or str(settings.value(legacy_key, "", type=str) or ""))
+
+        app_id = _pref("video/danmaku_app_id", "anime/danmaku_app_id")
+        secret = _pref("video/danmaku_app_secret", "anime/danmaku_app_secret")
+        from modu_workbench.services.dandanplay import DandanplayClient
 
         self._client = DandanplayClient(
             app_id=app_id, app_secret=secret,

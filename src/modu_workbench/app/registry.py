@@ -1,7 +1,6 @@
 """板块注册表：墨软·工作台当前可用板块。"""
 from __future__ import annotations
 
-from ..boards.anime import board as anime_board
 from ..boards.book import board as book_board
 from ..boards.convert import board as convert_board
 from ..boards.document import board as document_board
@@ -87,27 +86,18 @@ GALLERY_BOARD = BoardSpec(
     page=gallery_board.GalleryBoardPage,
 )
 
-ANIME_BOARD = BoardSpec(
-    key="anime",
-    title="墨软动漫",
-    tagline="规则采集 · 追番更新 · 时间表",
-    description=(
-        "规则驱动的番剧采集（XPath / JSON API 规则）：跨规则搜索并合并同一作品、线路/剧集选集、"
-        "追番与更新提醒、Bangumi 时间表、只读弹幕（弹弹play）与整季下载。"
-        "诚实边界：没有浏览器内核，纯 JS 渲染的站点解析不了；弹幕只读（不发送）；"
-        "站点改版会让规则失效，可用「规则」页的试跑逐级定位。"
-    ),
-    icon="🎞",
-    phase="可用",
-    page=anime_board.AnimeBoardPage,
+ANIME_BOARD_REMOVED_NOTE = (
+    "v2.0.0 起移除第七板块「墨软动漫」：规则驱动的番剧采集依赖第三方站点规则，"
+    "站点点播地址普遍依赖网页 JS 渲染或站点私有加密，在没有浏览器内核的前提下"
+    "『能搜到但播不了』，长期维护成本高于实际可用性。动漫类内容请用「墨软影视」"
+    "的类型筛选（电影/电视剧/动漫/综艺）搜索与播放。"
 )
 
 # 首页卡片与顶栏导航顺序：前五个板块顺序固定（历史约定），
-# 第六大板块「墨软文档」、第七大板块「墨软动漫」依次追加在末尾，
-# 避免影响既有板块的入口位置。
+# 第六大板块「墨软文档」追加在末尾，避免影响既有板块的入口位置。
+# v2.0.0 移除第七板块「墨软动漫」，见 `ANIME_BOARD_REMOVED_NOTE`。
 ACTIVE_BOARDS: tuple[BoardSpec, ...] = (
     BOOK_BOARD, CONVERT_BOARD, MUSIC_BOARD, VIDEO_BOARD, GALLERY_BOARD, DOCUMENT_BOARD,
-    ANIME_BOARD,
 )
 
 

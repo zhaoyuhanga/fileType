@@ -3,6 +3,83 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v2.0.0 — 定版：移除第七板块「墨软动漫」
+
+> **为什么不升 1.2 而是 2.0**：整块移除一个已发布的功能（板块入口、设置页、
+> 7 张数据表、规则引擎、追番/弹幕/时间表）属于**破坏性变更**，按语义化版本必须走大版本号。
+> 同时这一版把"说得到但做不到"的部分收回，文档与界面口径统一到"六个板块"。
+
+### 移除：墨软动漫（第七板块）
+
+**判断依据（不是拍脑袋，是实测）**：那套「规则驱动番剧采集」的可用性瓶颈不在我们的解析器，
+而在源站本身。v1.1.0 后期拿 KazumiRules 官方仓库**全量 16 条真实规则逐条打真站点**：
+
+| 阶段 | 结果 |
+|---|---|
+| 搜索 | 11 / 16 可用 |
+| 详情 / 选集 | 11 / 16 可用 |
+| **取到播放地址** | **0 / 16** |
+
+16 条规则**全部标注 `useWebview: true`**：播放地址要么由站点网页 JS 现算，要么是站点私有加密
+（实测 `encrypt=3` 这类自定义密文）。**没有浏览器内核**（v1.0.0 起的单栈决策）意味着这类站点
+从根本上播不出来 —— 用户看到的是"能搜到番、能看到剧集列表、点播放打不开"。
+这不是再修几处嗅探能解决的，而是架构边界；继续维护它只会持续产生"看起来能用但实际不能用"的落差。
+
+**替代路径**：动漫类内容用「墨软影视」的类型筛选（电影 / 电视剧 / 动漫 / 综艺）搜索与播放；
+影视板块的聚合源是结构化接口（苹果 CMS），播放地址可静态解析，因此**是真的能播**。
+
+### 具体改了什么
+
+**删除**
+
+- `boards/anime/`（10 个模块）、`core/anime/`（13 个模块 + 2 条示例规则）、
+  `ui_kit/settings/anime.py`、`ui_kit/media/rule_sources.py`（把规则包装成影视源，仅动漫用）；
+- `core/platform/migrations/v3_anime.py`（7 张 `anime_*` 表 + 4 个索引）；
+- `tests/board_anime/`（13 个测试文件）、`docs/BOARDS/anime.md`；
+- 板块注册、设置页条目、`app/context.py` 的三个动漫单例、`paths.py` 的动漫目录函数、
+  `main.py` 的 `anime_core` 自检项、两个 spec 与 `build_app.ps1` 的动漫 hiddenimports。
+
+**迁移（不破坏老库）**
+
+- `MIGRATIONS` 收回到 `v1_initial` + `v2_document`，`LATEST_VERSION = 2`；
+- **不写"删表"迁移**：从 v1.1.0 升级的库里 `schema_migrations.version=3` 与 7 张 `anime_*` 表
+  原样保留（不再被读写），既不静默销毁用户当年追的番/进度，也让"降级回 v1.1.0"仍可用；
+  想回收空间的用户可按 `docs/DATABASE.md` 的 `DROP TABLE` 片段自行清理；
+- `schema_version > LATEST_VERSION` 是**合法状态**（`apply_migrations` 只跳过已应用版本）。
+
+**保留 / 迁移的能力（重要的"不连带损失"）**
+
+- **弹幕**没有随板块消失：弹弹play 只读客户端从 `core/anime/danmaku.py` 迁到
+  `services/dandanplay.py`，由「墨软影视」使用；设置项仍在「设置 → 影视 → 弹幕」，
+  且**保留读取旧键 `anime/danmaku_*` 的兜底**（老用户升级后不会突然"弹幕用不了"）；
+- 集数解析 / 标题归一化从 `core/anime/models.py` 迁到 `core/platform/textutil.py`
+  （共享层），语义与正则**逐字保留** —— 归一化结果参与弹幕缓存文件名哈希，
+  改了会让老缓存全部失配。
+
+**文案与文档一致性（此前真的错过）**
+
+- 副标题从「…图库 · 文档 · 动漫」收回「…图库 · 文档」，主窗口标题/首页说明同步；
+- 新增架构闸门 `test_removed_anime_board_leaves_no_trace`：目录必须已删除、
+  且源码里不得再 import `boards.anime` / `core.anime`（注释里的历史说明不算）；
+- `test_app_slogan_mentions_every_active_board` 增加反向断言：
+  **已移除的板块名不得再出现在副标题里**；
+- `docs/VIDEO_ANIME_PLAN.md` → `docs/VIDEO_PLAN.md`（收窄为影视方案，动漫部分改为
+  "历史参考"说明并保留调研报告作为决策留痕）；`README` / `docs/DATABASE.md` /
+  `docs/TESTING.md` / `docs/RELEASE.md` 同步。
+
+**测试**
+
+- 删除 13 个动漫测试文件；其余板块测试全量通过；
+- `test_db_schema` 新增断言：全新库**不得**再创建 `anime_*` 表；
+- 架构闸门全部通过（板块清单、spec hiddenimports 一致性、BOM、版本单一来源）。
+
+### 升级须知（从 v1.1.0）
+
+1. 直接覆盖安装即可，用户数据（书库/乐库/影视/图库/文档/大模型）不受影响；
+2. 旧的 `anime_*` 表与 `%APPDATA%\ModuWorkbench\anime\` 目录**不会被读取**，可自行删除；
+3. 曾在「设置 → 动漫 → 弹幕」填过弹弹play 凭证的用户无需重填（影视板块会读旧键）；
+4. 若你确实需要动漫板块，请留在 v1.1.0 —— v2.0.0 之后的代码不再包含它。
+
 ## v1.1.0 — 使用反馈修复（影视搜索"一直搜索中" · 动漫一键导入规则库）
 
 两条来自实际使用的反馈，都定位到根因并修掉，另有 4 个在排查过程中挖出的真实缺陷。

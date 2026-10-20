@@ -28,7 +28,7 @@ class _FakeClient:
         self.match_calls = 0
 
     def match_series(self, title, episode_name, *, episode_number=0, year=""):  # noqa: ANN001
-        from modu_workbench.core.anime.danmaku import DanmakuMatch
+        from modu_workbench.services.dandanplay import DanmakuMatch
 
         self.match_calls += 1
         if self._error:

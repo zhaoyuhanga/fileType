@@ -23,7 +23,7 @@ from .http import HttpClient, SourceError
 # 又不至于把几分钟前的拥塞一直算进 P50 里。
 LATENCY_WINDOW = 10
 
-# 打分公式（借自 LunaTV-EE，见 docs/VIDEO_ANIME_PLAN.md 3.3.5 / L4）：
+# 打分公式（借自 LunaTV-EE，见 docs/VIDEO_PLAN.md 3.3.5 / L4）：
 #     score = 分辨率 40% + 速度 40% + 延迟 20%
 SCORE_WEIGHT_RESOLUTION = 0.4
 SCORE_WEIGHT_SPEED = 0.4
@@ -101,7 +101,7 @@ def resolution_score_from_label(label: str) -> float:
 class SourceHealth:
     """视频源健康度：连续失败自动降级（熔断），成功即恢复。
 
-    测速相关字段（v3-e，见 docs/VIDEO_ANIME_PLAN.md 3.3.5）：
+    测速相关字段（v3-e，见 docs/VIDEO_PLAN.md 3.3.5）：
 
     - `latency_samples`：最近 `LATENCY_WINDOW` 次请求耗时的滑动窗口（秒），
       对外只暴露 P50，避免一次网络抖动就把整个源判死；
@@ -409,7 +409,7 @@ class VideoSource:
               manager=None, cancel=None) -> "ProbeResult":
         """测一次速度与延迟（v3-e，源设置里的「测速」按钮用）。
 
-        流程（对齐 LunaTV-EE 的 L4，见 docs/VIDEO_ANIME_PLAN.md 3.3.5）：
+        流程（对齐 LunaTV-EE 的 L4，见 docs/VIDEO_PLAN.md 3.3.5）：
         1. 用固定关键词搜索一次 → 搜索耗时即**延迟**样本；
         2. 取第一条结果的首集地址（结果里没带剧集就只算延迟，不再多发一次详情请求，
            这一条是为「3–4 秒整体超时」让路的取舍）；

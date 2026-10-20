@@ -1,16 +1,21 @@
-# 影视板块（第六）体验改造 + 墨软动漫（第七）建设方案
+# 影视板块（第六）体验改造方案
 
-> **状态**：评审稿 —— 本文只做设计，**不含任何代码改动**；确认后按第 5 节的里程碑分阶段实施。
-> **基线**：v1.0.5（已发版，含第六大板块墨软文档）。
-> **参考项目**：[MoonTV](https://github.com/samqin123/MoonTV.git)、[LunaTV](https://github.com/MoonTechLab/LunaTV.git)（影视聚合播放站）、[Kazumi](https://github.com/Predidit/Kazumi.git)（番剧采集客户端）。
+> **状态**：已实施完成（v1.1.0 落地 A/B/C 阶段，v2.0.0 收尾）。
+> **基线**：v1.0.5（含第六大板块墨软文档）。
+> **参考项目**：[MoonTV](https://github.com/samqin123/MoonTV.git)、[LunaTV](https://github.com/MoonTechLab/LunaTV.git)（影视聚合播放站）。
 > **技术栈约束（不引入新体系）**：PySide6 / Qt 6.11 单栈（**不引入 QtWebEngine**）、`requests`、随包 `ffmpeg`（`tools/ffmpeg`）、单库 `modu.db` + 版本化迁移、`boards/<key>/` + `core/<key>/` 分包、`ui_kit` 设计令牌、pytest、PyInstaller onedir + NSIS。
-> 新增依赖：**零**（XPath 用已装的 `lxml`，CSS 选择器用已装的 `beautifulsoup4`）。
-> **事实来源与取证方式**：对标结论来自**实读源码 / 官方文档 / issue 核实**，支撑材料在 `docs/research/`（4 份报告，含"宣传口径 vs. 代码事实"反证表）。
-> 引用到的对标数据都标了出处编号（M*=MoonTV、L*=LunaTV 家族、K*=Kazumi）；**凡 README 宣传语与源码不一致的，一律以源码为准**——别照抄不存在的功能。
+> 新增依赖：**零**。
+> **事实来源与取证方式**：对标结论来自**实读源码 / 官方文档 / issue 核实**，支撑材料在 `docs/research/`。
+> 引用到的对标数据都标了出处编号（M*=MoonTV、L*=LunaTV 家族）；**凡 README 宣传语与源码不一致的，一律以源码为准**——别照抄不存在的功能。
+>
+> **⚠️ v2.0.0 变更**：原第七大板块「墨软动漫」（Kazumi 式规则采集 + 追番 + 弹幕）
+> 已在 v2.0.0 **整体移除**，本文档随之收窄为「影视板块」方案（原文件
+> `VIDEO_ANIME_PLAN.md` 更名为 `VIDEO_PLAN.md`）。移除原因与替代路径见
+> `CHANGELOG.md` 的 v2.0.0 小节与 `docs/BOARDS/video.md`。
 
 ---
 
-## 0. TL;DR（先看这 12 条）
+## 0. TL;DR（先看这 8 条）
 
 1. **播放卡、帧率低的主因不是"源不好"，而是我们自己的链路**：远程地址一律经 Python 写的本地 HTTP 代理（`services/media_server.py`），而该代理**每个分片都新开一次 TLS（无 `requests.Session`）、把整个响应体读进内存后才转发、所有响应 `Cache-Control: no-store`、失败还带 3 次 0.6s 退避**。1080p/2s 分片意味着每分钟约 30 次握手 + 30 次 Python 全量缓冲，抖动直接体现为卡顿。
 2. **第二个主因是解码**：`QMediaPlayer` 用默认后端，代码里**没有任何**硬解/后端选择；PySide6 6.11 同包了 `ffmpegmediaplugin.dll` 与 `windowsmediaplugin.dll`，而 Qt 官方文档明确给了 `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=d3d11va,d3d12va,dxva2`、`QT_DISABLE_HW_TEXTURES_CONVERSION`、`QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH` 等开关——我们现在一个都没用，1080p H.264 基本靠软解，CPU 打满就是"帧率低"。
@@ -22,9 +27,9 @@
 8. **渲染路径要换**：`QVideoWidget` 是原生窗口，**无法在上面可靠叠加 Qt 控件**（弹幕/字幕/统计就做不了）。改用 `QGraphicsView + QGraphicsVideoItem`：视频是场景里的一个 item，弹幕/字幕/缓冲指示/调试信息都是叠加 item —— 这是第七大板块弹幕的前置条件。
 9. **对标 MoonTV/LunaTV 的可抄清单**：缓冲深度档位参数（三档数值）、源测速打分公式（分辨率 40% + 速度 40% + 延迟 20%）、下载器"并发下载 + 单线程保序落盘 + 暂停检查点"、代理的 keep-alive 连接池与背压、两级本地缓存（**缓存键用稳定 ID 而非 URL**）、SSE 流式搜索、搜索负缓存与 LRU、图片代理；**点播代理的路径设计**（逐源开关 + 必填 source + SSRF 校验 + Referer 伪装）以 `mtvpls/MoonTVPlus` 的 `/api/proxy/vod/*` 为最贴近的参考。**不抄**：服务端转码（他们根本没有 ffmpeg）、Docker/Vercel/Redis 部署形态、多用户与鉴权。
    ⚠️ **两个必须纠正的认知**：① **点播代理并非所有对标项目都有**——`LunaTV` / `LunaTV-EE` 的点播是直连源站（只有直播走代理），`MoonTVPlus` 才有 VOD 代理；② **它们都没有"失败自动换源"**（`on('error')` 近乎空实现）——这两件事我们都要**自己做**（我们已有 registry 健康度与跨源定位，属于领先项）。
-10. **第七大板块「墨软动漫」定位**：与影视板块**不重叠** —— 影视是"聚合 CMS 源 + 下载入库"，动漫是"**规则驱动的番剧采集 + 追番 + 弹幕**"（对标 Kazumi 的 XPath/API 规则、弹弹play 弹幕、追番更新提醒）。
-11. **动漫板块的规则引擎**：JSON 规则文件（字段与 Kazumi **一一对应**，便于直接吃 `KazumiRules` 仓库的规则），选择器**同时支持 XPath 与 CSS**（`lxml` + `soupsieve`），并带**API level 版本门控、`deprecated` 灰显、目录 `index.json` 批量安装、订阅更新、试跑调试器**；内置规则随包，用户规则存数据目录。
-12. **动漫板块不做的**：实时超分辨率（Qt 单栈下需要 libmpv/Anime4K 着色器，与"不引入新播放内核"冲突）、内置浏览器内核（因此**纯 JS 渲染站点无法支持**，Kazumi 维护者也承认这类站点"基本无法解决"）、DLNA/一起看/发送弹幕；对应地，超分改为**离线 ffmpeg 增强**并如实标注边界。
+10. **弹幕能力留在影视板块**：v2.0.0 移除动漫板块后，弹弹play 只读弹幕客户端迁到
+    `services/dandanplay.py`，由影视板块的播放器使用（设置项在「设置 → 影视 → 弹幕」）；
+    **只读、不发送**，没有 AppId/AppSecret 时给出可操作提示。
 
 ---
 
@@ -200,7 +205,7 @@ Qt 官方可用的开关（本轮改造直接采用，出处见附录 C）：
 | 线路/源测速 | ✅（打分 = 分辨率 40% + 速度 40% + 延迟 20%） | ❌ 只有成功率健康度 | **新增**（把这套打分搬进 `SourceHealth`） |
 | 缓冲深度/ABR 档位预设 | ✅（三档参数矩阵，**仅桌面**生效） | ❌ 固定缓存、无档位 | **新增**（数值借用，命名自定：省流/均衡/高质） |
 | 播放链路预加载 | ❌ 零预取（只有图片 preload） | ❌ 无 | **新增**（分片预取 + 清单短缓存，见 3.1.2） |
-| 弹幕用户级屏蔽 | ❌ 只有服务端硬编码过滤 | ❌ | **新增**（学 Kazumi：关键词 + `/正则/` 语法） |
+| 弹幕用户级屏蔽 | ❌ 只有服务端硬编码过滤 | ❌ | **新增**（关键词 + `/正则/` 语法） |
 | 弹幕性能分级（同屏上限/丢弃率） | ✅ 有公式（L16） | ❌ | **新增**（按 CPU/内存给 25/40/60 三档同屏上限） |
 | 配置/源订阅 | ✅（base58 订阅链接） | ❌ | **新增**（第七板块的规则订阅先落地，影视源订阅复用同一机制） |
 | 弹幕 | ✅（LunaTV） | ❌ | **新增**（3.3.3，第七板块复用） |
@@ -414,7 +419,7 @@ class SegmentDownloader:
 - 内嵌：QtMultimedia 无字幕轨 API → **不做内嵌**，如实提示"内嵌字幕请在下载后用《墨软转换》抽出"（ffmpeg `-map 0:s:0` 已具备）；
 - 设置：`video/subtitle_auto`、`video/subtitle_font_size`、`video/subtitle_color`。
 
-#### 3.3.3 弹幕（影视板块先做"能看"，第七板块做"完整"）
+#### 3.3.3 弹幕（影视板块内实现，v2.0.0 后是唯一使用方）
 
 - 数据源：**只做弹弹play 开放接口**（附录 A：`/api/v2/search` → `episodeId` → `/api/v2/comment/{episodeId}?withRelated=true`）；Kazumi 另外接了 BiliBili/Gamer 两源，但那两条链路没有公开文档与稳定约定，**不做**；
 - 匹配：标题 + 集数（复用 `core/video/sources/matcher.py` 的相似度）；匹配不上时给"手动搜索/导入本地 xml"入口；
@@ -603,466 +608,6 @@ CREATE INDEX IF NOT EXISTS idx_video_play_events_time ON video_play_events(creat
 
 ---
 
-## 4. 第七大板块「墨软动漫」方案
-
-### 4.0 与第六大板块的边界（先说清楚，避免重复建设）
-
-| 维度 | 墨软影视（第六） | 墨软动漫（第七） |
-|---|---|---|
-| 内容来源 | 苹果 CMS / 公开源（**结构化接口**） | **规则驱动的番剧站采集**（XPath / JSON API 规则） |
-| 核心资产 | 多源聚合 + 下载入库 | **规则库 + 追番 + 弹幕**（+ Bangumi 元数据） |
-| 换源语义 | 同一作品在多个 CMS 源之间换 | 同一番剧在**多条规则/多个线路**之间换 |
-| 播放器 | 共用（改造后的 `ui_kit/media/player.py`） | 同左（**同一个实现**，不重复造） |
-| 代理/缓存/ABR/下载器 | `services/media_proxy/`、`core/video/*` | **直接复用**（动漫不新写下载与代理） |
-| 数据表 | `video_*` | `anime_*`（独立前缀，互不干扰） |
-| 设置页 | 「影视」 | 「动漫」（新页） |
-| 与对方的关系 | 不引用 | 不引用（复用只走 `ui_kit` / `services` / `core/platform`） |
-
-> **架构闸门**：`tests/architecture/test_architecture.py` 规定"板块不得引用其他板块"。因此第七板块**不能** `from modu_workbench.boards.video import player`。解决办法是把播放器**上移到共享层**：
-> - `ui_kit/media/player.py`（播放器窗口：视频面/控制条/快捷键/清晰度/倍速/进度）
-> - `ui_kit/media/danmaku.py`（弹幕层与轨道算法）
-> - `ui_kit/media/subtitle.py`（字幕层）
-> - `ui_kit/media/proxy.py`（薄封装，转发到 `services/media_proxy`）
->
-> 这是本方案的**前置改造**（第六板块的 V1/V3 会自然把它做出来）；动漫板块只做"接线 + 弹幕/追番业务"。
-
-### 4.1 能力清单（对标 Kazumi，逐项给取舍）
-
-Kazumi 的功能清单来自其 README 的"功能/开发计划"（附录 C）与我们实际需要：
-
-| Kazumi 功能 | 我们 | 做法 / 理由 |
-|---|---|---|
-| 规则编辑器 | ✅ P1 | JSON 表单 + 选择器输入 + **试跑面板**（命中数/预览/报错定位） |
-| 番剧目录 | ✅ P1 | 规则可选提供 `catalogue`（目录页）→ 采集条目入"番剧库" |
-| 番剧搜索 | ✅ P0 | 多规则并发搜索 + 名称相似度合并（复用 `core/video/sources/matcher.py` 思路） |
-| 番剧时间表 | ✅ P1 | 优先用 **Bangumi 放送时间**（开放 API），规则目录页为备选 |
-| 番剧字幕 | ⚠️ P1 部分 | 外挂字幕（本地 srt/ass→vtt 转换后渲染）；内嵌字幕不做（Qt 无字幕轨 API） |
-| 分集播放 | ✅ P0 | 线路 + 剧集选择，自动连播 |
-| 视频播放器 | ✅ P0 | 复用第六板块改造后的播放器（`QGraphicsVideoItem` + 弹幕层） |
-| 多视频源 | ✅ P0 | 多规则 / 单规则多线路 |
-| 规则分享 | ✅ P0 | JSON 导入导出 + **订阅 URL**（对标 LunaTV 的订阅思路） |
-| 硬件加速 | ✅ P0 | 复用第六板块的硬解开关 |
-| 高刷适配 | ✅ P0 | 渲染层不设帧率上限；`MinimalViewportUpdate`；避免在主线程做网络/解析 |
-| 追番列表 | ✅ P0 | `anime_favorites` + 一键追番 |
-| 番剧弹幕 | ✅ P0（只读） | 弹弹play（附录 A）+ 本地 xml 导入导出；发送弹幕不做（受限接口未开放）。屏蔽用"关键词 + `/正则/`"（学 Kazumi），不做 LunaTV 那种服务端硬编码过滤 |
-| 在线更新 / 番剧更新提醒 | ✅ P1 | 逐条比对追番的剧集列表（**Kazumi 自己还没做**，这是我们的差异化） |
-| 历史记录 | ✅ P0 | `anime_history` + 续播 |
-| 倍速播放 | ✅ P0 | 播放器已有（Kazumi 的倍速范围 0.25–3.0x、长按 1.25–3.0x，可作设置项参考） |
-| 播放快捷键 | ✅ P0 | 现有：空格/←→/F/ESC；**补齐**：`N`/`P` 上下一集、`D` 弹幕开关、`S` 截图、`[`/`]` 调速（对齐 Kazumi 的快捷键习惯） |
-| 下载默认值 | ✅ P0 | 分片并发默认 6（范围 2–16）、同时下载集数默认 2（范围 1–4）——与 Kazumi（3 / 2）和 LunaTV-EE（6 worker）同量级，见 3.2 |
-| 配色方案 | ✅ P0 | 已有主题令牌 |
-| 跨设备同步 | ⚠️ P2 | 先做"追番与进度导出/导入 JSON"；WebDAV 留作后续（Kazumi 用 WebDAV，我们不做账号体系） |
-| 无线投屏 DLNA | ❌ | 需要 UPnP/DLNA 协议栈（新依赖 + 大量兼容性坑），与本项目定位不符；改为"外部播放器打开地址" |
-| 外部播放器播放 | ✅ P1 | `QDesktopServices.openUrl` / `os.startfile` 把真实地址交给系统播放器（也解决反盗链拿不到的少数源） |
-| 超分辨率 | ⚠️ 离线 | 见 4.8：**不做实时 Anime4K**，提供离线 ffmpeg 增强 |
-| 一起看（SyncPlay） | ❌ | 需要公共服务器与协议实现，单机工具不划算 |
-| 番剧下载 | ✅ P0 | 复用 `core/video/downloader.py`（第六板块 V2 提速后直接受益） |
-| Bangumi 元数据 | ✅ P1 | 封面/简介/评分/放送时间（开放 API，只读、缓存） |
-| 以图搜番（trace.moe） | ⚠️ P2 | 需要把用户截图上传第三方；默认关闭，作为高级功能 |
-
-### 4.2 规则引擎（本板块的核心，也是最需要写清楚的）
-
-#### 4.2.1 规则文件与存放
-
-| 项 | 约定 |
-|---|---|
-| 格式 | 单个 JSON 文件；**字段名与 Kazumi 规则一一对应**（便于直接吃 [KazumiRules](https://github.com/Predidit/KazumiRules) 仓库的规则） |
-| 内置规则 | `src/modu_workbench/core/anime/rules_builtin/*.json`（随包，只读） |
-| 用户规则 | `数据目录/anime/rules/*.json`（可编辑、可删除） |
-| 订阅规则 | `数据目录/anime/rules/_subscribed/<订阅名>/<规则名>.json`（只读，带订阅来源与校验和） |
-| 索引与状态 | DB 表 `anime_rules`（启用状态、最近测试结果、来源、版本） |
-| 编码 | UTF-8（无 BOM），换行 LF；导入时容错 BOM 与 CRLF |
-
-#### 4.2.2 规则字段（兼容 Kazumi + 我们的扩展）
-
-```jsonc
-{
-  "api": "8",                       // 兼容字段：规则 API 等级（我们 = 8）
-  "type": "anime",                  // anime | comic | novel（本期只实现 anime）
-  "name": "示例番剧站",
-  "version": "1.0",
-  "baseURL": "https://example.com/",
-  "referer": "",                    // 可选：覆盖播放/下载请求的 Referer
-  "userAgent": "",                  // 可选：覆盖 UA
-  "searchMode": "xpath",            // xpath | api
-  "chapterMode": "xpath",           // xpath | api
-
-  // ---- XPath 模式字段（Kazumi 同名）----
-  "searchURL": "https://example.com/search/-------------.html?wd=@keyword",
-  "searchList": "//div[@class='module-items']//div[@class='module-item']",
-  "searchName": "//a[@class='module-item-title']/@title",
-  "searchResult": "//a[@class='module-item-cover']/@href",
-  "chapterRoads": "//div[@class='module-play-list']",
-  "chapterResult": "//a/@href",
-
-  // ---- API 模式字段（Kazumi 同名）----
-  "searchApiConfig": {
-    "request": { "method": "GET", "url": "https://example.com/api/search",
-                 "headers": {}, "query": { "q": "@keyword", "pageSize": 20 }, "body": null },
-    "listPath": "$.data.videos[*]", "namePath": "$.name", "sourcePath": "$.id"
-  },
-  "chapterApiConfig": {
-    "request": { "method": "GET", "url": "https://example.com/api/detail/@source" },
-    "format": "nested",             // nested | flat
-    "roadsPath": "$.data.playSources[*]", "roadNamePath": "$.name",
-    "episodesPath": "$.episodes[*]", "episodeNamePath": "$.name", "episodeUrlPath": "",
-    "variables": { "slug": "$.data.slug" },
-    "episodePage": { "url": "https://example.com/video/@slug/play",
-                     "query": { "source": "@roadIndex", "episode": "@episodeIndex" } }
-  },
-
-  // ---- 高级选项（Kazumi 同名 + 我们的扩展）----
-  "usePost": false,                 // 搜索用 POST（表单字段写在 searchURL 的查询串里）
-  "useLegacyParser": false,         // 简易解析（容错解析器，优先 lxml.html，失败退 html.parser）
-  "adBlocker": false,               // HLS 广告分片过滤（对应 3.3.7）
-  "muliSources": true,              // 兼容字段（Kazumi 的拼写）：本规则支持多源
-  "useNativePlayer": true,          // 兼容字段：忽略（我们只有内置播放器）
-  "useWebview": true,               // 兼容字段：忽略；为 true 时在"规则详情"里提示"该规则部分源依赖网页渲染，可能无法解析"
-  "antiCrawlerConfig": { "enabled": false },   // 兼容字段：我们不做自动过验证，见下
-
-  // ---- 我们的扩展 ----
-  "catalogue": {                    // 可选：目录页（番剧库/时间表用）
-    "url": "https://example.com/anime/",
-    "list": "//div[@class='module-item']", "name": "//a/@title",
-    "link": "//a/@href", "cover": "//img/@data-src", "update": "//span[@class='module-item-note']/text()"
-  },
-  "schedule": { "url": "https://example.com/schedule/", "list": "...", "day": "...", "items": "..." },
-  "episodeParse": "(?:第|EP|E)(\\d{1,4})",   // 可选：集数正则（默认内置多套正则）
-  "timeout": 20, "retries": 2,      // 网络参数覆盖
-  "rateLimit": { "qps": 2 },        // 礼貌限速（默认 2 请求/秒/规则）
-  "notes": "自用规则，勿外传"
-}
-```
-
-**变量替换（与 Kazumi 一致）**
-
-| 变量 | 含义 | 可用位置 |
-|---|---|---|
-| `@keyword` | 用户输入的关键词（URL 编码） | 搜索 URL/query |
-| `@source` | 搜索结果里的 `sourcePath` 值（作品内部 ID/URL） | 选集 URL/query |
-| `@roadIndex` | 线路序号（**从 0 开始**） | 播放页模板/query |
-| `@episodeIndex` | 剧集序号（**从 0 开始**） | 播放页模板/query |
-| `@roadNumber` / `@episodeNumber` | 线路/剧集序号（**从 1 开始**） | 播放页模板/query |
-| `<响应变量名>` | `chapterApiConfig.variables` 里保存的值（如 `@slug`） | 播放页模板/query |
-
-**选择器子集**
-
-| 类型 | 支持 | 说明 |
-|---|---|---|
-| XPath | 全部 XPath 1.0（`lxml`），**兼容** Kazumi 的"必须以 `//` 开头"约定；同时允许 `@attr` 取属性、`text()` 取文本 | Kazumi 只支持以 `//` 开头的选择器（其文档明示），我们更宽松但保持兼容 |
-| CSS 选择器 | 支持（`soupsieve`，`bs4`/`lxml` 都可） | 我们的扩展：写 `css:div.item > a` 即按 CSS 解析 |
-| JSONPath 子集 | `$`、`$.a.b`、`$.a[*]`、`$.a[0]`、`$['a-b']` | 与 Kazumi 相同：**不支持**递归 `..`、过滤 `[?(...)]`、切片 `[0:2]`、函数 `length()` |
-| 集数解析 | 内置多套正则（`第N集/话`、`EPn`、`En`、`【n】`、`n.`）→ 归一为整数 | 用于弹幕匹配、进度、更新比对 |
-
-**反爬与验证码（诚实边界）**
-
-- `antiCrawlerConfig` 我们**只读不执行**：当检测到验证页（响应含 `captcha`/`验证`/`cloudflare` 特征）时，给出明确提示"该规则需要人工通过站点验证，请换规则或在浏览器中打开该站"；
-- 不做自动打码、不做浏览器内核（**与 Qt 单栈冲突**），也不内置任何绕过手段。
-
-**版本门控与"能兼容到什么程度"（必须提前说清）**
-
-| 项 | 我们怎么做 |
-|---|---|
-| 规则 API level | 规则里的 `api` 是"所需能力等级"（Kazumi 客户端当前 `apiLevel = 8`）。我们同样声明 `SUPPORTED_API_LEVEL = 8`：`api > 8` 的规则**加载但灰显**并注明"该规则需要更新的客户端"，**不静默失败** |
-| 退役规则 | 兼容规则里的顶层 `deprecated`（KazumiRules 仓库用 CI 脚本自动打这个标记）：显示为"已退役"并默认不参与搜索，但**保留文件**不删除（用户可以手动改回） |
-| 目录/订阅清单 | 兼容 KazumiRules 的 `index.json` 结构（`name` / `version` / `useNativePlayer` / `antiCrawlerEnabled` / `author` / `lastUpdate`），支持从**目录清单**批量安装与更新 |
-| `useWebview` / `useNativePlayer` / `muliSources` | **只读兼容**：`useWebview=true` 时在规则详情里明确提示"该规则部分源依赖网页 JS 渲染，我们无浏览器内核，可能解析失败" |
-| **Kazumi 规则能直接用吗** | **分两类**：① **API 模式规则**（`searchMode/chapterMode = api`）——结构完全一致，**可直接导入使用**（只要站点接口还在）；② **XPath 模式规则**——只在其播放地址**能被静态嗅探**（苹果 CMS `player_aaaa` / JSON / iframe 等）时可用；依赖 WebView 执行 JS 的站点**不支持**。Kazumi 维护者在 issue #914 里也说明：iframe 内的 referer 校验与 JS 挑战"基本无法解决"，必须依赖注入脚本——这正是我们没有的能力，所以**不要承诺"Kazumi 规则全兼容"** |
-
-#### 4.2.3 执行引擎（`core/anime/`）
-
-```
-core/anime/
-├── __init__.py      门面导出（AnimeLibrary / AnimeRule / DANMAKU_* / describe() …）
-├── models.py        AnimeRule / AnimeSeries / AnimeEpisode / Road / DanmakuItem / Progress
-├── selectors.py     XPath / CSS / JSONPath 三种求值器（统一 first()/all()/text()/attr() 接口）
-├── rules.py         规则解析、校验、变量替换、导入导出、订阅校验和
-├── engine.py        规则执行：搜索 → 详情 → 线路/剧集 → 播放地址（含嗅探）
-├── sniffer.py       播放页静态嗅探（见下）
-├── providers.py     把规则包装成"源"，接口与 core/video 的 VideoSource 对齐（search/detail/resolve）
-├── library.py       业务编排（搜索/追番/进度/下载/换源/更新检查）
-├── storage.py       anime_* 表 CRUD
-├── danmaku.py       弹弹play 客户端 + XML 解析/生成 + 匹配（标题+集数）
-├── bangumi.py       Bangumi 元数据（封面/简介/评分/放送时间），只读 + 缓存
-├── update_check.py  追番更新检查（并发 2、可取消、写回 total/latest）
-└── tasks.py         后台任务封装（QThread 之外的纯 Python 任务，UI 侧用 QThread 包一层）
-```
-
-**播放地址解析（三步走，从便宜到昂贵）**
-
-1. **规则直接给**：`episodeUrlPath`（API 模式）或 `chapterResult` 命中的 `<a>` 的 `href` 本身是媒体地址（`looks_like_media_url()`）→ 直接用；
-2. **播放页嗅探**：拿到播放页 URL → `sniffer.py` 抓 HTML/JSON 并提取真实地址（见下）；
-3. **播放页构造 + 嗅探**：API 模式用 `episodePage` 模板 + 变量构造播放页 URL → 嗅探。
-
-**嗅探器（`sniffer.py`）—— 无浏览器场景的关键**
-
-| 策略 | 说明 | 覆盖的真实站点模式 |
-|---|---|---|
-| 苹果 CMS `player_aaaa` | 页面内 `<script>var player_aaaa={...}</script>`，取其中的 `url` / `link_next` / `encrypt` | **绝大多数采集站/番剧站（苹果 CMS v10）** |
-| JSON 字段扫描 | 在 HTML 中找 `m3u8`/`mp4` 字面量，或在返回的 JSON 里递归找以媒体后缀结尾的字符串 | 各种自研播放器 |
-| iframe 递归 | 抓 `<iframe src>`（最多 3 层），在子页面继续同样策略 | 播放页套播放器页 |
-| JS 变量/函数 | `url:`、`source:`、`videoUrl`、`player.xxx(`、`atob('...')`、`unescape('...')`、`\uXXXX` 解码 | 常见 JS 播放器初始化 |
-| `/player/` 接口 | 若页面里出现 `player/?id=xxx`（或类似）形态的 iframe/URL，直接请求该接口并按 JSON 解析 | 苹果 CMS 播放器接口 |
-| 用户手动兜底 | 嗅探失败时给"在浏览器中打开该页 → 复制 m3u8 地址 → 粘贴播放"（`ui_kit` 已有的输入对话框） | 强 JS 渲染站点 |
-
-> **明确不做**：不内置浏览器内核、不执行页面 JS（与"Qt 单栈、不引入 QtWebEngine"冲突）。因此**纯 JS 渲染型站点无法支持**——这一点必须写进 `docs/BOARDS/anime.md` 的"能力边界"，而不是让用户以为"规则写对了就一定能看"。
-
-#### 4.2.4 规则导入 / 导出 / 订阅
-
-| 能力 | 做法 |
-|---|---|
-| 导入 | 文件（多选）、剪贴板、URL（单个 JSON、JSON 数组、KazumiRules 仓库的目录清单） |
-| 校验 | 解析 → 字段必填校验 → 选择器语法校验 → 记录到 `anime_rules.test_result`（"未测试/通过（命中 N 条）/失败（原因）"） |
-| 导出 | 单条/多条导出为 JSON（可选"打包成订阅文件"：`{"version":1,"rules":[...]}`） |
-| 订阅 | `anime/rule_subscriptions`（JSON 数组：`{name,url,enabled,last_checked,etag,hash}`）；手动"立即更新" + 可选的"启动时更新"（默认关）；更新时**逐条校验**，失败的规则保留旧版本并提示 |
-| 分发体 | 订阅内容就是 JSON（不引入 base58/压缩等额外编码；LunaTV 用 base58 是因为要贴到配置文件里，我们直接给 URL/文件更直观） |
-
-### 4.3 数据模型（迁移 `v3_anime`，纯增量）
-
-```sql
--- 规则索引（文件是唯一真相，这里存状态与索引）
-CREATE TABLE IF NOT EXISTS anime_rules (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    key         TEXT NOT NULL UNIQUE,       -- 文件路径的稳定标识（用户规则=文件名，内置=builtin:name）
-    name        TEXT NOT NULL DEFAULT '',
-    version     TEXT NOT NULL DEFAULT '',
-    kind        TEXT NOT NULL DEFAULT 'xpath',   -- xpath | api
-    path        TEXT NOT NULL DEFAULT '',
-    builtin     INTEGER NOT NULL DEFAULT 0,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    source_url  TEXT NOT NULL DEFAULT '',   -- 订阅来源
-    test_state  TEXT NOT NULL DEFAULT '',   -- '' | ok | fail
-    test_note   TEXT NOT NULL DEFAULT '',
-    updated_at  INTEGER NOT NULL DEFAULT 0
-);
-
--- 番剧库（元数据缓存 + 每规则一份的来源记录）
-CREATE TABLE IF NOT EXISTS anime_series (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_key       TEXT NOT NULL DEFAULT '',
-    remote_id      TEXT NOT NULL DEFAULT '',   -- 规则里的作品标识（sourcePath 值或详情 URL）
-    title          TEXT NOT NULL DEFAULT '',
-    title_norm     TEXT NOT NULL DEFAULT '',   -- 归一化标题（匹配用）
-    cover          TEXT NOT NULL DEFAULT '',
-    year           TEXT NOT NULL DEFAULT '',
-    summary        TEXT NOT NULL DEFAULT '',
-    bangumi_id     INTEGER NOT NULL DEFAULT 0,
-    total_episodes INTEGER NOT NULL DEFAULT 0,
-    latest_episode TEXT NOT NULL DEFAULT '',
-    air_weekday    INTEGER NOT NULL DEFAULT -1,  -- 0=周一 … 6=周日，-1 未知
-    created_at     INTEGER NOT NULL DEFAULT 0,
-    updated_at     INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(rule_key, remote_id)
-);
-
--- 追番
-CREATE TABLE IF NOT EXISTS anime_favorites (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    series_id  INTEGER NOT NULL,
-    note       TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(series_id)
-);
-
--- 观看进度（按集）
-CREATE TABLE IF NOT EXISTS anime_progress (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    series_id     INTEGER NOT NULL,
-    episode_key   TEXT NOT NULL DEFAULT '',   -- 线路+集数的稳定标识
-    episode_name  TEXT NOT NULL DEFAULT '',
-    episode_index INTEGER NOT NULL DEFAULT 0,
-    position_ms   INTEGER NOT NULL DEFAULT 0,
-    duration_ms   INTEGER NOT NULL DEFAULT 0,
-    watched       INTEGER NOT NULL DEFAULT 0,
-    updated_at    INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(series_id, episode_key)
-);
-
--- 播放历史
-CREATE TABLE IF NOT EXISTS anime_history (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    series_id    INTEGER NOT NULL DEFAULT 0,
-    rule_key     TEXT NOT NULL DEFAULT '',
-    title        TEXT NOT NULL DEFAULT '',
-    episode_name TEXT NOT NULL DEFAULT '',
-    source       TEXT NOT NULL DEFAULT '',
-    played_at    INTEGER NOT NULL DEFAULT 0
-);
-
--- 弹幕缓存索引（文件在 数据目录/anime/danmaku/）
-CREATE TABLE IF NOT EXISTS anime_danmaku (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    series_id   INTEGER NOT NULL DEFAULT 0,
-    episode_key TEXT NOT NULL DEFAULT '',
-    provider    TEXT NOT NULL DEFAULT 'dandanplay',
-    episode_id  INTEGER NOT NULL DEFAULT 0,
-    count       INTEGER NOT NULL DEFAULT 0,
-    path        TEXT NOT NULL DEFAULT '',
-    fetched_at  INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(series_id, episode_key, provider)
-);
-
-CREATE INDEX IF NOT EXISTS idx_anime_series_rule ON anime_series(rule_key, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_anime_history_time ON anime_history(played_at DESC);
-CREATE INDEX IF NOT EXISTS idx_anime_progress_time ON anime_progress(updated_at DESC);
-```
-
-> 下载任务直接复用第六板块 V2 新增的 `video_download_tasks`（动漫与影视共用同一张表与下载器，`video_id` 语义扩展为"任意条目 id + kind"，实现时用 `kind` 字段区分；若担心耦合，则在 `v3_anime` 里加同构的 `anime_download_tasks`——**推荐后者**，两个板块的数据互不干扰，符合"板块最小化"原则）。
-
-**登记点（漏一个测试就会红）**：`tests/platform/test_db_schema.py`（表清单 + 前缀 + 索引不重名）、`docs/DATABASE.md`、`core/platform/migrations/__init__.py`（`MIGRATIONS = (v1_initial, v2_document, v3_anime)`）。
-
-### 4.4 模块与文件清单（含架构登记点）
-
-**新增（`core/anime/`）**：见 4.2.3 的目录树（11 个文件，预计 2 600–3 200 行）。
-
-**新增（`boards/anime/`）**
-
-| 文件 | 职责 | 预计 |
-|---|---|---|
-| `__init__.py` | 空导出（与其他板块一致） | 3 行 |
-| `context.py` | 板块单例（storage / library / 规则管理器） | 60 行 |
-| `board.py` | 外壳：5 个 nav 按钮 + `TaskBar` + 设置入口 | 600 行 |
-| `search.py` | 搜索页（多规则并发、边搜边出、追番/下载/播放入口） | 420 行 |
-| `detail.py` | 番剧详情对话框（元数据 + 线路/剧集 + 批量下载 + 追番） | 380 行 |
-| `library_page.py` | 番剧库/追番（含"有新集"角标、继续观看） | 420 行 |
-| `schedule.py` | 时间表（Bangumi 优先，规则备选） | 260 行 |
-| `rules_page.py` | 规则管理（列表/启停/导入/导出/订阅/试跑编辑器） | 520 行 |
-| `history.py` | 播放历史 | 220 行 |
-| `widgets.py` | 公共控件（海报卡片、线路选择器、追番按钮、集数标签） | 380 行 |
-
-**共享层改造（第六板块 V1/V3 产出，动漫直接复用）**
-
-| 文件 | 说明 |
-|---|---|
-| `ui_kit/media/player.py` | 从 `boards/video/player.py` 抽出（影视板块改为薄封装调用） |
-| `ui_kit/media/danmaku.py` | 弹幕解析/轨道分配/渲染层 |
-| `ui_kit/media/subtitle.py` | 字幕解析/渲染层 |
-| `services/media_proxy/*` | 代理/缓存/预取（两个板块共用） |
-
-**登记点（照第六板块的"接入清单"逐项做）**
-
-| 位置 | 动作 |
-|---|---|
-| `app/registry.py` | 新增 `ANIME_BOARD`，追加到 `ACTIVE_BOARDS` **末尾**（不改既有顺序） |
-| `app/context.py` | 暴露 `anime_library()` 等单例 |
-| `core/platform/paths.py` | 新增 `anime_dir()`（数据目录/动漫） |
-| `core/platform/migrations/` | `v3_anime.py` + 注册 |
-| `ui_kit/settings/anime.py` + `ui_kit/settings/__init__.py` | 新设置页并入清单 |
-| `tests/architecture/test_architecture.py` | 新增板块 key（并断言"动漫不得引用影视"） |
-| `tests/smoke/test_cross_board_link.py` | 设置页清单加「动漫」 |
-| `workbench.spec` / `workbench_mac.spec` | `core.anime` / `boards.anime` 的 hiddenimports（两个 spec 必须一致） |
-| `packaging/build_app.ps1` | 模块核验清单加动漫模块 |
-| `app/main.py` | 自检项 `anime_core`（见 4.9） |
-| `docs/BOARDS/anime.md`、`docs/ARCHITECTURE.md`、`docs/DATABASE.md`、`docs/TESTING.md`、`README.md`、`CHANGELOG.md` | 文档同步 |
-
-### 4.5 界面设计
-
-**子页（nav 按钮顺序）**：`🔍 搜索` · `📺 番剧库` · `🗓 时间表` · `🧩 规则` · `🕘 历史`
-
-**搜索页**
-
-- 顶部：关键词输入 + "搜索（全部规则）" + 规则过滤下拉 + "只搜已启用规则"；
-- 结果：**边搜边出**（每完成一条规则就插入一批），每条显示"来源规则 + 标题 + 封面 + 年份 + 更新信息"，同一作品多规则命中时**合并成一张卡**（展开可选具体来源）；
-- 卡片操作：播放（默认第一条线路第一集）、详情、追番、下载（单集/整季）。
-
-**详情对话框**
-
-- 上半：封面/标题/年份/评分/简介（Bangumi 元数据，缺失时用规则数据）；
-- 中部：线路下拉（多规则 = 多组线路）+ 剧集网格（已看过的集数打勾、正在看的加进度条）；
-- 下部：`追番` / `下载整季` / `在浏览器打开` / `复制播放地址`；
-- 右键剧集：`用外部播放器打开` / `重新解析地址`（换线路）。
-
-**玩家（复用改造后的播放器）**
-
-- 新增：弹幕开关/透明度/速度/屏蔽词（设置页）、`F12` 诊断、自动连播；
-- 动漫特有的"下一集"逻辑：优先同线路下一集 → 无则换线路第一集 → 无则换规则。
-
-**规则页**
-
-- 列表：名称 / 版本 / 类型（XPath/API）/ 启用 / 最近测试结果 / 来源（内置/用户/订阅）；
-- 操作：导入（文件/剪贴板/URL）、导出、编辑、删除、试跑、订阅管理；
-- **试跑面板**：输入关键词 → 依次显示「搜索 URL → 命中 N 条 → 第一条作品名/链接 → 详情页命中线路数/集数 → 第一集解析结果（含嗅探命中策略）」；任一步失败给出**具体原因**（选择器返回 0 条 / HTTP 403 / JSONPath 未命中 / 无媒体地址）。
-
-### 4.6 播放与弹幕
-
-**弹幕数据源**：弹弹play 开放弹幕网络（附录 A）。要点：
-
-- 需要 **AppId/AppSecret**（在 dev.dandanplay.com 申请）→ 设置页提供填写（存 `QSettings`，与其它密钥一致的做法；**不进代码库**）；
-- 鉴权：**签名模式**（推荐，桌面端）：`X-AppId` / `X-Timestamp` / `X-Signature = base64(sha256(AppId + Timestamp + Path + AppSecret))`，Path 不含域名与查询串（如 `/api/v2/comment/123450001`）；
-- 匹配（**走官方文档路线，不抄野路子**）：`/api/v2/search`（按标题搜番剧）→ 选中条目取其分集 → `episodeId` → `/api/v2/comment/{episodeId}?withRelated=true` 取弹幕。
-  > Kazumi 用的是"Bangumi ID → 弹弹 bangumiId → `episodeId = bangumiId + 4 位左补零集数`"这条**未公开约定**（其源码注释自述 undocumented）。我们**不采用**：官方接口才是稳定路径，并额外提供"手动指定 episodeId / 导入本地 xml"兜底；
-- **必须缓存**（官方明确建议 2–6 小时，热门更新日 0.5–1 小时，老番 2–7 天）：我们按"番剧 id + 集 + 天"缓存到磁盘并在 DB 记索引，避免触发限流；
-- 合规：**只读**（发送弹幕属受限接口，官方未开放）；不做批量抓取；弹幕功能免费（我们本来就免费）。
-
-**本地弹幕**：导入/导出 `.xml`（主流弹幕格式，字段 `time/p`/`text`），支持"手动匹配"（用户指定 episodeId 或直接导入文件）。
-
-**渲染**（`ui_kit/media/danmaku.py`）
-
-- 数据：`[(time_ms, mode, font_size, color, text)]`，只取滚动/顶部/底部三种基本模式；默认参数参考 Kazumi：**持续 8 秒、不透明度 100%、弹幕区域 100%、字号 25、描边 1.5、顶部开/滚动开/底部关**（都做成设置项）；
-- 轨道分配：按字号把屏幕高度切成轨道，每条轨道维护"上一条弹幕的离开时间"，插入时选最早可用的轨道；
-- **性能分级（借用 LunaTV-EE 的公式，可移植）**：`score = min(cores/4,1)*0.5 + min(mem_GB/1,1)*0.3 + 0.5*0.2`（桌面恒为 0.5 那项）→ `>0.7` 高 / `>0.4` 中 / 其他 低；三档**同屏上限 60 / 40 / 25**、**超出丢弃率 0.1 / 0.3 / 0.5**（无 Worker 可用，这是我们与浏览器的差异：我们直接在 Qt 主线程做轻量池化渲染，因此**同屏上限更保守**）；
-- 池化：`QGraphicsSimpleTextItem` 复用（避免频繁 new/GC 掉帧）；视频尺寸变化只重算轨道边界；
-- 屏蔽（学 Kazumi）：关键词列表 + **`/正则/` 语法**（以 `/` 开头结尾视作正则）+ 按类型（滚动/顶/底）+ 同屏密度上限；
-- 去重（学 Kazumi 的归一化）：全角转半角 → 去空白与标点 → 连续 3 个以上相同字符合并为 3 个 → 分组后合并显示为 `原文 xN`；**默认关闭**（合并会改变观感）；
-- 性能预算：单帧渲染 ≤ 2ms（500 条同屏数据，实际只渲染上限内的条数）。
-
-### 4.7 追番与更新提醒
-
-| 能力 | 做法 |
-|---|---|
-| 追番 | `anime_favorites`；搜索/详情/播放页一键追番；番剧库页按"最近更新/我追的/在看的"分组 |
-| 进度 | 播放器每 5 秒上报 `position_ms`（复用影视板块的进度定时器），退出/切集时立即写回；剧集网格显示进度条 |
-| 更新检查 | 对追番列表逐条调规则的详情接口取剧集列表，比较 `total_episodes` 与末集名；**并发 2、可取消、失败不影响其他条目**；结果写 `anime_series.latest_episode` 并打"新集"标记 |
-| 展示 | nav 按钮上的 chip（"3 部有新集"）+ 番剧库页角标；点击后只显示有更新的条目 |
-| 触发 | 手动按钮（默认）+ 可选"启动后延迟 30 秒自动检查一次"（默认关，避免启动慢/打扰） |
-| 不做 | 系统托盘/气泡通知（本项目没有托盘体系）、后台常驻轮询 |
-| 为什么不照抄 WebDAV | Kazumi 的跨设备同步是**缺陷最密集**的功能（issue #861 恢复错集数、#1280 追番同步一直失败、#2341 "显示成功但未同步"、#2233 全屏切换触发同步把 CPU 打满）；其 Bangumi 域名还长期被阻断（#2133，官方承认"启用镜像后无法同步属预期"）。因此我们 P2 先做**显式导出/导入 JSON**（用户看得见、可校验），WebDAV 只有在有明确需求时才评估 |
-
-### 4.8 超分辨率（诚实边界）
-
-| 方案 | 结论 |
-|---|---|
-| 实时超分（Anime4K / mpv 着色器） | ❌ 不做。需要 libmpv 播放内核 + 着色器管线，与"Qt 单栈（QtMultimedia）"决策冲突；Kazumi 自己的 Q&A 也说明"质量档对 GPU 要求高、低端机会卡" |
-| 离线增强 | ✅ 做（P2）：复用转换引擎的 ffmpeg，提供两个档位：① 放大（`scale=1920:1080:flags=lanczos`，可选 `unsharp` 轻锐化）；② 重编码（`libx264 -crf 20 -preset medium`）。入口在"下载完成后处理"，并**明确标注"这是离线重编码，不是 Anime4K 实时超分"** |
-| 播放中 4K 升频 | ❌ 不做（同理） |
-
-### 4.9 分阶段实施计划（可直接排期）
-
-| 阶段 | 内容 | 交付物 | 验收 |
-|---|---|---|---|
-| **A. 前置（第六板块 V1/V2/V3 的共享层）** | 代理重写、缓存/预取、硬解、`QGraphicsVideoItem` 播放器上移到 `ui_kit/media/`、弹幕层、下载器并发 | 第六板块改造完成 + 4 个共享模块 | 见 3.5 的测试与手工验收；`pytest tests/board_video tests/architecture` 全绿 |
-| **B. 动漫 P0（MVP，可看）** | 规则引擎（XPath + API）、选择器、嗅探器、搜索/详情/播放、追番 + 进度、下载（复用）、弹幕（只读） | `core/anime/*`、`boards/anime/*`、迁移 v3_anime、设置页 | 用 1 条内置规则 + 本地假站点 fixture 跑通"搜索→详情→选集→嗅探→播放（本地样本）→下载→弹幕渲染"；`pytest tests/board_anime -q` 全绿 |
-| **C. 动漫 P1（好用）** | 规则编辑器 + 试跑、规则订阅、番剧库/时间表、Bangumi 元数据、更新检查、字幕、外部播放器、图片代理 | 规则页 + 时间表 + 元数据 + 更新角标 | 手工：导入 1 条自写规则 → 试跑通过 → 追番 → 播放 → 有新集提示；规则订阅更新不破坏旧规则 |
-| **D. 动漫 P2（可选）** | 追番进度导出/导入（+WebDAV）、离线增强、广告分片跳过、以图搜番 | 导出 JSON、增强任务 | 手工：导出的追番/进度能在另一台机器导入还原 |
-| **E. 收尾** | 打包（spec + build 脚本 + 自检 `anime_core`）、文档（`docs/BOARDS/anime.md` 等）、发版 | v1.1.0 产物（onedir + Setup） | 三道自检全绿；安装包静默安装→自检→卸载闭环（照 v1.0.5 的做法） |
-
-**依赖关系**：B 依赖 A（播放器/代理/下载器）；C 依赖 B；D 可选；E 依赖 B/C。
-
-### 4.10 测试与打包清单
-
-**`tests/board_anime/`（新增，预计 9 个文件 / 180+ 用例）**
-
-| 文件 | 覆盖 |
-|---|---|
-| `test_anime_rules.py` | 规则解析/校验/变量替换/导入导出/订阅校验和/坏规则不致命/Kazumi 规则兼容（含 `muliSources` 等杂字段） |
-| `test_anime_selectors.py` | XPath（含 `@attr`/`text()`/`//` 兼容）、CSS（`css:` 前缀）、JSONPath 子集（`[*]`/`[0]`/`['k']`）、不支持的语法给出明确错误 |
-| `test_anime_engine.py` | 搜索/详情/选集/播放页构造（用本地 HTML/JSON fixture 起 `http.server`）、POST 搜索、超时重试、限速 |
-| `test_anime_sniffer.py` | `player_aaaa`、iframe 递归、JSON 扫描、base64/unicode 解码、失败时的可读提示 |
-| `test_anime_danmaku.py` | 弹弹play 客户端（替身）：签名算法正确、缓存命中、限流退避、xml 解析/导出、标题+集数匹配、轨道分配不重叠 |
-| `test_anime_library.py` | 追番/进度/历史/更新检查（复现"总集数变多"）、换线路/换规则、下载入库（复用假下载器） |
-| `test_anime_storage.py` | `anime_*` 表 CRUD、唯一约束、级联清理 |
-| `test_anime_ui.py` | 板块构建、五个子页、搜索边出边显示、详情、规则页试跑（替身引擎）、播放器接线、快捷键 |
-| `test_anime_acceptance.py` | 「需求 7.x 验收」端到端：规则导入 → 搜索 → 追番 → 播放 → 弹幕 → 下载 → 更新提示 |
-
-**打包与自检**
-
-- `workbench.spec` / `workbench_mac.spec`：hiddenimports 加 `modu_workbench.core.anime.*`、`modu_workbench.boards.anime.*`、`modu_workbench.ui_kit.media.*`（两个 spec 必须一致——`test_spec_integrity.py` 会拦）；
-- `packaging/build_app.ps1`：模块核验清单加动漫模块（现 28 项 → 约 36 项）；
-- `app/main.py`：新增自检项 `anime_core`（16 → 17 项）：用**内置规则 + 内置假站点 HTML**跑通"解析规则 → 选择器命中 → 嗅探出 m3u8"，并断言弹幕 xml 解析、追番/进度读写；
-- `docs/TESTING.md`：加动漫板块冒烟项（规则导入 → 搜索 → 播放 → 追番 → 更新检查）。
-
----
-
 ## 5. 里程碑与任务清单（可勾选）
 
 ### 5.1 第六大板块（影视改造）
@@ -1091,35 +636,6 @@ CREATE INDEX IF NOT EXISTS idx_anime_progress_time ON anime_progress(updated_at 
 - [x] **V3-g** 测试：3.5 全部用例 + `test_video_nonfunctional.py` 性能预算
 - [x] **V3-h** 自检 `video_playback`；文档/CHANGELOG 同步
 
-### 5.2 第七大板块（动漫）
-
-> **v1.1.0 落地情况**：A-a ~ B-g 全部完成，C/D 阶段的可用子集也已落地
-> （规则编辑器试跑、订阅更新、Bangumi 元数据与时间表、更新提醒、字幕、外部播放器、
-> 追番/进度 JSON 导出导入）；**未做**的是 D 阶段的离线增强（ffmpeg 放大/重编码）、
-> 以图搜番（trace.moe，P2，需要上传截图默认关闭）、以及 E 阶段的打包实测与发版产物。
-> 边界见 `docs/BOARDS/anime.md` 第 0 节（无浏览器内核 → 纯 JS 渲染站点不支持）。
-
-- [x] **A-a** 共享层抽取：`ui_kit/media/{player,danmaku,subtitle,proxy}.py`（影视板块改为调用）
-- [ ] **B-a** `core/anime/{models,rules,selectors}.py`（规则解析/校验/三种选择器）
-- [ ] **B-b** `core/anime/{engine,sniffer,providers}.py`（执行/嗅探/源接口）
-- [ ] **B-c** `core/anime/{storage,library}.py` + 迁移 `v3_anime` + 表登记
-- [ ] **B-d** `core/anime/danmaku.py`（弹弹play 客户端 + xml + 匹配）
-- [ ] **B-e** `boards/anime/*`（搜索/详情/番剧库/历史 + 设置页）
-- [x] **B-f** 内置规则 3–5 条（含 1 条 API 模式）+ 规则导入导出（落了 2 条可离线验证的样例）
-- [x] **B-g** 测试 `tests/board_anime/*` + 架构/DB/设置页登记
-- [x] **C-a** 规则编辑器 + 试跑面板（逐步显示五步结果与失败原因）
-- [x] **C-b** 规则订阅（拉取/校验/更新；校验失败保留旧版本）
-- [x] **C-c** `bangumi.py` 元数据 + 时间表页
-- [x] **C-d** `update_check.py` + "有新集"角标
-- [x] **C-e** 字幕 + 外部播放器打开
-- [x] **D-a** 追番/进度导出导入（JSON；WebDAV 按 6.2 的"不做"清单明确不做）
-- [x] **D-b** 离线增强（ffmpeg 放大/重编码）：`core/video/enhance.py` + 「我的视频 → 增强」入口，
-  **如实标注这不是 Anime4K 实时超分**，只对已下载的本地文件生效、可取消（有真 ffmpeg 的端到端测试）
-- [x] **D-c** 广告分片跳过（与 3.3.7 共用，实验性、默认关）
-- [~] **E-a** 打包登记（两个 spec 的 hiddenimports + `build_app.ps1` 模块核验清单 + 自检
-  `anime_core` 全部就位，自检 18 项全绿）；**发版产物（onedir + Setup）未构建**
-
----
 
 ## 6. 风险、合规与"不做"清单
 
@@ -1160,74 +676,12 @@ CREATE INDEX IF NOT EXISTS idx_anime_progress_time ON anime_progress(updated_at 
 - 官方要求：**按需调用 + 缓存**（2–6 小时；热门更新日 0.5–1 小时；老番 2–7 天）、禁止批量抓取、禁止商用、弹幕对用户免费。
 - 参考：[弹弹play 开放弹幕网络文档](https://doc.dandanplay.com/open/)
 
-### B. 规则示例
+### B. 历史参考（动漫板块已于 v2.0.0 移除）
 
-**B1. XPath 规则（本站内 fixture 用，可离线测试）**
-
-```json
-{
-  "api": "8", "type": "anime", "name": "本地样例站", "version": "1.0",
-  "baseURL": "http://127.0.0.1:PORT/",
-  "searchMode": "xpath", "chapterMode": "xpath",
-  "searchURL": "http://127.0.0.1:PORT/search?wd=@keyword",
-  "searchList": "//div[@class='module-items']//div[@class='module-item']",
-  "searchName": "//a[@class='module-item-title']/@title",
-  "searchResult": "//a[@class='module-item-cover']/@href",
-  "chapterRoads": "//div[@class='module-play-list']",
-  "chapterResult": "//a/@href"
-}
-```
-
-**B2. API 规则（结构对齐 Kazumi 文档里的 TvTFun 示例）**
-
-```json
-{
-  "api": "8", "type": "anime", "name": "TvTFun 风格", "version": "1.0",
-  "baseURL": "https://www.example.com/",
-  "searchMode": "api", "chapterMode": "api",
-  "searchApiConfig": {
-    "request": { "method": "GET", "url": "https://www.example.com/api/videos/search",
-                 "query": { "q": "@keyword", "pageSize": 20 } },
-    "listPath": "$.data.videos[*]", "namePath": "$.name", "sourcePath": "$.id"
-  },
-  "chapterApiConfig": {
-    "request": { "method": "GET", "url": "https://www.example.com/api/videos/@source" },
-    "format": "nested",
-    "roadsPath": "$.data.playSources[*]", "roadNamePath": "$.name",
-    "episodesPath": "$.episodes[*]", "episodeNamePath": "$.name", "episodeUrlPath": "",
-    "variables": { "slug": "$.data.slug" },
-    "episodePage": { "url": "https://www.example.com/video/@slug/play",
-                     "query": { "source": "@roadIndex", "episode": "@episodeIndex" } }
-  }
-}
-```
-
-### C. 参考资料
-
-**被对标/借鉴的项目**
-
-- MoonTV（`samqin123/MoonTV`）：<https://github.com/samqin123/MoonTV> —— 多源聚合、`config.json`（`cache_time`/`api_site` 苹果 CMS V10/`custom_category`）、ArtPlayer + HLS.js、图片/豆瓣代理环境变量、智能去广告。
-- LunaTV（`MoonTechLab/LunaTV`）：<https://github.com/MoonTechLab/LunaTV> —— 空壳 + 自配源、**配置订阅（base58）**、**流式搜索**、豆瓣/图片代理多档、Docker + Kvrocks/Redis/Upstash。
-- **LunaTV-EE（`stazeng/LunaTV-EE`）**：<https://github.com/stazeng/LunaTV-EE> —— 本方案**数值来源最集中**的参考（缓冲参数矩阵、源测速打分、下载器保序写入、分片代理工程细节、两级缓存）。
-- **MoonTVPlus（`mtvpls/MoonTVPlus`）**：<https://github.com/mtvpls/MoonTVPlus> —— **点播代理解析最贴近的参考**：`src/app/api/proxy/vod/m3u8/route.ts`、`src/app/api/proxy/vod/segment/route.ts`、`src/lib/server/ssrf.ts`、`src/lib/server/proxy-headers.ts`、`src/lib/config.ts`（`SourceConfig.proxyMode`）。另有 `brucemomo/Moon_TV` 等分支。
-- Kazumi（`Predidit/Kazumi`）：<https://github.com/Predidit/Kazumi> —— Flutter 番剧采集客户端；**规则编辑器/规则分享**、番剧目录/搜索/时间表、追番、弹幕（弹弹play）、硬件加速、高刷适配、多源、外部播放器、下载；**"番剧更新提醒"未实现**（README 开发计划未勾选）。
-  - XPath 规则开发文档：<https://kazumi.app/docs/rules/develop-rules>（字段：Name/Version/BaseURL/SearchURL/SearchList/SearchName/SearchResult/ChapterRoads/ChapterResult；`@keyword`；高级选项：简易解析、广告过滤、UA、Referer、反反爬虫）
-  - API 规则开发文档：<https://kazumi.app/docs/rules/develop-api-rules>（JSONPath 子集、`@source`/`@roadIndex`/`@episodeIndex`/响应变量、完整 JSON 示例）
-  - 视频嗅探原理（各平台 WebView 实现）：<https://kazumi.app/docs/architecture/video-parser>
-  - 规则仓库（含 `index.json` 与 CI 自动维护 `deprecated`）：<https://github.com/Predidit/KazumiRules>
-  - 关键 issue（我们对标时的"别踩同一个坑"依据）：
-    - #914 —— 维护者说明 iframe 内 referer 校验/JS 挑战"基本无法解决"（解析架构的根本限制）
-    - #739 / #591 —— 实时超分的 GPU 代价（低端机 100% 占用且卡顿）
-    - #995 —— HDR/杜比视界受 Flutter Texture 限制不支持
-    - #2133 —— Bangumi 四域名被阻断；官方承认"启用镜像后无法同步属预期行为"
-    - #861 / #1280 / #2341 / #2233 —— WebDAV 同步的典型缺陷（错集数/同步失败/"显示成功但未同步"/同步把 CPU 打满）
-  - 上述 issue 的核实清单见 `docs/research/kazumi_issue_mining_report.md`。
-- 本项目内的支撑材料（本次调研产出，仅作证据保留，不参与打包、也不影响运行时）：
-  - `docs/research/MoonTV-LunaTV-技术调研报告.md`（EE/MoonTVPlus 家族源码级事实 + **"宣传口径 vs. 代码事实"反证表** + 反模式清单；点播代理一节以 MoonTVPlus 为准）
-  - `docs/research/kazumi_research_report.md`（Kazumi 9 节事实 + 可借鉴清单）
-  - `docs/research/kazumi_issue_mining_report.md`（约 60 条 API 核实的 issue）
-  - `docs/research/kazumi_extras_report_v2.md`（代理/防盗链注入、HLS 广告过滤与解析、下载子系统、平台差异）
-  - `docs/research/kazumi_danmaku_timetable_report.md`（弹幕与时间表细节）
+原第七板块的规则引擎与嗅探实现参考过 Kazumi 的设计，相关调研报告保留在
+`docs/research/`（`kazumi_*`）作为**决策留痕**：它们解释了"为什么当初要做"
+以及"为什么最终移除"（站点地址普遍依赖网页 JS 或站点私有加密，在没有浏览器
+内核的前提下无法稳定播放）。这些文档不再描述当前代码，读的时候请以此为前提。
 
 **Qt / 技术依据**
 
@@ -1237,22 +691,3 @@ CREATE INDEX IF NOT EXISTS idx_anime_progress_time ON anime_progress(updated_at 
 
 ---
 
-## 8. 一句话总结
-
-第六大板块的问题**不在源，而在我们自己的代理/解码/选路/下载四条链路**：把代理做成"流式 + 连接复用 + 分片缓存 + 预取"、把解码交给硬解、把选路交给实测带宽、把下载改成"并发 + 续传 + 直连优先"，"卡"和"慢"这两件事就该消失了；第七大板块「墨软动漫」则在此基础上**换一套内容获取方式（规则引擎 + 嗅探）并补上弹幕与追番**，与影视板块共享播放/代理/下载，但数据与规则各自独立。
-
-
-1. **播放卡、帧率低的主因不是"源不好"，而是我们自己的链路**：远程地址一律经 Python 写的本地 HTTP 代理（`services/media_server.py`），而该代理**每个分片都新开一次 TLS（无 `requests.Session`）、把整个响应体读进内存后才转发、所有响应 `Cache-Control: no-store`、失败还带 3 次 0.6s 退避**。1080p/2s 分片意味着每分钟约 30 次握手 + 30 次 Python 全量缓冲，抖动直接体现为卡顿。
-2. **第二个主因是解码**：`QMediaPlayer` 用默认后端，代码里**没有任何**硬解/后端选择；`PiSide6 6.11` 同包了 `ffmpegmediaplugin.dll` 与 `windowsmediaplugin.dll`，而 Qt 官方文档明确给了 `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=d3d11va,d3d12va,dxva2`、`QT_DISABLE_HW_TEXTURES_CONVERSION`、`QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH` 等开关——我们现在一个都没用，1080p H.264 基本靠软解，CPU 打满就是"帧率低"。
-3. **第三个主因是选路策略**：`library._lock_best_variant()` 永远锁定**最高码率**变体（`max(rank)`），没有带宽探测、没有卡顿降档。慢网下"锁最高"＝持续 stall。
-4. **首帧慢/卡死无自愈**：`player._check_native_started()` 等 20s 只打印一句提示，不会自动降清晰度、换源、或改为"先下后播"。
-5. **下载慢的主因**：`download_many()` 逐条串行；HLS 分片下载（无 ffmpeg 时）**严格串行 + 每片 `requests.get` 新建连接**；走 ffmpeg 时 ffmpeg 自己也串行取分片，而且**分片仍然要过我们的 Python 代理**（`_localize_playlist()` 把分片改写成本机代理地址）。三重串行 + 一重 Python 中转。
-6. **代理必须"流式 + 连接复用 + 磁盘缓存"**：改造后它从"瓶颈"变成"加速器"（本地缓存命中即零外网、Range 精确、keep-alive、并发预取）。
-7. **下载改造 = 并发分片 + 断点续传 + 直连优先**：自研分片下载器（`ThreadPoolExecutor` + 每线程 `Session` + `.part` + 已完成分片索引 + 坏片重试/跳过），ffmpeg 路径改为"能把请求头直接交给 ffmpeg 时不走代理"（本地 playlist 与 `-headers` 双路探测）。
-8. **渲染路径要换**：`QVideoWidget` 是原生窗口，**无法在上面可靠叠加 Qt 控件**（弹幕/字幕/统计就做不了）。改用 `QGraphicsView + QGraphicsVideoItem`：视频是场景里的一个 item，弹幕/字幕/缓冲指示/调试信息都是叠加 item —— 这是第七大板块弹幕的前置条件。
-9. **对标 MoonTV/LunaTV 的可抄清单**：本地/服务端代理补 Referer+UA、HLS 清单重写、分片缓存与 Range 精确转发、多源聚合与失效降级、图片代理（海报防盗链）、弹幕、自动连播、"线路测速/延迟排序"。**不抄**：服务端转码（我们是桌面端，有本地 ffmpeg 可做按需 remux）、Vercel/Redis 那套部署形态、多用户与鉴权。
-10. **第七大板块「墨软动漫」定位**：与影视板块**不重叠** —— 影视是"聚合 CMS 源 + 下载入库"，动漫是"**规则驱动的番剧采集 + 追番 + 弹幕**"（对标 Kazumi 的 XPath/JSON 规则、弹弹play 弹幕、追番更新提醒）。
-11. **动漫板块的规则引擎**：JSON 规则文件（字段对齐 Kazumi 的做法：搜索/详情/剧集/播放地址/字幕），选择器**同时支持 XPath 与 CSS**（`lxml` + `soupsieve`），带**规则校验 + 规则调试器 + 导入/导出/订阅更新**；内置规则随包，用户规则存数据目录。
-12. **动漫板块不做的**：实时超分辨率（Qt 单栈下需要 libmpv/Anime4K 着色器，与"Qt 单栈、不引入新播放内核"冲突）——改为**离线 ffmpeg 增强**（复用转换引擎），并如实标注边界。
-
----

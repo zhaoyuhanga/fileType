@@ -81,42 +81,6 @@ def video_download_dir() -> Path:
     return path
 
 
-# ---------- 墨软动漫 ----------
-
-def anime_dir() -> Path:
-    """墨软动漫的数据根目录（规则/弹幕缓存/导入产出的兜底位置）。
-
-    注意：下载产物**不**默认放这里 —— 与影视一致，用户可见的下载目录由
-    设置页决定（默认 `~/Videos/墨软动漫`），数据目录只放"程序自己管"的东西。
-    """
-    path = app_data_dir() / "anime"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def anime_rules_dir() -> Path:
-    """用户规则目录（`anime/rules`）。
-
-    内置规则随包只读（`core/anime/rules_builtin/`），这里只放用户导入与订阅的规则；
-    `core/anime/rules.py` 的 `user_rules_dir()` 直接指向本函数，因此目录必须自动创建
-    （首次运行就打开规则页时不能因为目录不存在而报错）。
-    """
-    path = anime_dir() / "rules"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def anime_danmaku_dir() -> Path:
-    """弹幕缓存目录（`anime/danmaku`）。
-
-    弹幕以 `xml/json` 文件落盘、DB 只记索引：官方建议按小时~天级缓存，
-    用文件的好处是"清缓存"就是删目录，且不会把几十万条弹幕塞进 SQLite。
-    """
-    path = anime_dir() / "danmaku"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 # ---------- 墨软图库 ----------
 
 def gallery_db_path() -> str:

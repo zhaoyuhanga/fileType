@@ -5,15 +5,29 @@
 2. 在下面 `MIGRATIONS` 元组里注册；
 3. 补一个迁移测试（`tests/test_db_schema.py`），并在 `docs/DATABASE.md` 更新表结构。
 **已发布的迁移模块不得再修改**（老用户已经跑过了）。
+
+## v2.0.0 移除了 v3_anime
+
+第七板块「墨软动漫」在 v1.1.0 里对应 `v3_anime`（7 张 `anime_*` 表）。
+v2.0.0 移除板块时**没有删掉这张"已发布迁移"的痕迹，也没有写"删表"迁移**：
+
+- 从 v1.1.0 升级上来的库，`schema_migrations` 里仍有 `version=3` 记录，
+  `anime_*` 表连同用户当年追的番/进度/弹幕索引**原样保留**（只是不再有任何代码读它）；
+  这样做不静默销毁用户数据，也让"降级回 v1.1.0"依然可用；
+- 全新安装只跑到 v2，**不会创建**这些表。
+- 想回收空间的用户可执行 `docs/DATABASE.md` 末尾给出的 `DROP TABLE anime_*` 片段。
+
+因为 `apply_migrations` 按"已应用就跳过"工作，`schema_version()` 高于
+`LATEST_VERSION` 是**合法状态**（老库），不会被当成损坏。
 """
 from __future__ import annotations
 
 import sqlite3
 import time
 
-from . import v1_initial, v2_document, v3_anime
+from . import v1_initial, v2_document
 
-MIGRATIONS: tuple = (v1_initial, v2_document, v3_anime)
+MIGRATIONS: tuple = (v1_initial, v2_document)
 
 LATEST_VERSION = max(module.VERSION for module in MIGRATIONS)
 

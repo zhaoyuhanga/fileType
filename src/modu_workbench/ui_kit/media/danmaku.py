@@ -17,7 +17,7 @@ import os
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 #: 三档同屏上限（见 L16）

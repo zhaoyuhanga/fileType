@@ -1,4 +1,4 @@
-"""设置对话框：按板块分页（通用 / 大模型 / 书库 / 转换 / 文档 / 乐库 / 影视 / 图库 / 动漫）。
+"""设置对话框：按板块分页（通用 / 大模型 / 书库 / 转换 / 文档 / 乐库 / 影视 / 图库）。
 
 各板块顶栏的「⚙ 设置」可直接跳到本板块那一页（`initial="gallery"` 等），
 未进入过的板块页在首次切换时才构造，避免启动时把所有板块的注册表都拉起来。
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
 )
 
 from .base import SETTINGS_APP, SETTINGS_ORG, SettingsPage, app_settings
-from .anime import AnimeSettingsPage
 from .book import BookSettingsPage
 from .convert import ConvertSettingsPage
 from .document import DocumentSettingsPage
@@ -45,7 +44,6 @@ PAGE_FACTORIES: tuple[tuple[str, str, str, Callable[[], SettingsPage]], ...] = (
     ("music", "乐库", "🎧", MusicSettingsPage),
     ("video", "影视", "🎬", VideoSettingsPage),
     ("gallery", "图库", "🖼", GallerySettingsPage),
-    ("anime", "动漫", "🎞", AnimeSettingsPage),
 )
 
 PAGE_TITLES = {key: title for key, title, _icon, _factory in PAGE_FACTORIES}

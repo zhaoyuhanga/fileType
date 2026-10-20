@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..tokens import CARD_PADDING, FONT, PAGE_MARGIN, ROW_GAP, SECTION_GAP, SPACE
+from ..tokens import CARD_PADDING, PAGE_MARGIN, ROW_GAP, SECTION_GAP, SPACE
 
 __all__ = [
     "ColumnPage",

@@ -127,8 +127,10 @@ def test_board_registered_and_titled() -> None:
     assert spec.title == "墨软文档"
     assert spec.icon and spec.description
     keys = [board.key for board in ACTIVE_BOARDS]
-    # 第六（文档）、第七（动漫）板块依次追加在末尾，不影响既有板块位置
-    assert keys[-2:] == ["document", "anime"], "新板块追加在末尾，不影响既有板块位置"
+    # 「文档」是最后追加的板块（v2.0.0 移除「动漫」后它仍排在末尾），
+    # 既有板块的入口位置不受影响。
+    assert keys[-1] == "document", "文档板块追加在末尾，不影响既有板块位置"
+    assert "anime" not in keys, "v2.0.0 已移除「动漫」板块"
 
 
 def test_board_has_all_panels(board: DocumentBoardPage) -> None:

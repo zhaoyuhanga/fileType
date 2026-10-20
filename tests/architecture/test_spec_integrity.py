@@ -82,15 +82,29 @@ BOM_REQUIRED = ("packaging/build_app.ps1", "packaging/build_installer.ps1", "pac
 
 @pytest.mark.parametrize("relative", BOM_REQUIRED)
 def test_packaging_scripts_keep_utf8_bom(relative: str) -> None:
-    """打包脚本必须保留 UTF-8 BOM。
+    """打包脚本必须保留 UTF-8 BOM，且**只能有一个**。
 
     Windows PowerShell 5.1（`powershell -File …`，文档里的推荐调用方式）**不认没有 BOM 的
     UTF-8 脚本**：中文会按 ANSI 解码，字符串里的引号被吃掉，直接报
     "Missing closing ')'" 之类的语法错误 —— 实测踩过一次（编辑器保存丢掉 BOM 就会复现）。
+
+    **"只有一个"这条也是实测踩出来的**：用"先读文本、再用带 BOM 的编码写回"的方式改文件时，
+    读出来的字符串本身就以 U+FEFF 开头，写回就变成「BOM 字节 + 一个 U+FEFF 字符」——
+    只看"前 3 字节是不是 BOM"的断言**照样通过**，但 PowerShell 会把这多出来的字符当成
+    正文，于是报 `Unexpected attribute 'CmdletBinding'` / `Unexpected token 'param'`
+    这种完全指错方向的语法错误（排查了很久）。所以这里连"正文首字符不得是 U+FEFF"一起断言。
     """
     data = (REPO_ROOT / relative).read_bytes()
     assert data.startswith(b"\xef\xbb\xbf"), (
         f"{relative} 缺少 UTF-8 BOM：Windows PowerShell 5.1 会解析失败（请用带 BOM 的方式保存）"
     )
+    # 去掉前缀 BOM 后，正文不得再以 U+FEFF 开头（重复 BOM 会让 PowerShell 解析失败）
+    body = data[3:]
+    assert not body.startswith(b"\xef\xbb\xbf"), (
+        f"{relative} 有重复 BOM（BOM 字节后又跟了一个 U+FEFF 字符）："
+        "PowerShell 会把它当正文，报出与真实原因无关的语法错误"
+    )
     # 顺带确认文件确实是 UTF-8（而不是 GBK 等），避免"有 BOM 但内容坏掉"
-    data.decode("utf-8")
+    text = data.decode("utf-8")
+    assert text[0] == "\ufeff", "解码后首字符应当是 BOM"
+    assert not text[1:].startswith("\ufeff"), f"{relative} 正文开头仍残留 U+FEFF 字符"

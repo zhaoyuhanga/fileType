@@ -16,7 +16,7 @@
 # 1) 全量测试（含架构闸门）
 .venv\Scripts\python.exe -m pytest tests -q
 
-# 2) 源码自检（18 项：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/播放链路（video_playback）/五个板块核心（乐库·影视·动漫·图库·文档）/PDF 打印渲染/ffmpeg/品牌）
+# 2) 源码自检（17 项：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/播放链路（video_playback）/五个板块核心（乐库·影视·图库·文档·转换）/PDF 打印渲染/ffmpeg/品牌）
 $env:MODU_CHECK_DEPS="$env:TEMP\check.json"
 .venv\Scripts\python.exe -m modu_workbench; type $env:TEMP\check.json
 
@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 打包脚本内置三道自检，任一处 `Fail` 都会直接中断：
 1. 源码自检（`MODU_CHECK_DEPS`）；
 2. exe 字节流里检索关键模块名（七个板块/平台层/共享媒体层，共 48 项）；
-3. 运行打包产物做能力自检（18 项）。
+3. 运行打包产物做能力自检（17 项）。
 
 ## 3. 体积基线与精简记录
 
@@ -56,6 +56,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 | v1.0.4 | 382.9 MB | 151.3 MB | 墨软转换格式扩到 68 种（+PyYAML 约 0.4MB） |
 | v1.0.5 | **379.1 MB** | **152.1 MB** | 新增第六大板块（文档/PDF/OCR）+ 三批自查修复；**QtPdf 回归**（约 1.5MB）：文档板块打印 PDF 要逐页渲染，见 `app/main.py` 的 `pdf_print_engine` 自检；安装包实测静默安装→自检 16/16→静默卸载闭环 |
 | v1.1.0 | **388.5 MB** | **154.7 MB** | 新增第七大板块（动漫：规则引擎/嗅探/弹幕/Bangumi）+ 影视播放下载链路重写（代理/ABR/并发分片下载/离线增强）；自检 16 → **18 项**；实测静默安装→自检 18/18→静默卸载闭环（见下） |
+| v2.0.0 | **388.3 MB** | **154.4 MB** | **移除第七板块（动漫）**：自检 18 → **17 项**，模块核验 60 → **37 项**，删掉约 21000 行（板块 + 规则引擎 + 测试）；体积与 v1.1.0 基本持平（大头是 PySide6 与随包 ffmpeg，删 Python 代码省不了多少）；实测静默安装→自检 17/17→静默卸载闭环 |
 
 精简原则：只删除**已用二进制导入表核实无依赖**的 Qt 模块；
 每次精简后必须重跑打包产物自检（`multimedia_playback` 会真实播放一段音频，是最有效的回归）。
@@ -87,10 +88,29 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 - 推送走本机代理：`git -c http.proxy=http://127.0.0.1:7897 push origin main`；
 - CHANGELOG 按版本分节，定版时把「进行中」小节合并为定版说明。
 
-## 7. v1.1.0 打包实测（安装 → 自检 → 卸载闭环）
+## 7. 打包实测（安装 → 自检 → 卸载闭环）
+
+### v2.0.0（六个板块定版）
 
 环境：Windows 11 26200 / Python 3.12.10 / PyInstaller 6.22.3 / PySide6 6.11 /
-makensis（electron-builder 缓存里的 3.0.4.1，`winget install NSIS.NSIS` 装的 3.13 也可用）。
+makensis（electron-builder 缓存里的 3.0.4.1）。
+
+| 步骤 | 结果 |
+|---|---|
+| 源码自检 | **17/17** 通过（移除 `anime_core` 后从 18 项变 17 项） |
+| PyInstaller onedir | `dist\ModuWorkbench\ModuWorkbench.exe`，目录 **388.3 MB** |
+| exe 字节流模块核验 | **37 项全部命中**（删掉 23 个动漫条目：`60 → 37`） |
+| 打包产物自检 | **17/17** 通过 |
+| NSIS | `dist\墨软工作台-Setup-2.0.0.exe`，**154.4 MB**，版本资源 2.0.0 |
+| 静默安装 `/S` | 退出码 0；装到 `%LOCALAPPDATA%\Programs\墨软工作台`（**388.4 MB**）；注册表 `DisplayVersion=2.0.0`；桌面快捷方式已建 |
+| 已安装产物自检 | 退出码 0，**17/17 通过** |
+| 已安装产物核对 | `__version__=2.0.0`；`ACTIVE_BOARDS` 恰好 6 个（book/convert/music/video/gallery/document）；副标题不含"动漫"；`import modu_workbench.core.anime` → `ModuleNotFoundError`（确认没被误打包） |
+| 静默卸载 `/S` | 退出码 0；安装目录、卸载注册表项、桌面与开始菜单快捷方式**全部清干净**；`modu.db` 用户数据保留 |
+
+> 全量 `pytest tests -q`：**1154 个用例全部通过**（`--collect-only` 计数；
+> 删除了 `tests/board_anime/` 的 13 个文件后仍覆盖其余 6 个板块 + 平台层 + 架构闸门）。
+
+### v1.1.0（历史记录）
 
 ```
 powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -SkipDeps -Installer
