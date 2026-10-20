@@ -6,6 +6,7 @@
 短时缓存（默认 3s）：同一份清单被反复拉取（播放器探测 + ffmpeg + 下载器）
 是常态，TTL 内直接复用上次的重写结果，避免"一首歌反复拉清单"。
 """
+
 from __future__ import annotations
 
 import threading
@@ -17,6 +18,7 @@ from . import state
 from .config import get_config
 from .stats import get_stats
 from .upstream import get_client
+from modu_workbench.core.platform.logging import swallow
 
 #: 清单改写结果缓存：key = (target, referer, extra) → (到期时间, 文本)
 _playlist_cache: dict[tuple[str, str, str], tuple[float, str]] = {}
@@ -62,8 +64,7 @@ def _params(target: str, referer: str, extra: str) -> str:
     return urlencode(params)
 
 
-def hls_path(target: str, referer: str = "", extra: str = "",
-             episode_key: str = "") -> str:
+def hls_path(target: str, referer: str = "", extra: str = "", episode_key: str = "") -> str:
     """HLS 代理路径（不含 origin）。"""
     from .server import ensure_server
 
@@ -74,8 +75,7 @@ def hls_path(target: str, referer: str = "", extra: str = "",
     return f"{state.HLS_PREFIX}{name_hint(target)}?{query}"
 
 
-def proxy_path(target: str, referer: str = "", extra: str = "",
-               episode_key: str = "") -> str:
+def proxy_path(target: str, referer: str = "", extra: str = "", episode_key: str = "") -> str:
     """直通代理路径（不含 origin）。"""
     from .server import ensure_server
 
@@ -118,13 +118,23 @@ def _segment_lines(text: str, base_url: str, referer: str, extra: str) -> list[s
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        found.append(stripped if stripped.lower().startswith(("http://", "https://"))
-                     else urljoin(base_url, stripped))
+        found.append(
+            stripped
+            if stripped.lower().startswith(("http://", "https://"))
+            else urljoin(base_url, stripped)
+        )
     return found
 
 
-def rewrite_playlist(text: str, base_url: str, referer: str = "", extra: str = "",
-                     *, warmup: bool = True, episode_key: str = "") -> str:
+def rewrite_playlist(
+    text: str,
+    base_url: str,
+    referer: str = "",
+    extra: str = "",
+    *,
+    warmup: bool = True,
+    episode_key: str = "",
+) -> str:
     """把 m3u8 里所有 URI 重写为继续走本机代理（保留请求头）。
 
     既包括普通行（分片 / 子清单），也包括 `#EXT-X-KEY` 的密钥 URI。
@@ -142,8 +152,11 @@ def rewrite_playlist(text: str, base_url: str, referer: str = "", extra: str = "
             else:
                 out_lines.append(line)
             continue
-        absolute = stripped if stripped.lower().startswith(("http://", "https://")) \
+        absolute = (
+            stripped
+            if stripped.lower().startswith(("http://", "https://"))
             else urljoin(base_url, stripped)
+        )
         out_lines.append(origin() + hls_path(absolute, referer, extra, episode_key))
     rewritten = "\n".join(out_lines)
 
@@ -201,7 +214,7 @@ def _schedule_warmup(text: str, base_url: str, referer: str, extra: str) -> None
     for url in queue:
         try:
             _warmup_executor().submit(_warmup_one, url, referer, extra)
-        except RuntimeError:            # 解释器退出中
+        except RuntimeError:  # 解释器退出中
             with _warmup_lock:
                 _warmup_pending.discard(url)
 
@@ -213,8 +226,8 @@ def _warmup_one(url: str, referer: str, extra: str) -> None:
 
         fetch_to_cache(url, referer=referer, extra=extra, kind="segment")
         get_stats().record_prefetch(1)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+        swallow("playlist 中的可选步骤", error)
     finally:
         with _warmup_lock:
             _warmup_pending.discard(url)
@@ -252,7 +265,7 @@ def store_playlist(target: str, referer: str, extra: str, text: str) -> None:
     key = (target, referer, extra)
     with _playlist_lock:
         _playlist_cache[key] = (time.time() + ttl, text)
-        if len(_playlist_cache) > 64:      # 防止无界增长
+        if len(_playlist_cache) > 64:  # 防止无界增长
             oldest = min(_playlist_cache, key=lambda item: _playlist_cache[item][0])
             _playlist_cache.pop(oldest, None)
 
@@ -265,8 +278,7 @@ def clear_playlist_cache() -> None:
 # ---------------------------------------------------------------- 对外便捷函数
 
 
-def wrap_playlist(text: str, base_url: str, referer: str = "",
-                  headers: dict | None = None) -> str:
+def wrap_playlist(text: str, base_url: str, referer: str = "", headers: dict | None = None) -> str:
     """把 m3u8 内容改写为「全部经本机代理」的形式（绝对地址）。
 
     供 ffmpeg 下载与调试使用：请求头由本机代理在服务端补，
@@ -296,8 +308,20 @@ def fetch_playlist(target: str, referer: str = "", extra: str = "") -> PlaylistF
 
 
 __all__ = [
-    "PlaylistFetch", "cached_playlist", "clear_playlist_cache", "fetch_playlist",
-    "hls_path", "image_path", "name_hint", "origin", "proxy_path",
-    "rewrite_playlist", "shutdown_warmup", "store_playlist", "warmup_enabled",
-    "warmup_executor", "warmup_pending", "wrap_playlist",
+    "PlaylistFetch",
+    "cached_playlist",
+    "clear_playlist_cache",
+    "fetch_playlist",
+    "hls_path",
+    "image_path",
+    "name_hint",
+    "origin",
+    "proxy_path",
+    "rewrite_playlist",
+    "shutdown_warmup",
+    "store_playlist",
+    "warmup_enabled",
+    "warmup_executor",
+    "warmup_pending",
+    "wrap_playlist",
 ]

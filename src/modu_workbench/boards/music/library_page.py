@@ -1,4 +1,5 @@
 """墨软乐库：我的音乐（本地曲库）与音频格式转换页。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,6 +41,7 @@ from .widgets import (
     row_track_id,
     selected_track_ids,
 )
+from modu_workbench.core.platform.logging import swallow
 
 # 曲目表列序（用于「收藏」列点击）
 FAVORITE_COLUMN = 6
@@ -48,7 +50,7 @@ FAVORITE_COLUMN = 6
 class MusicLibraryPage(QWidget):
     """本地曲库：导入、筛选、收藏、分类、加入歌单、播放。"""
 
-    playRequested = Signal(list, int)   # (tracks, start_index)
+    playRequested = Signal(list, int)  # (tracks, start_index)
     libraryChanged = Signal()
 
     def _cancel_current(self) -> None:
@@ -56,15 +58,17 @@ class MusicLibraryPage(QWidget):
         if getattr(self, "_worker", None) is not None:
             try:
                 self._worker.cancel()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                swallow("library_page 中的可选步骤", error)
 
     # ------------------------------------------------------------------ 状态
 
     @property
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
-        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+        return (
+            self._task._label if self._task is not None else self._fallback_status
+        )  # noqa: SLF001
 
     def _note_fallback(self, message: str) -> None:
         """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
@@ -78,7 +82,7 @@ class MusicLibraryPage(QWidget):
             if done or total:
                 self._task.report(message, done, total)
             else:
-                self._task.note(message)      # 纯信息：不显示进度条/取消
+                self._task.note(message)  # 纯信息：不显示进度条/取消
 
     def _busy(self, message: str) -> None:
         """进行中提示（搜索/导入/解析这类未知时长）。"""
@@ -94,14 +98,25 @@ class MusicLibraryPage(QWidget):
 
     def _set_progress(self, value: int) -> None:
         """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
-        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
-            self._task._progress if self._task is not None else None)     # noqa: SLF001
+        bar = (
+            self._task_bar._progress
+            if hasattr(self, "_task_bar")
+            else (self._task._progress if self._task is not None else None)
+        )  # noqa: SLF001
         if bar is not None:
             bar.setRange(0, 100)
             bar.setValue(int(value))
 
-    def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
-                 toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):
+    def __init__(
+        self,
+        library: MusicLibrary,
+        storage: MusicStorage,
+        player: MusicPlayer,
+        toaster: Toaster,
+        parent: QWidget | None = None,
+        *,
+        task_bar=None,
+    ):
         super().__init__(parent)
         self._library = library
         self._storage = storage
@@ -118,7 +133,9 @@ class MusicLibraryPage(QWidget):
         title = QLabel("我的音乐")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
-        subtitle = QLabel("导入本地音频（mp3 / flac / m4a / wav / aac / ogg / opus / wma），支持收藏、分类与歌单管理。")
+        subtitle = QLabel(
+            "导入本地音频（mp3 / flac / m4a / wav / aac / ogg / opus / wma），支持收藏、分类与歌单管理。"
+        )
         subtitle.setObjectName("pageSub")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
@@ -138,7 +155,12 @@ class MusicLibraryPage(QWidget):
         self._favorite_only.addItem("仅收藏", True)
         self._favorite_only.currentIndexChanged.connect(lambda _i: self.reload())
         self._order = QComboBox()
-        for key, label in (("added", "按加入时间"), ("title", "按曲名"), ("artist", "按歌手"), ("played", "按最近播放")):
+        for key, label in (
+            ("added", "按加入时间"),
+            ("title", "按曲名"),
+            ("artist", "按歌手"),
+            ("played", "按最近播放"),
+        ):
             self._order.addItem(label, key)
         self._order.currentIndexChanged.connect(lambda _i: self.reload())
 
@@ -158,7 +180,8 @@ class MusicLibraryPage(QWidget):
         self._table.itemClicked.connect(self._on_item_clicked)
         attach_context_menu(self._table, self._row_menu)
         self._empty = EmptyState(
-            "🎵", "曲库还是空的",
+            "🎵",
+            "曲库还是空的",
             "用「导入本地音频」把已有文件加进来，或去「搜索下载」在线下载",
         )
         self._empty.setMaximumHeight(240)
@@ -191,7 +214,7 @@ class MusicLibraryPage(QWidget):
         self._status_label = QLabel("就绪。")
         self._status_label.setObjectName("readerStatus")
         self._status_label.setWordWrap(True)
-        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
+        self._status_label.setVisible(False)  # 状态统一显示在板块任务条
 
     # ---------- 数据 ----------
 
@@ -209,16 +232,30 @@ class MusicLibraryPage(QWidget):
         self._rebuild_filter_combos(artist, category)
 
         self._tracks = self._storage.list_tracks(
-            keyword=keyword, artist=artist, category=category,
-            favorite_only=favorite_only, order=order,
+            keyword=keyword,
+            artist=artist,
+            category=category,
+            favorite_only=favorite_only,
+            order=order,
         )
         self._table.setRowCount(len(self._tracks))
         self._empty.setVisible(not self._tracks)
         self._table.setVisible(bool(self._tracks))
         for row, track in enumerate(self._tracks):
             fill_track_row(
-                self._table, row, track,
-                ["title", "artist", "album", "duration", "format", "category", "favorite", "played"],
+                self._table,
+                row,
+                track,
+                [
+                    "title",
+                    "artist",
+                    "album",
+                    "duration",
+                    "format",
+                    "category",
+                    "favorite",
+                    "played",
+                ],
             )
         missing = [t for t in self._tracks if not t.exists]
         message = f"共 {len(self._tracks)} 首"
@@ -269,7 +306,9 @@ class MusicLibraryPage(QWidget):
 
     def _import_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
-            self, "选择音频文件", "",
+            self,
+            "选择音频文件",
+            "",
             "音频文件 (*.mp3 *.m4a *.aac *.wav *.flac *.ogg *.opus *.wma);;所有文件 (*.*)",
         )
         if not files:
@@ -277,7 +316,9 @@ class MusicLibraryPage(QWidget):
         self._import(list(files))
 
     def _import_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "选择音频文件夹（递归导入）", str(music_dir()))
+        folder = QFileDialog.getExistingDirectory(
+            self, "选择音频文件夹（递归导入）", str(music_dir())
+        )
         if not folder:
             return
         self._import([folder])
@@ -338,8 +379,10 @@ class MusicLibraryPage(QWidget):
             return []
         return [
             ("▶ 播放这首", lambda: self._play_one(track_id)),
-            ("★ 取消收藏" if track.favorited else "☆ 收藏这首",
-             lambda: self._toggle_favorite_one(track_id)),
+            (
+                "★ 取消收藏" if track.favorited else "☆ 收藏这首",
+                lambda: self._toggle_favorite_one(track_id),
+            ),
             ("设置分类…", lambda: self._set_category_for([track_id])),
             ("加入歌单…", lambda: self._add_to_playlist_for([track_id])),
             ("从库中移除", lambda: self._remove_tracks_for([track_id])),
@@ -360,7 +403,9 @@ class MusicLibraryPage(QWidget):
         from PySide6.QtGui import QDesktopServices
 
         target = Path(path)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.parent if target.parent.exists() else Path.home())))
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(target.parent if target.parent.exists() else Path.home()))
+        )
 
     def _set_category(self) -> None:
         ids = action_ids(self._table)
@@ -418,7 +463,9 @@ class MusicLibraryPage(QWidget):
     def _refresh_durations(self) -> None:
         updated = self._library.refresh_durations()
         self.reload()
-        self._toaster.info(f"已补齐 {updated} 首时长信息" + ("" if updated else "（需要 ffprobe 支持）"))
+        self._toaster.info(
+            f"已补齐 {updated} 首时长信息" + ("" if updated else "（需要 ffprobe 支持）")
+        )
 
     def _open_dir(self) -> None:
         from PySide6.QtGui import QDesktopServices
@@ -434,7 +481,9 @@ class MusicConvertPage(QWidget):
     @property
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
-        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+        return (
+            self._task._label if self._task is not None else self._fallback_status
+        )  # noqa: SLF001
 
     def _note_fallback(self, message: str) -> None:
         """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
@@ -454,7 +503,7 @@ class MusicConvertPage(QWidget):
             if done or total:
                 self._task.report(message, done, total)
             else:
-                self._task.note(message)      # 纯信息：不显示进度条/取消
+                self._task.note(message)  # 纯信息：不显示进度条/取消
 
     def _idle(self, message: str = "") -> None:
         if message:
@@ -464,14 +513,24 @@ class MusicConvertPage(QWidget):
 
     def _set_progress(self, value: int) -> None:
         """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
-        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
-            self._task._progress if self._task is not None else None)     # noqa: SLF001
+        bar = (
+            self._task_bar._progress
+            if hasattr(self, "_task_bar")
+            else (self._task._progress if self._task is not None else None)
+        )  # noqa: SLF001
         if bar is not None:
             bar.setRange(0, 100)
             bar.setValue(int(value))
 
-    def __init__(self, library: MusicLibrary, storage: MusicStorage, toaster: Toaster,
-                 parent: QWidget | None = None, *, task_bar=None):
+    def __init__(
+        self,
+        library: MusicLibrary,
+        storage: MusicStorage,
+        toaster: Toaster,
+        parent: QWidget | None = None,
+        *,
+        task_bar=None,
+    ):
         super().__init__(parent)
         self._library = library
         self._storage = storage
@@ -507,7 +566,9 @@ class MusicConvertPage(QWidget):
         row.addWidget(reload_button)
         layout.addLayout(row)
 
-        self._table = configure_table(QTableWidget(), ["曲名", "歌手", "时长", "格式", "大小", "分类"])
+        self._table = configure_table(
+            QTableWidget(), ["曲名", "歌手", "时长", "格式", "大小", "分类"]
+        )
         layout.addWidget(self._table, 1)
 
         options = QHBoxLayout()
@@ -536,20 +597,27 @@ class MusicConvertPage(QWidget):
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._set_progress(0)
-        self._progress.setVisible(False)          # 进度统一显示在板块任务条
+        self._progress.setVisible(False)  # 进度统一显示在板块任务条
 
         self._status_label = QLabel("就绪。勾选曲目后开始转换。")
         self._status_label.setObjectName("readerStatus")
         self._status_label.setWordWrap(True)
-        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
+        self._status_label.setVisible(False)  # 状态统一显示在板块任务条
 
         self.reload()
 
     def reload(self) -> None:
-        self._tracks = self._storage.list_tracks(keyword=self._keyword.text().strip(), order="title")
+        self._tracks = self._storage.list_tracks(
+            keyword=self._keyword.text().strip(), order="title"
+        )
         self._table.setRowCount(len(self._tracks))
         for row, track in enumerate(self._tracks):
-            fill_track_row(self._table, row, track, ["title", "artist", "duration", "format", "size", "category"])
+            fill_track_row(
+                self._table,
+                row,
+                track,
+                ["title", "artist", "duration", "format", "size", "category"],
+            )
         self._report(f"共 {len(self._tracks)} 首可选")
 
     def _pick_dir(self) -> None:
@@ -590,7 +658,7 @@ class MusicConvertPage(QWidget):
     def _on_finished(self, outputs: list, errors: list) -> None:
         self._set_progress(100)
         if outputs:
-            self.reload()   # 刷新列表（内部会重置状态文本）
+            self.reload()  # 刷新列表（内部会重置状态文本）
         message = f"转换完成：成功 {len(outputs)}，失败 {len(errors)}"
         if errors:
             message += "；" + "；".join(errors[:3])

@@ -3,6 +3,7 @@
 线程模型与墨软乐库一致：所有联网/磁盘操作都放在 QThread 里，
 通过信号回到 UI 线程更新界面，绝不阻塞主线程。
 """
+
 from __future__ import annotations
 
 import threading
@@ -42,6 +43,7 @@ from modu_workbench.core.video import (
 )
 from modu_workbench.core.video import hls
 from . import context as app_context
+from modu_workbench.core.platform.logging import swallow
 
 REMOTE_ROLE = Qt.ItemDataRole.UserRole + 1
 VIDEO_ID_ROLE = Qt.ItemDataRole.UserRole
@@ -110,7 +112,7 @@ class _ImageFetchWorker(QThread):
     带回来，由 `load_pixmap` 在主线程解码。
     """
 
-    fetched = Signal(str, object)     # url, bytes（失败时是 None）
+    fetched = Signal(str, object)  # url, bytes（失败时是 None）
 
     TIMEOUT = 8.0
 
@@ -131,8 +133,9 @@ class _ImageFetchWorker(QThread):
         self.fetched.emit(self._url, payload)
 
 
-def load_pixmap(url: str, referer: str = "", size: tuple[int, int] | None = None,
-                *, on_loaded=None, parent=None):  # noqa: ANN001, ANN201
+def load_pixmap(
+    url: str, referer: str = "", size: tuple[int, int] | None = None, *, on_loaded=None, parent=None
+):  # noqa: ANN001, ANN201
     """异步加载远程封面，`on_loaded(QPixmap|None)` 回调；返回 QThread（调用方要留着引用）。
 
     与源设置里那些 Worker 同样的用法：拿到返回值后必须持有它 ——
@@ -161,7 +164,8 @@ def load_pixmap(url: str, referer: str = "", size: tuple[int, int] | None = None
             if candidate.loadFromData(payload) and not candidate.isNull():
                 if size:
                     candidate = candidate.scaled(
-                        int(size[0]), int(size[1]),
+                        int(size[0]),
+                        int(size[1]),
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
@@ -203,7 +207,11 @@ def configure_table(table: QTableWidget, headers: list[str]) -> QTableWidget:
 def make_item(text: str, checkable: bool = False, checked: bool = False) -> QTableWidgetItem:
     item = QTableWidgetItem(text)
     if checkable:
-        item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        item.setFlags(
+            Qt.ItemFlag.ItemIsUserCheckable
+            | Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsSelectable
+        )
         item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
     return item
 
@@ -234,7 +242,9 @@ def fill_remote_row(table: QTableWidget, row: int, remote: RemoteVideo) -> None:
         table.setItem(row, index, item)
 
 
-def fill_video_row(table: QTableWidget, row: int, video: Video, columns: list[str] | None = None) -> None:
+def fill_video_row(
+    table: QTableWidget, row: int, video: Video, columns: list[str] | None = None
+) -> None:
     """本地/已入库条目：片名 / 类型 / 集 / 画质 / 时长 / 大小 / 来源。"""
     keys = columns or ["title", "kind", "episode", "quality", "duration", "size", "source"]
     for index, key in enumerate(keys):
@@ -259,7 +269,9 @@ def fill_video_row(table: QTableWidget, row: int, video: Video, columns: list[st
         elif key == "favorite":
             item = make_item("★" if video.favorited else "☆")
         elif key == "local":
-            item = make_item("本地" if video.exists else ("在线" if video.online_only else "文件缺失"))
+            item = make_item(
+                "本地" if video.exists else ("在线" if video.online_only else "文件缺失")
+            )
         elif key == "year":
             item = make_item(video.year or "-")
         elif key == "played":
@@ -289,7 +301,10 @@ def checked_rows(table: QTableWidget, role: int) -> List[int]:
         item = table.item(row, 0)
         if item is None or item.data(role) is None:
             continue
-        if item.flags() & Qt.ItemFlag.ItemIsUserCheckable and item.checkState() == Qt.CheckState.Checked:
+        if (
+            item.flags() & Qt.ItemFlag.ItemIsUserCheckable
+            and item.checkState() == Qt.CheckState.Checked
+        ):
             rows.append(row)
     return rows
 
@@ -391,8 +406,9 @@ def ask_text(parent: QWidget | None, title: str, label: str, default: str = "") 
 class CollectionPicker(QDialog):
     """选择目标分类/收藏集合（可现场新建）。"""
 
-    def __init__(self, storage: VideoStorage, parent: QWidget | None = None,
-                 title: str = "加入分类"):
+    def __init__(
+        self, storage: VideoStorage, parent: QWidget | None = None, title: str = "加入分类"
+    ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(340)
@@ -410,7 +426,9 @@ class CollectionPicker(QDialog):
         create.clicked.connect(self._create)
         row.addWidget(create)
         row.addStretch(1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         row.addWidget(buttons)
@@ -462,14 +480,22 @@ class SearchWorker(QThread):
     - `failed(message)`：整体异常（单个源失败走 `errors`，不算整体失败）。
     """
 
-    progressed = Signal(int, int, int)         # (已完成源数, 参与源数, 累计结果数)
-    partialResults = Signal(object, object)    # (List[RemoteVideo], List[str]) 边搜边给
-    finishedResults = Signal(object, object)   # (List[RemoteVideo], List[str] errors)
+    progressed = Signal(int, int, int)  # (已完成源数, 参与源数, 累计结果数)
+    partialResults = Signal(object, object)  # (List[RemoteVideo], List[str]) 边搜边给
+    finishedResults = Signal(object, object)  # (List[RemoteVideo], List[str] errors)
     failed = Signal(str)
 
-    def __init__(self, keyword: str, kind: str = "all", source_key: str = "all",
-                 limit: int = 30, page: int = 1, parent=None, library=None,
-                 per_source_timeout: float | None = None):
+    def __init__(
+        self,
+        keyword: str,
+        kind: str = "all",
+        source_key: str = "all",
+        limit: int = 30,
+        page: int = 1,
+        parent=None,
+        library=None,
+        per_source_timeout: float | None = None,
+    ):
         super().__init__(parent)
         self._keyword = keyword
         self._kind = kind
@@ -493,13 +519,20 @@ class SearchWorker(QThread):
                 if self._per_source_timeout is not None:
                     kwargs["per_source_timeout"] = self._per_source_timeout
                 videos, errors = registry.search_all(
-                    self._keyword, kind=self._kind, limit=self._limit, page=self._page,
-                    on_partial=self._on_partial, **kwargs,
+                    self._keyword,
+                    kind=self._kind,
+                    limit=self._limit,
+                    page=self._page,
+                    on_partial=self._on_partial,
+                    **kwargs,
                 )
             else:
                 videos = registry.search_one(
-                    self._source_key, self._keyword, kind=self._kind,
-                    limit=self._limit, page=self._page,
+                    self._source_key,
+                    self._keyword,
+                    kind=self._kind,
+                    limit=self._limit,
+                    page=self._page,
                 )
                 errors = []
             self.finishedResults.emit(videos, errors)
@@ -532,12 +565,20 @@ class DetailWorker(QThread):
 class ResolveWorker(QThread):
     """解析播放地址（含跨源兜底）；成功后条目自动入库。"""
 
-    finishedResolve = Signal(object, object)   # (ResolvedPlay, Video)
+    finishedResolve = Signal(object, object)  # (ResolvedPlay, Video)
     failed = Signal(str)
 
-    def __init__(self, remote: RemoteVideo, episode: Episode | None = None,
-                 quality: Quality | None = None, *, allow_cross_source: bool = True,
-                 exclude: Iterable[str] = (), parent=None, library=None):
+    def __init__(
+        self,
+        remote: RemoteVideo,
+        episode: Episode | None = None,
+        quality: Quality | None = None,
+        *,
+        allow_cross_source: bool = True,
+        exclude: Iterable[str] = (),
+        parent=None,
+        library=None,
+    ):
         super().__init__(parent)
         self._remote = remote
         self._episode = episode
@@ -550,8 +591,11 @@ class ResolveWorker(QThread):
         try:
             library = self._library or app_context.video_library()
             resolved, video = library.resolve_playback(
-                self._remote, self._episode, self._quality,
-                allow_cross_source=self._allow_cross, exclude=self._exclude,
+                self._remote,
+                self._episode,
+                self._quality,
+                allow_cross_source=self._allow_cross,
+                exclude=self._exclude,
             )
             self.finishedResolve.emit(resolved, video)
         except Exception as error:  # noqa: BLE001
@@ -561,7 +605,7 @@ class ResolveWorker(QThread):
 class QualityWorker(QThread):
     """探测 m3u8 主清单，得到可选清晰度列表。"""
 
-    finishedQualities = Signal(object)   # List[HlsVariant]
+    finishedQualities = Signal(object)  # List[HlsVariant]
     failed = Signal(str)
 
     # 探测清晰度是「锦上添花」，超时要短：否则用户关掉对话框时它还在跑
@@ -578,7 +622,9 @@ class QualityWorker(QThread):
             from modu_workbench.core.video.sources import HttpClient
 
             client = HttpClient(timeout=self.TIMEOUT, attempts=self.ATTEMPTS)
-            self.finishedQualities.emit(hls.list_qualities(self._url, http=client, referer=self._referer))
+            self.finishedQualities.emit(
+                hls.list_qualities(self._url, http=client, referer=self._referer)
+            )
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
 
@@ -591,11 +637,12 @@ class HdSearchWorker(QThread):
     """
 
     progressed = Signal(str)
-    found = Signal(object)        # HdCandidate | None
+    found = Signal(object)  # HdCandidate | None
     failed = Signal(str)
 
-    def __init__(self, remote, episode=None, *, current_height: int = 0,
-                 library=None, parent=None):  # noqa: ANN001
+    def __init__(
+        self, remote, episode=None, *, current_height: int = 0, library=None, parent=None
+    ):  # noqa: ANN001
         super().__init__(parent)
         self._remote = remote
         self._episode = episode
@@ -606,7 +653,8 @@ class HdSearchWorker(QThread):
         try:
             library = self._library or app_context.video_library()
             candidate = library.find_higher_quality(
-                self._remote, self._episode,
+                self._remote,
+                self._episode,
                 current_height=self._current_height,
                 on_progress=lambda message: self.progressed.emit(message),
             )
@@ -624,13 +672,20 @@ class DownloadWorker(QThread):
     """
 
     progressed = Signal(int, int, str)
-    taskDone = Signal(object)        # DownloadResult
-    finishedAll = Signal(object)     # List[DownloadResult]
+    taskDone = Signal(object)  # DownloadResult
+    finishedAll = Signal(object)  # List[DownloadResult]
     failed = Signal(str)
     pausedChanged = Signal(bool)
 
-    def __init__(self, tasks: Iterable[tuple], dest_dir: str, *, allow_cross_source: bool = True,
-                 parent=None, library=None):
+    def __init__(
+        self,
+        tasks: Iterable[tuple],
+        dest_dir: str,
+        *,
+        allow_cross_source: bool = True,
+        parent=None,
+        library=None,
+    ):
         super().__init__(parent)
         self._tasks = list(tasks)
         self._dest = dest_dir
@@ -670,10 +725,12 @@ class DownloadWorker(QThread):
         try:
             library = self._library or app_context.video_library()
             results = library.download_many(
-                self._tasks, dest_dir=self._dest,
+                self._tasks,
+                dest_dir=self._dest,
                 on_progress=lambda done, total, message: self.progressed.emit(done, total, message),
                 on_task_done=lambda result: self.taskDone.emit(result),
-                cancel=self._cancel, allow_cross_source=self._allow_cross,
+                cancel=self._cancel,
+                allow_cross_source=self._allow_cross,
                 pause_event=self._pause,
             )
             self.finishedAll.emit(results)
@@ -687,10 +744,17 @@ class DanmakuWorker(QThread):
     弹幕是**可选增强**：任何失败都只回报一句可读原因，不影响正在播放的视频。
     """
 
-    fetched = Signal(object)          # DanmakuResult
+    fetched = Signal(object)  # DanmakuResult
 
-    def __init__(self, title: str, episode_label: str = "", *, episode_number: int = 0,
-                 year: str = "", parent=None):
+    def __init__(
+        self,
+        title: str,
+        episode_label: str = "",
+        *,
+        episode_number: int = 0,
+        year: str = "",
+        parent=None,
+    ):
         super().__init__(parent)
         self._title = title
         self._episode = episode_label
@@ -706,8 +770,12 @@ class DanmakuWorker(QThread):
 
         try:
             result = DanmakuFetcher().fetch(
-                self._title, self._episode, episode_number=self._number,
-                year=self._year, cancel=self._cancel)
+                self._title,
+                self._episode,
+                episode_number=self._number,
+                year=self._year,
+                cancel=self._cancel,
+            )
         except Exception as error:  # noqa: BLE001  弹幕失败不能影响播放
             from modu_workbench.ui_kit.media.danmaku_bridge import DanmakuResult
 
@@ -723,7 +791,7 @@ class EnhanceWorker(QThread):
     """
 
     progressed = Signal(int, int, str)
-    finishedAll = Signal(object, object)   # (ok paths, errors)
+    finishedAll = Signal(object, object)  # (ok paths, errors)
     failed = Signal(str)
 
     def __init__(self, video_ids: Iterable[int], mode: str = "upscale", parent=None):
@@ -759,13 +827,16 @@ class EnhanceWorker(QThread):
             suffix = source.suffix or ".mp4"
             target = source.with_name(f"{source.stem}（增强）{suffix}")
             if target.exists():
-                target = source.with_name(
-                    f"{source.stem}（增强 {int(time.time())}）{suffix}")
+                target = source.with_name(f"{source.stem}（增强 {int(time.time())}）{suffix}")
             try:
                 result = enhance_video(
-                    source, target, mode=self._mode, cancel=self._cancel,
-                    on_progress=lambda done, count, message,
-                    i=index: self.progressed.emit(i - 1, total, message),
+                    source,
+                    target,
+                    mode=self._mode,
+                    cancel=self._cancel,
+                    on_progress=lambda done, count, message, i=index: self.progressed.emit(
+                        i - 1, total, message
+                    ),
                 )
             except Exception as error:  # noqa: BLE001
                 errors.append(f"{name}：{error}")
@@ -775,8 +846,8 @@ class EnhanceWorker(QThread):
                 # 入库（与下载入库同一条路径，便于「我的视频」直接看到）
                 try:
                     library.import_download_result(_enhanced_result(video, result.path))
-                except Exception:  # noqa: BLE001  入库失败不影响文件已产出
-                    pass
+                except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                    swallow("widgets 中的可选步骤", error)
             else:
                 errors.append(f"{name}：{result.message}")
         self.progressed.emit(len(outputs), total, f"完成 {len(outputs)}/{total}")
@@ -789,8 +860,12 @@ def _enhanced_result(video, path):  # noqa: ANN001, ANN202
 
     return DownloadResult(
         video=video.to_remote() if hasattr(video, "to_remote") else video,
-        episode=None, quality=None, path=str(path), ok=True,
-        message="离线增强", source="local",
+        episode=None,
+        quality=None,
+        path=str(path),
+        ok=True,
+        message="离线增强",
+        source="local",
     )
 
 
@@ -798,7 +873,7 @@ class ConvertWorker(QThread):
     """视频格式转换（逐个条目，支持取消）。"""
 
     progressed = Signal(int, int, str)
-    finishedAll = Signal(object, object)   # (ok paths, errors)
+    finishedAll = Signal(object, object)  # (ok paths, errors)
     failed = Signal(str)
 
     def __init__(self, video_ids: Iterable[int], target_format: str, output_dir: str, parent=None):

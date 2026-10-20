@@ -1,11 +1,11 @@
 # 影视板块（第六）体验改造方案
 
-> **状态**：已实施完成（v1.1.0 落地 A/B/C 阶段，v2.0.0 收尾）。
+> **状态**：**已实施并稳定**（v1.1.0 落地 A/B/C，v2.0.0 移除动漫板块后收窄，v2.1.0 起 `services/media_proxy/` 拆成 fetch/handler/server 三个模块）。本文是**设计记录**，不是待办清单。
 > **基线**：v1.0.5（含第六大板块墨软文档）。
 > **参考项目**：[MoonTV](https://github.com/samqin123/MoonTV.git)、[LunaTV](https://github.com/MoonTechLab/LunaTV.git)（影视聚合播放站）。
 > **技术栈约束（不引入新体系）**：PySide6 / Qt 6.11 单栈（**不引入 QtWebEngine**）、`requests`、随包 `ffmpeg`（`tools/ffmpeg`）、单库 `modu.db` + 版本化迁移、`boards/<key>/` + `core/<key>/` 分包、`ui_kit` 设计令牌、pytest、PyInstaller onedir + NSIS。
 > 新增依赖：**零**。
-> **事实来源与取证方式**：对标结论来自**实读源码 / 官方文档 / issue 核实**，支撑材料在 `docs/research/`。
+> **事实来源与取证方式**：对标结论来自**实读源码 / 官方文档 / issue 核实**；仍在生效的支撑材料只有 `docs/research/MoonTV-LunaTV-技术调研报告.md`（索引见 `docs/research/README.md`）。
 > 引用到的对标数据都标了出处编号（M*=MoonTV、L*=LunaTV 家族）；**凡 README 宣传语与源码不一致的，一律以源码为准**——别照抄不存在的功能。
 >
 > **⚠️ v2.0.0 变更**：原第七大板块「墨软动漫」（Kazumi 式规则采集 + 追番 + 弹幕）
@@ -676,12 +676,15 @@ CREATE INDEX IF NOT EXISTS idx_video_play_events_time ON video_play_events(creat
 - 官方要求：**按需调用 + 缓存**（2–6 小时；热门更新日 0.5–1 小时；老番 2–7 天）、禁止批量抓取、禁止商用、弹幕对用户免费。
 - 参考：[弹弹play 开放弹幕网络文档](https://doc.dandanplay.com/open/)
 
-### B. 历史参考（动漫板块已于 v2.0.0 移除）
+### B. 历史参考（动漫板块已于 v2.0.0 移除，材料已删）
 
-原第七板块的规则引擎与嗅探实现参考过 Kazumi 的设计，相关调研报告保留在
-`docs/research/`（`kazumi_*`）作为**决策留痕**：它们解释了"为什么当初要做"
-以及"为什么最终移除"（站点地址普遍依赖网页 JS 或站点私有加密，在没有浏览器
-内核的前提下无法稳定播放）。这些文档不再描述当前代码，读的时候请以此为前提。
+原第七板块的规则引擎参考过 Kazumi 的设计，但那一整套**已随板块删除**：
+
+- 规则在真实站点上取不到播放地址（16 条官方规则：搜索 11、详情 11、**播放 0**，
+  全部依赖 `useWebview`），而本项目不内置浏览器内核；
+- 4 份 Kazumi 调研报告（约 375 KB）已在 v2.1.0 删除 —— 留着"如何实现一个已删功能"
+  的材料只会误导后来者；结论（为什么做、为什么删）写在 `CHANGELOG.md` 的 v2.0.0 小节。
+- 想看当初的依据请用 git 历史：`git show v1.1.0:docs/research/`。
 
 **Qt / 技术依据**
 

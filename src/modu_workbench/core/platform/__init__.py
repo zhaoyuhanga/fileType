@@ -1,6 +1,7 @@
 """板块无关的公共能力层（唯一允许被各板块依赖的 core 子包）。
 
-分层约定见 `docs/REFACTOR_PLAN.md` 第 2 节：
+分层约定见 `docs/ARCHITECTURE.md` 的「依赖规则」一节（由
+`tests/architecture/test_architecture.py` 强制）：
 
     boards/<板块>  →  core/<同板块>  →  core/platform
     core/<板块>    ✗→ core/<其他板块>（core.convert 作为共享转换引擎例外，且它不得反向依赖板块）

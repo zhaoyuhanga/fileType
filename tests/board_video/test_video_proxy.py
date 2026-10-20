@@ -290,8 +290,13 @@ def test_proxy_prefetch_warms_cache(monkeypatch: pytest.MonkeyPatch) -> None:
         proxied = media_proxy.hls_url(upstream.url("list.m3u8"))
         _status, _body, _headers = _get(proxied)
         upstream.payload = b"W" * (64 * 1024)
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and playlist_module.warmup_pending():
+        # 等"真正想要的条件"：缓存里已有 ≥3 片**且**预热队列排空。
+        # 只等 warmup_pending() 不够 —— 预热任务失败时它也会变空，
+        # 于是断言偶发失败（全量套件负载高时 CPython 线程调度更容易让假源站超时）。
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            if media_proxy.get_cache().count() >= 3 and not playlist_module.warmup_pending():
+                break
             time.sleep(0.02)
         # `shutdown_warmup()` 会等已提交的预热跑完再关闭，下次访问会重建线程池
         playlist_module.shutdown_warmup()

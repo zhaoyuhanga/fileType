@@ -8,6 +8,7 @@
   自动到其他源搜索同一部片继续尝试，用户无感；
 - **可扩展**：整个影视板块只依赖本类的公开方法，新增源不需要改任何业务代码。
 """
+
 from __future__ import annotations
 
 import json
@@ -30,11 +31,12 @@ from .probe import (
     probe_source,
 )
 from .providers import DEFAULT_PROVIDER_ORDER, build_default_providers
+from modu_workbench.core.platform.logging import swallow
 
 SETTING_ENABLED = "sources/enabled"
 SETTING_ORDER = "sources/priority"
-SETTING_SOURCE_URLS = "sources/urls"      # 用户覆盖的采集接口地址 {key: url}
-SETTING_VERSION = "sources/version"       # 源清单版本（升级时迁移用户的启用/排序设置）
+SETTING_SOURCE_URLS = "sources/urls"  # 用户覆盖的采集接口地址 {key: url}
+SETTING_VERSION = "sources/version"  # 源清单版本（升级时迁移用户的启用/排序设置）
 
 # 测速参数（计划 3.3.5：并发 3、最多测 20 个源 = 权重最高的前 5 + 剩余随机 15）
 SPEED_TEST_CONCURRENCY = 3
@@ -98,19 +100,22 @@ class SpeedResult:
         return f"{latency} / {speed} / 评分 {self.score:.2f}"
 
 
-def _safe_partial(callback, done: int, total: int, videos: list, errors: list) -> None:  # noqa: ANN001
+def _safe_partial(
+    callback, done: int, total: int, videos: list, errors: list
+) -> None:  # noqa: ANN001
     """回调 `on_partial`；回调自己炸了不能影响搜索（进度提示是锦上添花）。"""
     try:
         callback(done, total, list(videos), list(errors))
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+        swallow("registry 中的可选步骤", error)
 
 
 class VideoRegistry:
     """多视频源注册表（应用级单例，见 services.app_context.video_registry）。"""
 
-    def __init__(self, providers: Iterable[VideoSource] | None = None,
-                 *, rng: random.Random | None = None):
+    def __init__(
+        self, providers: Iterable[VideoSource] | None = None, *, rng: random.Random | None = None
+    ):
         self._providers: dict[str, VideoSource] = {}
         self._order: list[str] = []
         self._health: dict[str, SourceHealth] = {}
@@ -149,8 +154,7 @@ class VideoRegistry:
     def order(self) -> list[str]:
         return [key for key in self._order if key in self._providers]
 
-    def ordered_keys(self, *, by_speed: bool = False,
-                     enabled_only: bool = True) -> list[str]:
+    def ordered_keys(self, *, by_speed: bool = False, enabled_only: bool = True) -> list[str]:
         """源的最终顺序：默认**原样返回用户顺序**，`by_speed=True` 时按评分重排。
 
         - 用户顺序 = 「源设置」里上下移动出来的顺序（`SETTING_ORDER`）；
@@ -288,9 +292,13 @@ class VideoRegistry:
 
     # ---------- 测速（v3-e，计划 3.3.5） ----------
 
-    def select_speed_test_keys(self, keys: Iterable[str] | None = None, *,
-                               limit: int = SPEED_TEST_MAX_SOURCES,
-                               top: int = SPEED_TEST_TOP_SOURCES) -> list[str]:
+    def select_speed_test_keys(
+        self,
+        keys: Iterable[str] | None = None,
+        *,
+        limit: int = SPEED_TEST_MAX_SOURCES,
+        top: int = SPEED_TEST_TOP_SOURCES,
+    ) -> list[str]:
         """挑出要测的源：**用户顺序最靠前的 `top` 个 + 其余随机补足 `limit` 个**。
 
         这是计划里写的 LunaTV-EE 口径（权重最高前 5 + 剩余随机 15）。
@@ -315,12 +323,17 @@ class VideoRegistry:
         picked = set(chosen)
         return [key for key in ordered if key in picked]
 
-    def measure_sources(self, keys: Iterable[str] | None = None, *,
-                        concurrency: int = SPEED_TEST_CONCURRENCY,
-                        limit: int = SPEED_TEST_MAX_SOURCES,
-                        keyword: str = DEFAULT_PROBE_KEYWORD,
-                        timeout: float = PROBE_TIMEOUT,
-                        cancel=None, on_progress: Callable | None = None) -> List[SpeedResult]:
+    def measure_sources(
+        self,
+        keys: Iterable[str] | None = None,
+        *,
+        concurrency: int = SPEED_TEST_CONCURRENCY,
+        limit: int = SPEED_TEST_MAX_SOURCES,
+        keyword: str = DEFAULT_PROBE_KEYWORD,
+        timeout: float = PROBE_TIMEOUT,
+        cancel=None,
+        on_progress: Callable | None = None,
+    ) -> List[SpeedResult]:
         """批量测速：并发 `concurrency`（默认 3）、最多 `limit`（默认 20）个源。
 
         结果同时写进 `SourceHealth`（延迟进滑动窗口、吞吐与分辨率进测速字段），
@@ -353,11 +366,11 @@ class VideoRegistry:
                 if provider is None:
                     continue
                 try:
-                    result = pool.submit(self._probe_one, key, provider, keyword,
-                                         timeout, cancel).result()
+                    result = pool.submit(
+                        self._probe_one, key, provider, keyword, timeout, cancel
+                    ).result()
                 except Exception as error:  # noqa: BLE001  兜底：绝不让一个源炸掉整批
-                    result = SpeedResult(key=key, label=self._label(key),
-                                         error=str(error)[:200])
+                    result = SpeedResult(key=key, label=self._label(key), error=str(error)[:200])
                 results.append(result)
                 done += 1
                 if on_progress is not None:
@@ -366,19 +379,24 @@ class VideoRegistry:
         results.sort(key=lambda item: index.get(item.key, len(index)))
         return results
 
-    def _probe_one(self, key: str, provider: VideoSource, keyword: str,  # noqa: ANN001
-                   timeout: float, cancel) -> SpeedResult:  # noqa: ANN001
+    def _probe_one(
+        self, key: str, provider: VideoSource, keyword: str, timeout: float, cancel  # noqa: ANN001
+    ) -> SpeedResult:  # noqa: ANN001
         """单个源的测速 + 落库（在池里的工作线程上跑，所以这里可以自由阻塞）。"""
         probe: ProbeResult = probe_source(
-            provider, keyword, http=getattr(provider, "http", None),
-            timeout=timeout, cancel=cancel,
+            provider,
+            keyword,
+            http=getattr(provider, "http", None),
+            timeout=timeout,
+            cancel=cancel,
         )
         weight = self.weight_of(key)
         health = self.health(key)
         with self._health_lock:
             if probe.latency_ms > 0:
-                health.note_success(probe.latency_ms / 1000.0,
-                                    speed_mbps=probe.mbit_per_s, height=probe.height)
+                health.note_success(
+                    probe.latency_ms / 1000.0, speed_mbps=probe.mbit_per_s, height=probe.height
+                )
             elif probe.mbit_per_s > 0:
                 # 有吞吐但没拿到延迟样本（理论上不会发生）：仍算成功，只是不进延迟窗口
                 health.note_success(speed_mbps=probe.mbit_per_s, height=probe.height)
@@ -389,10 +407,16 @@ class VideoRegistry:
             health.measured_height = probe.height or health.measured_height
             score = health.health_score(weight=weight)
         return SpeedResult(
-            key=key, label=self._label(key), ok=probe.ok,
-            latency_ms=probe.latency_ms, mbit_per_s=probe.mbit_per_s,
-            height=probe.height, resolution=probe.resolution,
-            weight=weight, score=score, error=probe.error,
+            key=key,
+            label=self._label(key),
+            ok=probe.ok,
+            latency_ms=probe.latency_ms,
+            mbit_per_s=probe.mbit_per_s,
+            height=probe.height,
+            resolution=probe.resolution,
+            weight=weight,
+            score=score,
+            error=probe.error,
         )
 
     @staticmethod
@@ -400,13 +424,14 @@ class VideoRegistry:
         """进度回调：`on_progress(result, done, total)`；回调异常不影响测速本身。"""
         try:
             on_progress(result, done, total)
-        except Exception:  # noqa: BLE001  界面槽函数出问题不该毁掉后台任务
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("registry 中的可选步骤", error)
 
     # ---------- 搜索 ----------
 
-    def search_one(self, key: str, keyword: str, kind: str = "all", limit: int = 30,
-                   page: int = 1) -> List[RemoteVideo]:
+    def search_one(
+        self, key: str, keyword: str, kind: str = "all", limit: int = 30, page: int = 1
+    ) -> List[RemoteVideo]:
         provider = self.require(key)
         provider.require_available()
         started = time.monotonic()
@@ -419,13 +444,18 @@ class VideoRegistry:
         self.record_success(key, latency=time.monotonic() - started)
         return videos
 
-    def search_all(self, keyword: str, kind: str = "all", limit: int = 20,
-                   sources: Iterable[str] | None = None,
-                   include_degraded: bool = False,
-                   page: int = 1,
-                   per_source_timeout: float | None = DEFAULT_SEARCH_TIMEOUT,
-                   on_partial=None, workers: int | None = None,
-                   ) -> tuple[List[RemoteVideo], List[str]]:
+    def search_all(
+        self,
+        keyword: str,
+        kind: str = "all",
+        limit: int = 20,
+        sources: Iterable[str] | None = None,
+        include_degraded: bool = False,
+        page: int = 1,
+        per_source_timeout: float | None = DEFAULT_SEARCH_TIMEOUT,
+        on_partial=None,
+        workers: int | None = None,
+    ) -> tuple[List[RemoteVideo], List[str]]:
         """跨源搜索：返回 (结果, 错误说明列表)。
 
         默认跳过被熔断的源；显式指定 sources 时按指定来（忽略熔断）。
@@ -451,9 +481,12 @@ class VideoRegistry:
             # 直链类源只在「关键词本身就是一个地址」时才参与聚合，
             # 否则每次搜索都会多出一条「请输入 http(s):// 开头的地址」的噪音错误
             keyword_is_url = (keyword or "").strip().lower().startswith(("http://", "https://"))
-            chosen = [key for key in self.ordered_keys(by_speed=self._sort_by_speed)
-                      if (self._providers[key].supports_keyword_search() or keyword_is_url)
-                      and (include_degraded or not self.health(key).is_degraded(now))]
+            chosen = [
+                key
+                for key in self.ordered_keys(by_speed=self._sort_by_speed)
+                if (self._providers[key].supports_keyword_search() or keyword_is_url)
+                and (include_degraded or not self.health(key).is_degraded(now))
+            ]
         else:
             chosen = [key for key in sources if key in self._providers]
 
@@ -491,10 +524,8 @@ class VideoRegistry:
         # 才放弃）会把我们已经算好的结果**再拖回去**。实测：9 秒预算判定完成、
         # 但 `with` 退出时又等了 84 秒，总耗时 93.8s，用户端依旧是"卡住"。
         # 这里改成显式 shutdown(wait=False)：线程自己在后台收尾，调用方立刻拿到结果。
-        pool = ThreadPoolExecutor(max_workers=max(1, pool_size),
-                                  thread_name_prefix="video-search")
-        futures = {pool.submit(_run, key, provider): key
-                   for _position, key, provider in runnable}
+        pool = ThreadPoolExecutor(max_workers=max(1, pool_size), thread_name_prefix="video-search")
+        futures = {pool.submit(_run, key, provider): key for _position, key, provider in runnable}
         try:
             for future in as_completed(futures, timeout=budget if budget > 0 else None):
                 key = futures[future]
@@ -505,8 +536,13 @@ class VideoRegistry:
                     slot[key] = ([], f"{label}：{error}")
                 done += 1
                 if on_partial is not None:
-                    _safe_partial(on_partial, done, len(runnable),
-                                  self._merge(slot, runnable), self._partial_errors(slot))
+                    _safe_partial(
+                        on_partial,
+                        done,
+                        len(runnable),
+                        self._merge(slot, runnable),
+                        self._partial_errors(slot),
+                    )
         except FuturesTimeoutError:
             # 超预算：还没回来的源记一次失败并**直接放弃**（不 join，避免又被拖住）
             for future, key in futures.items():
@@ -514,14 +550,21 @@ class VideoRegistry:
                     continue
                 timed_out.append(key)
                 label = getattr(self._providers.get(key), "label", key)
-                message = (f"{label}：搜索超过 {budget:g} 秒仍未返回，已跳过"
-                           "（该源可能不可达；可在「源设置」里关掉或换地址）")
+                message = (
+                    f"{label}：搜索超过 {budget:g} 秒仍未返回，已跳过"
+                    "（该源可能不可达；可在「源设置」里关掉或换地址）"
+                )
                 slot[key] = ([], message)
                 self.record_failure(key, message)
                 done += 1
             if on_partial is not None:
-                _safe_partial(on_partial, done, len(runnable),
-                              self._merge(slot, runnable), self._partial_errors(slot))
+                _safe_partial(
+                    on_partial,
+                    done,
+                    len(runnable),
+                    self._merge(slot, runnable),
+                    self._partial_errors(slot),
+                )
         finally:
             # 不等待未完成的源；同时取消还没开始跑的（队列里排队的那些）
             pool.shutdown(wait=False, cancel_futures=True)
@@ -593,7 +636,12 @@ class VideoRegistry:
         provider = self._providers.get(video.source)
         target_episode = episode or (video.episodes[0] if video.episodes else None)
 
-        if target_episode is None and provider is not None and provider.available() and video.source not in excluded:
+        if (
+            target_episode is None
+            and provider is not None
+            and provider.available()
+            and video.source not in excluded
+        ):
             # 还没拉详情：先补分集再解析（用户直接点「播放」的场景）
             try:
                 detailed = provider.detail(video)
@@ -604,15 +652,24 @@ class VideoRegistry:
                 primary_error = str(error)
                 self.record_failure(video.source, error)
 
-        if target_episode is not None and provider is not None and provider.available() and video.source not in excluded:
+        if (
+            target_episode is not None
+            and provider is not None
+            and provider.available()
+            and video.source not in excluded
+        ):
             try:
                 url = provider.play_url(video, target_episode, quality)
                 if not url:
                     raise SourceError("该集没有可用的播放地址")
                 self.record_success(provider.key)
                 return ResolvedPlay(
-                    url=url, source=provider.key, video=video, episode=target_episode,
-                    quality=quality, is_hls=looks_like_hls(url),
+                    url=url,
+                    source=provider.key,
+                    video=video,
+                    episode=target_episode,
+                    quality=quality,
+                    is_hls=looks_like_hls(url),
                     referer=self._referer_of(provider, url),
                 )
             except SourceError as error:
@@ -628,12 +685,18 @@ class VideoRegistry:
             raise SourceError(primary_error or "该条目没有可用的播放地址")
 
         candidate_keys = [
-            key for key in (sources if sources is not None
-                            else self.ordered_keys(by_speed=self._sort_by_speed))
-            if key != video.source and key in self._providers
-            and self.is_enabled(key) and key not in excluded
+            key
+            for key in (
+                sources if sources is not None else self.ordered_keys(by_speed=self._sort_by_speed)
+            )
+            if key != video.source
+            and key in self._providers
+            and self.is_enabled(key)
+            and key not in excluded
         ]
-        reasons: list[str] = [f"{self._label(video.source)}：{primary_error}"] if primary_error else []
+        reasons: list[str] = (
+            [f"{self._label(video.source)}：{primary_error}"] if primary_error else []
+        )
         for key in candidate_keys:
             candidate_source = self._providers[key]
             if not candidate_source.available():
@@ -670,8 +733,12 @@ class VideoRegistry:
                 continue
             self.record_success(key)
             return ResolvedPlay(
-                url=url, source=key, video=matched, episode=switched_episode,
-                quality=None, is_hls=looks_like_hls(url),
+                url=url,
+                source=key,
+                video=matched,
+                episode=switched_episode,
+                quality=None,
+                is_hls=looks_like_hls(url),
                 switched_from=video.source,
                 note=f"{self._label(video.source)} 不可用，已改用{self._label(key)}",
                 referer=self._referer_of(candidate_source, url),

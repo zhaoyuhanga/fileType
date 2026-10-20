@@ -1,4 +1,4 @@
-# 界面设计规范（UI Guide，v1.0.0）
+# 界面设计规范（UI Guide）
 
 > 令牌唯一来源：`src/modu_workbench/ui_kit/tokens.py`
 > QSS 生成：`src/modu_workbench/ui_kit/theme.py`

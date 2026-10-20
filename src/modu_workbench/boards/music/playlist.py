@@ -1,4 +1,5 @@
 """墨软乐库：歌单页（歌单/收藏/分类管理，支持顺序、循环、随机播放与待下载项）。"""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -38,6 +39,7 @@ from .widgets import (
     row_track_id,
     selected_track_ids,
 )
+from modu_workbench.core.platform.logging import swallow
 
 # 曲目表列序（用于「收藏」列点击）
 FAVORITE_COLUMN = 5
@@ -46,7 +48,7 @@ FAVORITE_COLUMN = 5
 class MusicPlaylistPage(QWidget):
     """歌单管理：左侧歌单列表，右侧曲目与「待下载」在线曲目。"""
 
-    playRequested = Signal(list, int, str)   # (tracks, start_index, mode)
+    playRequested = Signal(list, int, str)  # (tracks, start_index, mode)
     libraryChanged = Signal()
 
     def _cancel_current(self) -> None:
@@ -54,15 +56,17 @@ class MusicPlaylistPage(QWidget):
         if getattr(self, "_download", None) is not None:
             try:
                 self._download.cancel()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                swallow("playlist 中的可选步骤", error)
 
     # ------------------------------------------------------------------ 状态
 
     @property
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
-        return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
+        return (
+            self._task._label if self._task is not None else self._fallback_status
+        )  # noqa: SLF001
 
     def _note_fallback(self, message: str) -> None:
         """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
@@ -76,7 +80,7 @@ class MusicPlaylistPage(QWidget):
             if done or total:
                 self._task.report(message, done, total)
             else:
-                self._task.note(message)      # 纯信息：不显示进度条/取消
+                self._task.note(message)  # 纯信息：不显示进度条/取消
 
     def _busy(self, message: str) -> None:
         """进行中提示（搜索/导入/解析这类未知时长）。"""
@@ -92,14 +96,25 @@ class MusicPlaylistPage(QWidget):
 
     def _set_progress(self, value: int) -> None:
         """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
-        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
-            self._task._progress if self._task is not None else None)     # noqa: SLF001
+        bar = (
+            self._task_bar._progress
+            if hasattr(self, "_task_bar")
+            else (self._task._progress if self._task is not None else None)
+        )  # noqa: SLF001
         if bar is not None:
             bar.setRange(0, 100)
             bar.setValue(int(value))
 
-    def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
-                 toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):
+    def __init__(
+        self,
+        library: MusicLibrary,
+        storage: MusicStorage,
+        player: MusicPlayer,
+        toaster: Toaster,
+        parent: QWidget | None = None,
+        *,
+        task_bar=None,
+    ):
         super().__init__(parent)
         self._library = library
         self._storage = storage
@@ -135,8 +150,11 @@ class MusicPlaylistPage(QWidget):
         self._list.currentRowChanged.connect(self._on_playlist_changed)
         left_layout.addWidget(self._list, 1)
         left_buttons = QHBoxLayout()
-        for label, handler in (("新建", self._create_playlist), ("重命名", self._rename_playlist),
-                               ("删除", self._delete_playlist)):
+        for label, handler in (
+            ("新建", self._create_playlist),
+            ("重命名", self._rename_playlist),
+            ("删除", self._delete_playlist),
+        ):
             button = QPushButton(label)
             button.clicked.connect(handler)
             left_buttons.addWidget(button)
@@ -151,12 +169,15 @@ class MusicPlaylistPage(QWidget):
         self._header.setObjectName("sectionTitle")
         right_layout.addWidget(self._header)
 
-        self._table = configure_table(QTableWidget(), ["曲名", "歌手", "专辑", "时长", "格式", "收藏"])
+        self._table = configure_table(
+            QTableWidget(), ["曲名", "歌手", "专辑", "时长", "格式", "收藏"]
+        )
         self._table.doubleClicked.connect(lambda _i: self._play(0, "order"))
         self._table.itemClicked.connect(self._on_track_clicked)
         attach_context_menu(self._table, self._row_menu)
         self._empty = EmptyState(
-            "📁", "这个歌单还是空的",
+            "📁",
+            "这个歌单还是空的",
             "从「搜索下载」或「我的音乐」把曲目加入歌单",
         )
         self._empty.setMaximumHeight(240)
@@ -196,7 +217,7 @@ class MusicPlaylistPage(QWidget):
         self._status_label = QLabel("就绪。")
         self._status_label.setObjectName("readerStatus")
         self._status_label.setWordWrap(True)
-        self._status_label.setVisible(False)            # 状态统一显示在板块任务条
+        self._status_label.setVisible(False)  # 状态统一显示在板块任务条
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -212,7 +233,9 @@ class MusicPlaylistPage(QWidget):
         self._list.blockSignals(True)
         self._list.clear()
         for playlist in self._storage.list_playlists():
-            label = f"{'★ ' if playlist.is_favorite else '♪ '}{playlist.name}（{playlist.track_count}"
+            label = (
+                f"{'★ ' if playlist.is_favorite else '♪ '}{playlist.name}（{playlist.track_count}"
+            )
             if playlist.pending_count:
                 label += f"+{playlist.pending_count}"
             label += "）"
@@ -253,8 +276,12 @@ class MusicPlaylistPage(QWidget):
         self._empty.setVisible(not self._tracks)
         self._table.setVisible(bool(self._tracks))
         for row, track in enumerate(self._tracks):
-            fill_track_row(self._table, row, track,
-                           ["title", "artist", "album", "duration", "format", "favorite"])
+            fill_track_row(
+                self._table,
+                row,
+                track,
+                ["title", "artist", "album", "duration", "format", "favorite"],
+            )
         remotes = self._storage.list_playlist_remotes(self._playlist_id)
         self._pending.setRowCount(len(remotes))
         for row, remote in enumerate(remotes):
@@ -352,7 +379,9 @@ class MusicPlaylistPage(QWidget):
             self._toaster.info("请先选择待下载项")
             return
         remotes = self._storage.list_playlist_remotes(self._playlist_id)
-        keys = [remotes[row].extra.get("remote_key", "") for row in sorted(rows) if row < len(remotes)]
+        keys = [
+            remotes[row].extra.get("remote_key", "") for row in sorted(rows) if row < len(remotes)
+        ]
         self._storage.remove_playlist_remotes(self._playlist_id, keys)
         self._render()
         self.libraryChanged.emit()
@@ -369,8 +398,11 @@ class MusicPlaylistPage(QWidget):
             remotes = [remotes[row] for row in sorted(rows) if row < len(remotes)]
         dest = str(music_download_dir_pref())
         self._download = DownloadWorker(
-            remotes, dest, parent=self,
-            registry=app_context.music_registry(), allow_cross_source=True,
+            remotes,
+            dest,
+            parent=self,
+            registry=app_context.music_registry(),
+            allow_cross_source=True,
         )
         self._download.progressed.connect(self._on_progress)
         self._download.finishedAll.connect(self._on_downloaded)
@@ -389,7 +421,9 @@ class MusicPlaylistPage(QWidget):
         imported = self._library.import_download_results(ok)
         if self._playlist_id is not None and imported:
             self._storage.add_to_playlist(self._playlist_id, [t.id for t in imported])
-            keys = [r.track.extra.get("remote_key", f"{r.track.source}:{r.track.remote_id}") for r in ok]
+            keys = [
+                r.track.extra.get("remote_key", f"{r.track.source}:{r.track.remote_id}") for r in ok
+            ]
             self._storage.remove_playlist_remotes(self._playlist_id, keys)
         self._set_progress(100)
         self._render()

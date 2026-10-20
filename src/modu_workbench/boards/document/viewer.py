@@ -25,6 +25,7 @@
 - 段落模式：编辑框里一行对应一个标题或正文块，按顺序写回；
 - 表格模式：按单元格写回对应表。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,6 +77,7 @@ from modu_workbench.ui_kit.settings import app_settings
 from modu_workbench.ui_kit.toast import Toaster
 
 from . import widgets as W
+from modu_workbench.core.platform.logging import swallow
 
 #: 文档区（编辑框 + 预览，可单独显示或分屏）与其它内容的分栈索引
 STACK_DOCUMENT = 0
@@ -120,8 +122,13 @@ class DocViewer(QWidget):
     statusMessage = Signal(str)
     saved = Signal(str)
 
-    def __init__(self, library: DocumentLibrary, *, task_bar: Optional[TaskBar] = None,
-                 parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        library: DocumentLibrary,
+        *,
+        task_bar: Optional[TaskBar] = None,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self._task = task_bar
         self._library = library
@@ -272,8 +279,9 @@ class DocViewer(QWidget):
         comment_row.addWidget(comment_title)
         comment_row.addStretch(1)
         add_comment = QPushButton("加/改")
-        add_comment.setToolTip("给选中大纲项（或光标所在块）加批注；"
-                               "导出 Word 时是原生批注，其它格式汇总到附录")
+        add_comment.setToolTip(
+            "给选中大纲项（或光标所在块）加批注；" "导出 Word 时是原生批注，其它格式汇总到附录"
+        )
         add_comment.clicked.connect(self._add_comment)
         comment_row.addWidget(add_comment)
         remove_comment = QPushButton("删除")
@@ -341,14 +349,17 @@ class DocViewer(QWidget):
         self._mode = self._mode_for(ir.format_key, editable=bool(spec and spec.edit))
         self._title_label.setText(ir.title or Path(ir.path).name or "未命名文档")
         self._format_label.setText(
-            f"{format_label(ir.format_key)} · {spec.capability_text() if spec else '—'}")
+            f"{format_label(ir.format_key)} · {spec.capability_text() if spec else '—'}"
+        )
         self._edit_button.setChecked(self._mode in (MODE_SOURCE, MODE_PARAGRAPH, MODE_SHEET))
         self._edit_button.setEnabled(self._mode != MODE_PREVIEW)
-        self._split_button.setEnabled(self._mode in (MODE_SOURCE, MODE_PARAGRAPH)
-                                      and ir.format_key in LIVE_PREVIEW_FORMATS)
-        self._split_button.setChecked(self._split_button.isEnabled()
-                                      and bool(self._settings.value("document/split_view", False,
-                                                                    type=bool)))
+        self._split_button.setEnabled(
+            self._mode in (MODE_SOURCE, MODE_PARAGRAPH) and ir.format_key in LIVE_PREVIEW_FORMATS
+        )
+        self._split_button.setChecked(
+            self._split_button.isEnabled()
+            and bool(self._settings.value("document/split_view", False, type=bool))
+        )
         self._hint.setText(_EDIT_HINT.get(self._mode, ""))
         self._refresh()
         self._render_outline()
@@ -388,8 +399,9 @@ class DocViewer(QWidget):
             self._stack.setCurrentIndex(STACK_SHEET)
         else:
             show_editor = editing and self._mode in (MODE_SOURCE, MODE_PARAGRAPH)
-            show_preview = (not show_editor) or (self._split_button.isChecked()
-                                                 and self._split_button.isEnabled())
+            show_preview = (not show_editor) or (
+                self._split_button.isChecked() and self._split_button.isEnabled()
+            )
             if show_editor:
                 self._editor.blockSignals(True)
                 self._editor.setPlainText(self._editor_text())
@@ -415,7 +427,8 @@ class DocViewer(QWidget):
             f"<div class='watermark'>文档较大（{len(ir.blocks)} 块 / 约 {stats['chars']} 字）："
             f"预览只渲染前 {PREVIEW_BLOCK_LIMIT} 块以保证流畅。"
             "保存、导出、美化、合并与循环美化仍按**全文**处理；"
-            "要看后面的内容可用「编辑」定位或选中左侧大纲项跳转。</div>")
+            "要看后面的内容可用「编辑」定位或选中左侧大纲项跳转。</div>"
+        )
         return banner + render_html(capped, standalone=False)
 
     def is_preview_capped(self, ir: Optional[DocumentIR] = None) -> bool:
@@ -423,8 +436,9 @@ class DocViewer(QWidget):
         target = ir or self._ir
         if target is None:
             return False
-        return (len(target.blocks) > PREVIEW_BLOCK_LIMIT
-                or target.stats()["chars"] > PREVIEW_CHAR_LIMIT)
+        return (
+            len(target.blocks) > PREVIEW_BLOCK_LIMIT or target.stats()["chars"] > PREVIEW_CHAR_LIMIT
+        )
 
     def _render_image(self) -> None:
         path = str(self._ir.metadata.get("src") or self._ir.path) if self._ir else ""
@@ -448,7 +462,8 @@ class DocViewer(QWidget):
         self._sheet.setRowCount(len(rows))
         self._sheet.setColumnCount(max(1, table.width))
         self._sheet.setHorizontalHeaderLabels(
-            [f"列{index + 1}" for index in range(max(1, table.width))])
+            [f"列{index + 1}" for index in range(max(1, table.width))]
+        )
         for row_index, row in enumerate(rows):
             for column_index, value in enumerate(row):
                 self._sheet.setItem(row_index, column_index, QTableWidgetItem(value))
@@ -500,7 +515,8 @@ class DocViewer(QWidget):
         self._meta_label.setText(
             f"块 {stats['blocks']} · 标题 {stats['headings']} · 表格 {stats['tables']} · "
             f"{stats['chars']} 字\n质量 {score.overall * 100:.0f} · 问题 {len(analysis['issues'])} 项"
-            + (f"\n警告：{self._ir.warnings[0]}" if self._ir.warnings else ""))
+            + (f"\n警告：{self._ir.warnings[0]}" if self._ir.warnings else "")
+        )
 
     # ---------------------------------------------------------------- 编辑
 
@@ -588,14 +604,16 @@ class DocViewer(QWidget):
         lines = [line.rstrip() for line in text.split("\n")]
         if self._ir.format_key == "pptx":
             return self._apply_slides(lines)
-        targets = [block for block in self._ir.blocks
-                   if block.is_textual and block.kind != "slide"]
+        targets = [block for block in self._ir.blocks if block.is_textual and block.kind != "slide"]
         content = [line for line in lines if line.strip()]
         if len(content) != len(targets):
             tables = [block for block in self._ir.blocks if block.is_table]
             self._ir.blocks = parse_plain_text("\n\n".join(content)).blocks + tables
-            W.note(self._task, f"段落数与原文不一致（{len(content)} vs {len(targets)}）："
-                               "已按新文本重排正文，表格保持不变")
+            W.note(
+                self._task,
+                f"段落数与原文不一致（{len(content)} vs {len(targets)}）："
+                "已按新文本重排正文，表格保持不变",
+            )
             return True
         changed = False
         for block, line in zip(targets, content):
@@ -697,7 +715,8 @@ class DocViewer(QWidget):
             parsed = self._preview_ir(text)
         except ParseError as error:
             self._preview.setHtml(
-                f"<p style='color:#b3261e'>预览失败（内容有语法错误）：{error}</p>")
+                f"<p style='color:#b3261e'>预览失败（内容有语法错误）：{error}</p>"
+            )
             return
         self._preview.setHtml(self._preview_html(parsed))
 
@@ -716,8 +735,9 @@ class DocViewer(QWidget):
         if key == "html":
             return parse_html(text, title=self._ir.title)
         if key in ("json", "xml", "yaml", "ini"):
-            return DocumentIR(blocks=[Block(kind=BLOCK_CODE, text=text)], title=self._ir.title,
-                              format_key=key)
+            return DocumentIR(
+                blocks=[Block(kind=BLOCK_CODE, text=text)], title=self._ir.title, format_key=key
+            )
         return parse_plain_text(text, title=self._ir.title)
 
     def current_ir(self) -> Optional[DocumentIR]:
@@ -810,12 +830,16 @@ class DocViewer(QWidget):
             return
         block = self._ir.blocks[index]
         existing = block.note or ""
-        text = W.ask_text(self, "批注", f"批注内容（锚点：{(block.text or '').strip()[:20]}）",
-                          existing)
+        text = W.ask_text(
+            self, "批注", f"批注内容（锚点：{(block.text or '').strip()[:20]}）", existing
+        )
         if not text:
             return
-        author = str(block.meta.get("comment_author") or "") or W.ask_text(
-            self, "批注人", "批注人（可留空）", "local") or "local"
+        author = (
+            str(block.meta.get("comment_author") or "")
+            or W.ask_text(self, "批注人", "批注人（可留空）", "local")
+            or "local"
+        )
         self._library.add_comment(self._ir, index, text, author=author)
         self._render_comments()
         self._set_dirty(True)
@@ -828,7 +852,8 @@ class DocViewer(QWidget):
         if self._ir is None:
             return
         item = self._comment_list.currentItem() or (
-            self._comment_list.item(0) if self._comment_list.count() else None)
+            self._comment_list.item(0) if self._comment_list.count() else None
+        )
         if item is None:
             self._toaster.info("当前文档没有批注")
             return
@@ -886,8 +911,11 @@ class DocViewer(QWidget):
     def save(self) -> None:
         if self._ir is None:
             return
-        if not self._edit_button.isChecked() and self._mode in (MODE_SOURCE, MODE_PARAGRAPH,
-                                                                MODE_SHEET):
+        if not self._edit_button.isChecked() and self._mode in (
+            MODE_SOURCE,
+            MODE_PARAGRAPH,
+            MODE_SHEET,
+        ):
             self._edit_button.setChecked(True)
         self._apply_editor()
         self._set_dirty(False)
@@ -978,15 +1006,17 @@ class DocViewer(QWidget):
                     image = pages.image(index, area.size())
                     if image is None or image.isNull():
                         continue
-                    image = image.scaled(area.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation)
+                    image = image.scaled(
+                        area.size(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
                     painter.drawImage(0, 0, image)
             finally:
                 painter.end()
         finally:
             pages.close()
         return True
-
 
     # ---------------------------------------------------------------- 查找替换
 
@@ -1028,8 +1058,12 @@ class DocViewer(QWidget):
             return
         replacement = self._replace_input.text()
         try:
-            hits = ir.replace_text(needle, replacement, regex=self._regex_box.isChecked(),
-                                   count=0 if replace_all else 1)
+            hits = ir.replace_text(
+                needle,
+                replacement,
+                regex=self._regex_box.isChecked(),
+                count=0 if replace_all else 1,
+            )
         except Exception as error:  # noqa: BLE001
             self._toaster.error(f"替换失败：{error}")
             return
@@ -1103,7 +1137,8 @@ class DocViewer(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._dirty:
             answer = QMessageBox.question(
-                self, "放弃未保存的修改？", "当前有未保存的编辑内容，确定关闭吗？")
+                self, "放弃未保存的修改？", "当前有未保存的编辑内容，确定关闭吗？"
+            )
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
@@ -1129,7 +1164,7 @@ class _PdfPages:
         self._open()
 
     def _open(self) -> None:
-        try:                                   # 优先 PyMuPDF（装了的话，渲染质量最好）
+        try:  # 优先 PyMuPDF（装了的话，渲染质量最好）
             import fitz
 
             self._fitz = fitz
@@ -1158,10 +1193,15 @@ class _PdfPages:
 
         if self._fitz_doc is not None and self._fitz is not None:
             page = self._fitz_doc.load_page(index)
-            scale = self._resolution / 72.0                 # PDF 点 → 设备像素
+            scale = self._resolution / 72.0  # PDF 点 → 设备像素
             pixmap = page.get_pixmap(matrix=self._fitz.Matrix(scale, scale), alpha=False)
-            return QImage(pixmap.samples, pixmap.width, pixmap.height, pixmap.stride,
-                          QImage.Format.Format_RGB888).copy()
+            return QImage(
+                pixmap.samples,
+                pixmap.width,
+                pixmap.height,
+                pixmap.stride,
+                QImage.Format.Format_RGB888,
+            ).copy()
         if self._qt_doc is not None:
             return self._qt_doc.render(index, size)
         return None
@@ -1170,8 +1210,8 @@ class _PdfPages:
         if self._fitz_doc is not None:
             try:
                 self._fitz_doc.close()
-            except Exception:  # noqa: BLE001  关闭失败不影响打印结果
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
             self._fitz_doc = None
         self._qt_doc = None
 

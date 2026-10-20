@@ -12,6 +12,7 @@
 主从、对比。七种模式都会产出 `MergeReport`（差异报告 + 摘要 + 冲突处理说明），
 并且**标注哪些内容由 AI 生成或修改**（验收标准第 5 条）。
 """
+
 from __future__ import annotations
 
 import difflib
@@ -43,6 +44,7 @@ from .models import (
     REVISION_MODIFIED,
     TableData,
 )
+from modu_workbench.core.platform.logging import swallow
 
 #: 过渡段模板（没有 AI 时用它生成章节衔接）
 TRANSITION_TEMPLATE = "以下内容来自《{title}》。"
@@ -56,8 +58,13 @@ _CITATION_RE = re.compile(r"[\[【]\s*(\d{1,3})\s*[\]】]")
 # ---------------------------------------------------------------- 入口
 
 
-def merge_documents(main: DocumentIR, other: DocumentIR, options: MergeOptions | None = None, *,
-                    chat: Optional[Callable[[list[dict]], str]] = None) -> MergeResult:
+def merge_documents(
+    main: DocumentIR,
+    other: DocumentIR,
+    options: MergeOptions | None = None,
+    *,
+    chat: Optional[Callable[[list[dict]], str]] = None,
+) -> MergeResult:
     """把 `other` 合并进 `main`，返回（合并后的 IR, 差异报告）。
 
     `chat` 是大模型对话回调（`lambda messages: text`）：给了就走 AI 语义增强
@@ -92,8 +99,7 @@ def merge_documents(main: DocumentIR, other: DocumentIR, options: MergeOptions |
         report.changes.extend(changes)
 
     if options.dedupe:
-        removed, changes = dedupe_blocks(merged, options.dedupe_threshold,
-                                         mark_ai=options.mark_ai)
+        removed, changes = dedupe_blocks(merged, options.dedupe_threshold, mark_ai=options.mark_ai)
         report.deduped = removed
         report.changes.extend(changes)
 
@@ -119,9 +125,14 @@ def merge_documents(main: DocumentIR, other: DocumentIR, options: MergeOptions |
     if options.add_summary:
         report.summary = build_summary(merged, chat=chat)
         if report.summary:
-            report.changes.append(Change(
-                "合并摘要", "文档开头", report.summary.splitlines()[0][:60],
-                ai_generated=bool(chat)))
+            report.changes.append(
+                Change(
+                    "合并摘要",
+                    "文档开头",
+                    report.summary.splitlines()[0][:60],
+                    ai_generated=bool(chat),
+                )
+            )
 
     report.diff = quality.diff_irs(main, merged)
     merged.metadata["merged_from"] = [main.path or main.title, other.path or other.title]
@@ -149,49 +160,71 @@ def _mark_blocks(blocks: Sequence[Block], *, ai: bool) -> list[Block]:
     return marked
 
 
-def _transition(other: DocumentIR, options: MergeOptions,
-                chat: Optional[Callable[[list[dict]], str]]) -> Block:
+def _transition(
+    other: DocumentIR, options: MergeOptions, chat: Optional[Callable[[list[dict]], str]]
+) -> Block:
     """过渡段：能用 AI 就用 AI 写一句衔接，否则用模板句。"""
     title = other.title or other.path or "副文档"
     if chat is not None:
         try:
-            text = chat([
-                {"role": "system", "content": "你是中文排版助手，只输出一句 30 字以内的过渡句。"},
-                {"role": "user", "content": f"主文档《{{main}}》后面要接《{title}》，写一句过渡句。"},
-            ]).strip()
+            text = chat(
+                [
+                    {
+                        "role": "system",
+                        "content": "你是中文排版助手，只输出一句 30 字以内的过渡句。",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"主文档《{{main}}》后面要接《{title}》，写一句过渡句。",
+                    },
+                ]
+            ).strip()
             if text:
                 return _paragraph(text, ai=True, revision=REVISION_INSERTED)
-        except Exception:  # noqa: BLE001  AI 失败就退回模板句，合并不能因此中断
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("merge 中的可选步骤", error)
     return _paragraph(TRANSITION_TEMPLATE.format(title=title), ai=False, revision=REVISION_INSERTED)
 
 
-def _merge_append(main: DocumentIR, other: DocumentIR, options: MergeOptions,
-                  report: MergeReport,
-                  chat: Optional[Callable[[list[dict]], str]] = None) -> None:
+def _merge_append(
+    main: DocumentIR,
+    other: DocumentIR,
+    options: MergeOptions,
+    report: MergeReport,
+    chat: Optional[Callable[[list[dict]], str]] = None,
+) -> None:
     if options.keep_revisions and options.add_transition:
         transition = _transition(other, options, chat)
         main.blocks.append(transition)
-        report.changes.append(Change(
-            "过渡段", "副文档前", transition.text,
-            ai_generated=transition.ai_generated))
+        report.changes.append(
+            Change("过渡段", "副文档前", transition.text, ai_generated=transition.ai_generated)
+        )
     main.blocks.append(Block(kind=BLOCK_PAGE_BREAK))
     if other.title and not any(block.text.strip() == other.title for block in main.headings()):
-        main.blocks.append(Block(kind=BLOCK_HEADING, text=other.title, level=1,
-                                 revision=REVISION_INSERTED))
+        main.blocks.append(
+            Block(kind=BLOCK_HEADING, text=other.title, level=1, revision=REVISION_INSERTED)
+        )
     main.blocks.extend(_mark_blocks(other.blocks, ai=False))
-    report.changes.append(Change(
-        "追加合并", "主文档末尾",
-        f"已追加 {len(other.blocks)} 个块（来自《{other.title or other.path}》）"))
+    report.changes.append(
+        Change(
+            "追加合并",
+            "主文档末尾",
+            f"已追加 {len(other.blocks)} 个块（来自《{other.title or other.path}》）",
+        )
+    )
 
 
 def _heading_level(block: Block) -> int:
     return max(1, min(6, block.level or 1))
 
 
-def _merge_section(main: DocumentIR, other: DocumentIR, options: MergeOptions,
-                   report: MergeReport,
-                   chat: Optional[Callable[[list[dict]], str]] = None) -> None:
+def _merge_section(
+    main: DocumentIR,
+    other: DocumentIR,
+    options: MergeOptions,
+    report: MergeReport,
+    chat: Optional[Callable[[list[dict]], str]] = None,
+) -> None:
     """章节合并：插到指定标题所在章节的末尾；找不到标题就追加并记冲突。"""
     title = (options.section_title or "").strip()
     insert_at = -1
@@ -205,7 +238,9 @@ def _merge_section(main: DocumentIR, other: DocumentIR, options: MergeOptions,
     if insert_at < 0:
         report.conflicts.append(
             f"没有找到章节「{title}」：已改为追加到文档末尾（可先在主文档里补一个该标题）"
-            if title else "没有指定章节标题：已追加到文档末尾")
+            if title
+            else "没有指定章节标题：已追加到文档末尾"
+        )
         _merge_append(main, other, options, report, chat)
         return
     # 章节末尾 = 下一个同级或更高级标题之前
@@ -219,30 +254,55 @@ def _merge_section(main: DocumentIR, other: DocumentIR, options: MergeOptions,
     if options.add_transition:
         inserted.append(_transition(other, options, chat))
     if other.title:
-        inserted.append(Block(kind=BLOCK_HEADING, text=other.title, level=min(6, level + 1),
-                              revision=REVISION_INSERTED))
+        inserted.append(
+            Block(
+                kind=BLOCK_HEADING,
+                text=other.title,
+                level=min(6, level + 1),
+                revision=REVISION_INSERTED,
+            )
+        )
     inserted.extend(_mark_blocks(other.blocks, ai=False))
     for offset, block in enumerate(inserted):
         main.blocks.insert(end + offset, block)
-    report.changes.append(Change(
-        "章节合并", f"章节「{title}」末尾",
-        f"已插入 {len(inserted)} 个块（来自《{other.title or other.path}》）"))
+    report.changes.append(
+        Change(
+            "章节合并",
+            f"章节「{title}」末尾",
+            f"已插入 {len(inserted)} 个块（来自《{other.title or other.path}》）",
+        )
+    )
 
 
-def _merge_slave(main: DocumentIR, other: DocumentIR, options: MergeOptions,
-                 report: MergeReport) -> None:
+def _merge_slave(
+    main: DocumentIR, other: DocumentIR, options: MergeOptions, report: MergeReport
+) -> None:
     main.blocks.append(Block(kind=BLOCK_PAGE_BREAK))
-    main.blocks.append(Block(
-        kind=BLOCK_HEADING, text=APPENDIX_TEMPLATE.format(title=other.title or other.path),
-        level=1, revision=REVISION_INSERTED))
+    main.blocks.append(
+        Block(
+            kind=BLOCK_HEADING,
+            text=APPENDIX_TEMPLATE.format(title=other.title or other.path),
+            level=1,
+            revision=REVISION_INSERTED,
+        )
+    )
     main.blocks.extend(_mark_blocks(other.blocks, ai=False))
-    report.changes.append(Change(
-        "主从合并", "附件区",
-        f"副文档《{other.title or other.path}》已作为附件并入（{len(other.blocks)} 个块）"))
+    report.changes.append(
+        Change(
+            "主从合并",
+            "附件区",
+            f"副文档《{other.title or other.path}》已作为附件并入（{len(other.blocks)} 个块）",
+        )
+    )
 
 
-def _merge_diff(main: DocumentIR, other: DocumentIR, options: MergeOptions,
-                report: MergeReport, original: DocumentIR) -> None:
+def _merge_diff(
+    main: DocumentIR,
+    other: DocumentIR,
+    options: MergeOptions,
+    report: MergeReport,
+    original: DocumentIR,
+) -> None:
     """对比合并：主文档保留，副文档的差异逐条插入并标注为修订。"""
     lines = quality.diff_irs(original, other)
     merged_blocks: list[Block] = []
@@ -267,31 +327,44 @@ def _merge_diff(main: DocumentIR, other: DocumentIR, options: MergeOptions,
         if not text.strip():
             continue
         prefix = "【修订】" if line.kind == "changed" else "【新增】"
-        block = Block(kind=BLOCK_PARAGRAPH, text=f"{prefix}{text}",
-                      revision=REVISION_INSERTED, ai_generated=False,
-                      meta={"diff": line.kind, "before": line.left})
+        block = Block(
+            kind=BLOCK_PARAGRAPH,
+            text=f"{prefix}{text}",
+            revision=REVISION_INSERTED,
+            ai_generated=False,
+            meta={"diff": line.kind, "before": line.left},
+        )
         if line.kind == "changed" and line.left:
             block.meta["before"] = line.left
         merged_blocks.append(block)
         added += 1
     main.blocks = merged_blocks
-    report.changes.append(Change(
-        "对比合并", "整篇",
-        f"保留主文档正文，插入 {added} 处副文档差异（标注为【新增】/【修订】）"))
+    report.changes.append(
+        Change(
+            "对比合并",
+            "整篇",
+            f"保留主文档正文，插入 {added} 处副文档差异（标注为【新增】/【修订】）",
+        )
+    )
 
 
 # ---------------------------------------------------------------- 表格合并
 
 
-def _merge_tables(main: DocumentIR, other: DocumentIR, options: MergeOptions,
-                  report: MergeReport,
-                  chat: Optional[Callable[[list[dict]], str]] = None) -> None:
+def _merge_tables(
+    main: DocumentIR,
+    other: DocumentIR,
+    options: MergeOptions,
+    report: MergeReport,
+    chat: Optional[Callable[[list[dict]], str]] = None,
+) -> None:
     main_table = main.first_table()
     other_table = other.first_table()
     if main_table is None or other_table is None:
         report.conflicts.append(
             "表格合并需要两边都有表格：已退化为追加合并"
-            + ("（主文档没有表格）" if main_table is None else "（副文档没有表格）"))
+            + ("（主文档没有表格）" if main_table is None else "（副文档没有表格）")
+        )
         _merge_append(main, other, options, report, chat)
         return
 
@@ -308,8 +381,9 @@ def _merge_tables(main: DocumentIR, other: DocumentIR, options: MergeOptions,
     replaced = False
     for index, block in enumerate(main.blocks):
         if block.kind == BLOCK_TABLE and block.table is not None:
-            main.blocks[index] = Block(kind=BLOCK_TABLE, table=merged,
-                                       style=dict(block.style), meta=dict(block.meta))
+            main.blocks[index] = Block(
+                kind=BLOCK_TABLE, table=merged, style=dict(block.style), meta=dict(block.meta)
+            )
             replaced = True
             break
     if not replaced:
@@ -319,7 +393,8 @@ def _merge_tables(main: DocumentIR, other: DocumentIR, options: MergeOptions,
     if other.blocks and len(other.tables()) > 1:
         report.conflicts.append(
             f"副文档有 {len(other.tables())} 张表，表格合并只处理了第一张"
-            "（其余内容未并入，可用「追加合并」保留）")
+            "（其余内容未并入，可用「追加合并」保留）"
+        )
 
 
 def merge_table_rows(main: TableData, other: TableData) -> tuple[TableData, list[str]]:
@@ -330,15 +405,19 @@ def merge_table_rows(main: TableData, other: TableData) -> tuple[TableData, list
     other_header = [cell.strip() for cell in other.header_row()]
     if merged.header and other.header and header != other_header:
         notes.append(
-            "两表表头不一致（" + "｜".join(header[:4]) + " vs " + "｜".join(other_header[:4])
-            + "）：已按列位置强行对齐，请核对")
+            "两表表头不一致（"
+            + "｜".join(header[:4])
+            + " vs "
+            + "｜".join(other_header[:4])
+            + "）：已按列位置强行对齐，请核对"
+        )
     existing = {tuple(cell.strip() for cell in row) for row in merged.rows}
     added = 0
     skipped = 0
     start = 1 if (other.header and len(other.rows) > 1) else 0
     for row in other.rows[start:]:
         padded = list(row) + [""] * (merged.width - len(row))
-        key = tuple(cell.strip() for cell in padded[:merged.width])
+        key = tuple(cell.strip() for cell in padded[: merged.width])
         if key in existing:
             skipped += 1
             continue
@@ -369,7 +448,9 @@ def merge_table_columns(main: TableData, other: TableData) -> tuple[TableData, l
     return merged, notes
 
 
-def merge_table_key(main: TableData, other: TableData, key_column: str) -> tuple[TableData, list[str]]:
+def merge_table_key(
+    main: TableData, other: TableData, key_column: str
+) -> tuple[TableData, list[str]]:
     """按主键合并：主键对齐，用副表补全主表空缺、并追加主表没有的主键行。"""
     merged = main.clone()
     notes: list[str] = []
@@ -454,13 +535,17 @@ def unify_terms(ir: DocumentIR, mapping: dict[str, str]) -> tuple[int, list[Chan
         count = ir.replace_text(old, new)
         if count:
             hits += count
-            changes.append(Change(
-                "术语统一", f"全文", f"「{old}」→「{new}」（{count} 处）", ai_generated=False))
+            changes.append(
+                Change(
+                    "术语统一", f"全文", f"「{old}」→「{new}」（{count} 处）", ai_generated=False
+                )
+            )
     return hits, changes
 
 
-def dedupe_blocks(ir: DocumentIR, threshold: float = 0.9, *,
-                  mark_ai: bool = True) -> tuple[int, list[Change]]:
+def dedupe_blocks(
+    ir: DocumentIR, threshold: float = 0.9, *, mark_ai: bool = True
+) -> tuple[int, list[Change]]:
     """语义去重：删除重复段落（先用归一化精确匹配，再用相似度）。
 
     只处理正文/列表/引用块，标题与表格保留（标题重复往往是有意为之，
@@ -488,10 +573,16 @@ def dedupe_blocks(ir: DocumentIR, threshold: float = 0.9, *,
                     break
         if duplicate:
             removed += 1
-            changes.append(Change(
-                "语义去重", f"段落「{block.text.strip()[:20]}」",
-                "与前面的段落重复，已删除", ai_generated=mark_ai,
-                before=block.text, after=""))
+            changes.append(
+                Change(
+                    "语义去重",
+                    f"段落「{block.text.strip()[:20]}」",
+                    "与前面的段落重复，已删除",
+                    ai_generated=mark_ai,
+                    before=block.text,
+                    after="",
+                )
+            )
             continue
         normalized.append(text)
         kept.append(block)
@@ -500,23 +591,28 @@ def dedupe_blocks(ir: DocumentIR, threshold: float = 0.9, *,
     return removed, changes
 
 
-def build_summary(ir: DocumentIR, *, chat: Optional[Callable[[list[dict]], str]] = None,
-                  max_items: int = 8) -> str:
+def build_summary(
+    ir: DocumentIR, *, chat: Optional[Callable[[list[dict]], str]] = None, max_items: int = 8
+) -> str:
     """合并摘要：有 AI 用 AI，没有就用抽取式（每章首句）。"""
     text = ir.text(include_tables=False)
     if not text.strip():
         return ""
     if chat is not None:
         try:
-            reply = chat([
-                {"role": "system",
-                 "content": "你是文档摘要助手：输出 5 条以内的中文要点，每条一行，不要客套话。"},
-                {"role": "user", "content": text[:6000]},
-            ]).strip()
+            reply = chat(
+                [
+                    {
+                        "role": "system",
+                        "content": "你是文档摘要助手：输出 5 条以内的中文要点，每条一行，不要客套话。",
+                    },
+                    {"role": "user", "content": text[:6000]},
+                ]
+            ).strip()
             if reply:
                 return reply
-        except Exception:  # noqa: BLE001  摘要失败不影响合并结果
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("merge 中的可选步骤", error)
     return extractive_summary(ir, max_items=max_items)
 
 
@@ -526,7 +622,7 @@ def extractive_summary(ir: DocumentIR, *, max_items: int = 8) -> str:
     for index, block in enumerate(ir.blocks):
         if block.kind == BLOCK_HEADING:
             following = ""
-            for candidate in ir.blocks[index + 1:]:
+            for candidate in ir.blocks[index + 1 :]:
                 if candidate.kind == BLOCK_PARAGRAPH and candidate.text.strip():
                     following = _first_sentence(candidate.text)
                     break
@@ -537,8 +633,10 @@ def extractive_summary(ir: DocumentIR, *, max_items: int = 8) -> str:
             lines.append(_first_sentence(block.text))
         if len(lines) >= max_items:
             break
-    return "\n".join(f"{index}. {line}" for index, line in enumerate(
-        [item for item in lines if item.strip()], start=1))
+    return "\n".join(
+        f"{index}. {line}"
+        for index, line in enumerate([item for item in lines if item.strip()], start=1)
+    )
 
 
 def _first_sentence(text: str) -> str:
@@ -546,37 +644,55 @@ def _first_sentence(text: str) -> str:
     return (parts[0] if parts else text.strip())[:80]
 
 
-def conflict_scan(main: DocumentIR, other: DocumentIR,
-                  options: MergeOptions | None = None) -> list[str]:
+def conflict_scan(
+    main: DocumentIR, other: DocumentIR, options: MergeOptions | None = None
+) -> list[str]:
     """扫描四类冲突：样式、编号、引用、元数据；并说明合并时怎么处理的。"""
     options = options or MergeOptions()
     conflicts: list[str] = []
     main_style = main.styles or {}
     other_style = other.styles or {}
-    if main_style.get("font_cn") and other_style.get("font_cn") \
-            and main_style["font_cn"] != other_style["font_cn"]:
+    if (
+        main_style.get("font_cn")
+        and other_style.get("font_cn")
+        and main_style["font_cn"] != other_style["font_cn"]
+    ):
         conflicts.append(
             f"样式冲突：字体 {main_style['font_cn']} vs {other_style['font_cn']}"
-            + ("（已按主文档模板统一）" if options.unify_style else "（未统一，建议开启「风格统一」）"))
-    if main_style.get("body_size") and other_style.get("body_size") \
-            and main_style["body_size"] != other_style["body_size"]:
+            + (
+                "（已按主文档模板统一）"
+                if options.unify_style
+                else "（未统一，建议开启「风格统一」）"
+            )
+        )
+    if (
+        main_style.get("body_size")
+        and other_style.get("body_size")
+        and main_style["body_size"] != other_style["body_size"]
+    ):
         conflicts.append(
             f"字号冲突：{main_style['body_size']:g}pt vs {other_style['body_size']:g}pt"
-            + ("（已统一）" if options.unify_style else ""))
+            + ("（已统一）" if options.unify_style else "")
+        )
     main_numbers = {quality.heading_numbering_style(block.text) for block in main.headings()}
     other_numbers = {quality.heading_numbering_style(block.text) for block in other.headings()}
-    if (main_numbers - {"none"}) and (other_numbers - {"none"}) \
-            and main_numbers != other_numbers:
-        conflicts.append("编号冲突：两边标题编号风格不同，合并后已整体重排（开启「自动编号」）"
-                         if options.unify_style else "编号冲突：两边标题编号风格不同，建议开启自动编号")
+    if (main_numbers - {"none"}) and (other_numbers - {"none"}) and main_numbers != other_numbers:
+        conflicts.append(
+            "编号冲突：两边标题编号风格不同，合并后已整体重排（开启「自动编号」）"
+            if options.unify_style
+            else "编号冲突：两边标题编号风格不同，建议开启自动编号"
+        )
     main_citations = set(_CITATION_RE.findall(main.text()))
     other_citations = set(_CITATION_RE.findall(other.text()))
     if main_citations and other_citations and main_citations != other_citations:
         conflicts.append(
             f"引用冲突：引用编号不重叠（主 {len(main_citations)} 个 / 副 {len(other_citations)} 个），"
-            "合并后请核对参考文献编号")
+            "合并后请核对参考文献编号"
+        )
     if main.title and other.title and main.title != other.title:
-        conflicts.append(f"元数据冲突：标题不同（已保留主文档《{main.title}》，副标题记为《{other.title}》）")
+        conflicts.append(
+            f"元数据冲突：标题不同（已保留主文档《{main.title}》，副标题记为《{other.title}》）"
+        )
     return conflicts
 
 

@@ -18,6 +18,7 @@
 - border  : {"width":.., "color":[r,g,b], "radius":..}
 - ai      : {"kind": "auto_enhance", "params": {...}}（复用 enhance 模块）
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,6 +27,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from . import enhance as enhance_mod
 from .models import EditStep
+from modu_workbench.core.platform.logging import swallow
 
 # 滤镜预设：名称 → (显示名, 处理函数)
 FILTERS: dict[str, tuple[str, object]] = {}
@@ -69,17 +71,19 @@ def _register_filters() -> None:
         gray = ImageOps.grayscale(image).convert("RGB")
         return ImageEnhance.Contrast(gray).enhance(1.35)
 
-    FILTERS.update({
-        "none": ("原图", lambda image: image),
-        "grayscale": ("黑白", grayscale),
-        "sepia": ("复古", sepia),
-        "warm": ("暖调", warm),
-        "cool": ("冷调", cool),
-        "film": ("胶片", film),
-        "fade": ("褪色", fade),
-        "vivid": ("鲜艳", vivid),
-        "mono_high": ("硬黑白", mono_high),
-    })
+    FILTERS.update(
+        {
+            "none": ("原图", lambda image: image),
+            "grayscale": ("黑白", grayscale),
+            "sepia": ("复古", sepia),
+            "warm": ("暖调", warm),
+            "cool": ("冷调", cool),
+            "film": ("胶片", film),
+            "fade": ("褪色", fade),
+            "vivid": ("鲜艳", vivid),
+            "mono_high": ("硬黑白", mono_high),
+        }
+    )
 
 
 _register_filters()
@@ -91,7 +95,7 @@ DEFAULT_ADJUST = {
     "contrast": 1.0,
     "saturation": 1.0,
     "sharpness": 1.0,
-    "temperature": 0.0,     # -1 ~ +1，负冷正暖
+    "temperature": 0.0,  # -1 ~ +1，负冷正暖
 }
 
 ADJUST_LABELS = {
@@ -122,7 +126,7 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
                 continue
     try:
         return ImageFont.load_default(size)
-    except TypeError:      # 旧版 Pillow 无 size 参数
+    except TypeError:  # 旧版 Pillow 无 size 参数
         return ImageFont.load_default()
 
 
@@ -133,10 +137,10 @@ def _apply_temperature(image: Image.Image, temperature: float) -> Image.Image:
         "r": 1.0 + 0.10 * temperature,
         "b": 1.0 - 0.10 * temperature,
     }
-    array = enhance_mod._as_array(image)      # noqa: SLF001
+    array = enhance_mod._as_array(image)  # noqa: SLF001
     array[:, :, 0] *= factors["r"]
     array[:, :, 2] *= factors["b"]
-    return enhance_mod._as_image(array)       # noqa: SLF001
+    return enhance_mod._as_image(array)  # noqa: SLF001
 
 
 def apply_steps(image: Image.Image, steps: list[EditStep]) -> Image.Image:
@@ -179,8 +183,9 @@ def apply_step(image: Image.Image, step: EditStep) -> Image.Image:
             for _ in range(turns):
                 result = result.transpose(Image.Transpose.ROTATE_270)
             return result
-        return image.rotate(angle, expand=expand, resample=Image.Resampling.BICUBIC,
-                            fillcolor=(255, 255, 255))
+        return image.rotate(
+            angle, expand=expand, resample=Image.Resampling.BICUBIC, fillcolor=(255, 255, 255)
+        )
 
     if kind == "flip":
         axis = str(params.get("axis", "horizontal"))
@@ -259,7 +264,9 @@ def apply_step(image: Image.Image, step: EditStep) -> Image.Image:
         color = tuple(int(v) for v in (params.get("color") or [255, 0, 0]))[:3]
         width = max(1, int(params.get("width", 6)))
         erase = bool(params.get("erase", False))
-        coords = [(int(p[0]), int(p[1])) for p in points if isinstance(p, (list, tuple)) and len(p) >= 2]
+        coords = [
+            (int(p[0]), int(p[1])) for p in points if isinstance(p, (list, tuple)) and len(p) >= 2
+        ]
         if erase:
             # 橡皮：用白色覆盖（简化处理，非真实透明擦除）
             draw.line(coords, fill=(255, 255, 255), width=width, joint="curve")
@@ -279,7 +286,9 @@ def apply_step(image: Image.Image, step: EditStep) -> Image.Image:
         region = image.crop((left, top, right, bottom))
         mode = str(params.get("mode", "mosaic"))
         if mode == "blur":
-            processed = region.filter(ImageFilter.GaussianBlur(max(2, int(params.get("block", 12)) / 2)))
+            processed = region.filter(
+                ImageFilter.GaussianBlur(max(2, int(params.get("block", 12)) / 2))
+            )
         else:
             block = max(3, int(params.get("block", 12)))
             small = region.resize(
@@ -301,7 +310,9 @@ def apply_step(image: Image.Image, step: EditStep) -> Image.Image:
             # 圆角：先把四角涂成边框色（简单近似）
             draw.rounded_rectangle(
                 [0, 0, result.width - 1, result.height - 1],
-                radius=radius, outline=color, width=width,
+                radius=radius,
+                outline=color,
+                width=width,
             )
         else:
             for offset in range(width):
@@ -330,8 +341,8 @@ def render_edited(source: str | Path, steps: list[EditStep]) -> Image.Image:
     finally:
         try:
             base.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except (OSError, ValueError) as error:  # 关闭失败可忽略
+            swallow("释放资源", error)
 
 
 # 扩展名 → Pillow 格式名（Pillow 用 JPEG 而不是 JPG，TIFF 而不是 TIF）
@@ -345,7 +356,9 @@ _PIL_FORMAT = {
 }
 
 
-def export_image(image: Image.Image, target: str | Path, fmt: str = "jpg", quality: int = 92) -> Path:
+def export_image(
+    image: Image.Image, target: str | Path, fmt: str = "jpg", quality: int = 92
+) -> Path:
     """把结果写出到目标文件（按格式选择编码参数）。
 
     注意：临时文件必须带正确扩展名 —— Pillow 会按扩展名推断格式，

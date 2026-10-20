@@ -7,6 +7,7 @@
   两者缺一都返回空结果，由调用方把原因写进界面提示；
 - 不联网、不上传：OCR 全程在本机完成。
 """
+
 from __future__ import annotations
 
 import os
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from modu_workbench.core.platform.logging import swallow
 
 DEFAULT_LANG = "chi_sim+eng"
 #: 单次 OCR 的页数上限（扫描件动辄几百页，避免一次点下去卡住界面）
@@ -30,9 +32,11 @@ def find_tesseract() -> str | None:
         return on_path
     if os.name == "nt":
         for candidate in (
-            Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Tesseract-OCR/tesseract.exe",
+            Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+            / "Tesseract-OCR/tesseract.exe",
             Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Tesseract-OCR/tesseract.exe",
-            Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Tesseract-OCR/tesseract.exe",
+            Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
+            / "Tesseract-OCR/tesseract.exe",
         ):
             if candidate.is_file():
                 return str(candidate)
@@ -61,7 +65,9 @@ def ocr_image(path: str | Path, *, lang: str = "", timeout: int = 180) -> str:
     command = [engine, str(path), "stdout", "-l", lang or DEFAULT_LANG]
     try:
         proc = subprocess.run(
-            command, capture_output=True, timeout=timeout,
+            command,
+            capture_output=True,
+            timeout=timeout,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
@@ -71,7 +77,9 @@ def ocr_image(path: str | Path, *, lang: str = "", timeout: int = 180) -> str:
     return proc.stdout.decode("utf-8", "ignore").strip()
 
 
-def ocr_pdf_pages(path: str | Path, *, lang: str = "", max_pages: int = MAX_PDF_PAGES) -> list[tuple[int, str]]:
+def ocr_pdf_pages(
+    path: str | Path, *, lang: str = "", max_pages: int = MAX_PDF_PAGES
+) -> list[tuple[int, str]]:
     """扫描 PDF → [(页码, 文字)]；缺少 PyMuPDF 或 tesseract 时返回空列表。"""
     if not available() or not pdf_render_available():
         return []
@@ -100,8 +108,8 @@ def ocr_pdf_pages(path: str | Path, *, lang: str = "", max_pages: int = MAX_PDF_
     finally:
         try:
             document.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except (OSError, ValueError) as error:  # 关闭失败可忽略
+            swallow("释放资源", error)
     return results
 
 
@@ -109,9 +117,13 @@ def describe() -> str:
     """一行状态说明（设置页/提示条用）。"""
     engine = find_tesseract()
     if engine is None:
-        return "未检测到 tesseract：扫描件/图片 OCR 不可用（设置 MODU_TESSERACT 或安装 Tesseract-OCR）"
+        return (
+            "未检测到 tesseract：扫描件/图片 OCR 不可用（设置 MODU_TESSERACT 或安装 Tesseract-OCR）"
+        )
     parts = [f"tesseract：{engine}"]
-    parts.append("PDF 扫描件可直接识别" if pdf_render_available() else "PDF 需先转图片（缺 PyMuPDF）")
+    parts.append(
+        "PDF 扫描件可直接识别" if pdf_render_available() else "PDF 需先转图片（缺 PyMuPDF）"
+    )
     return "；".join(parts)
 
 

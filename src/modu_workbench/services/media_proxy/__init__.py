@@ -21,9 +21,12 @@ v1.0.x 的旧实现（已删除）有三个致命点：
     upstream.py   每主机一个 requests.Session + 分层超时/重试 + 请求头注入
     cache.py      分片磁盘缓存（LRU + 配额 + Range 语义）
     playlist.py   m3u8 清单重写 + 短时缓存 + 前 N 片预热
-    server.py     ThreadingHTTPServer 路由、流式转发、并发闸门、安全收口
+    fetch.py      上游取流 + 落缓存（预热/Range 补齐/handler 共用）
+    handler.py    HTTP 处理器：路由、流式转发、并发闸门、安全收口
+    server.py     服务生命周期 + 对外 URL API（起停、拼地址）
     stats.py      计数器（请求/命中/回源字节/延迟 P50/502 数）
 """
+
 from __future__ import annotations
 
 from .cache import SegmentCache, cache_key, get_cache, reset_cache
@@ -45,11 +48,32 @@ from .stats import ProxyStats, get_stats, reset_stats
 from .upstream import UpstreamClient, get_client, reset_client
 
 __all__ = [
-    "ProxyConfig", "ProxyStats", "SegmentCache", "UpstreamClient",
-    "cache_key", "ensure_server", "get_cache", "get_client", "get_config",
-    "get_stats", "hls_path", "hls_url", "image_url", "is_local_url",
-    "load_config", "local_base_url", "media_url", "origin", "proxy_path",
-    "reset_cache", "reset_client", "reset_config", "reset_stats",
-    "rewrite_playlist", "set_config", "shutdown_server", "stream_url",
+    "ProxyConfig",
+    "ProxyStats",
+    "SegmentCache",
+    "UpstreamClient",
+    "cache_key",
+    "ensure_server",
+    "get_cache",
+    "get_client",
+    "get_config",
+    "get_stats",
+    "hls_path",
+    "hls_url",
+    "image_url",
+    "is_local_url",
+    "load_config",
+    "local_base_url",
+    "media_url",
+    "origin",
+    "proxy_path",
+    "reset_cache",
+    "reset_client",
+    "reset_config",
+    "reset_stats",
+    "rewrite_playlist",
+    "set_config",
+    "shutdown_server",
+    "stream_url",
     "wrap_playlist",
 ]

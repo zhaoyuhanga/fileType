@@ -14,12 +14,14 @@
 - "提前停止" = 拿到元数据 + 1 个分片就走：这里只取首块（`SEGMENT_BYTES`），
   分片常常有好几 MB，下完它会让 20 个源的测速从几秒变成半分钟。
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
 
 from ..hls import parse_m3u8, resolve_url
+from modu_workbench.core.platform.logging import swallow
 
 #: 单源整体超时（秒）。计划要求 3–4s：比它长会让「测 20 个源」变成一分钟。
 PROBE_TIMEOUT = 3.5
@@ -116,8 +118,15 @@ def _call_with_timeout(function, *args, timeout: float, **kwargs):
         return function(*args, **kwargs)
 
 
-def probe_source(provider, keyword: str = DEFAULT_PROBE_KEYWORD, *, http=None,  # noqa: ANN001
-                 timeout: float = PROBE_TIMEOUT, manager=None, cancel=None) -> ProbeResult:
+def probe_source(
+    provider,
+    keyword: str = DEFAULT_PROBE_KEYWORD,
+    *,
+    http=None,  # noqa: ANN001
+    timeout: float = PROBE_TIMEOUT,
+    manager=None,
+    cancel=None,
+) -> ProbeResult:
     """测一个源：搜索（延迟）→ 首集地址 → 首个分片（吞吐）。
 
     **任何失败都写进返回值，绝不抛异常** —— 它跑在并发批次里，抛出去会毁掉整批测速。
@@ -142,8 +151,9 @@ def probe_source(provider, keyword: str = DEFAULT_PROBE_KEYWORD, *, http=None,  
     return result
 
 
-def _probe_inner(provider, keyword: str, client, deadline: float,  # noqa: ANN001
-                 result: ProbeResult, cancel) -> str:  # noqa: ANN001
+def _probe_inner(
+    provider, keyword: str, client, deadline: float, result: ProbeResult, cancel  # noqa: ANN001
+) -> str:  # noqa: ANN001
     """真正干活的分支：返回错误说明（空串 = 一切顺利）。"""
     # ---- 阶段 1：搜索（这就是延迟样本）----
     phase_started = time.monotonic()
@@ -174,19 +184,23 @@ def _probe_inner(provider, keyword: str, client, deadline: float,  # noqa: ANN00
 
     # ---- 阶段 3：首个分片吞吐 ----
     mbit, note = _measure_first_segment(
-        provider, client, url, referer=referer,
-        timeout=phase_timeout(deadline), cancel=cancel,
+        provider,
+        client,
+        url,
+        referer=referer,
+        timeout=phase_timeout(deadline),
+        cancel=cancel,
     )
     if mbit > 0:
         result.mbit_per_s = mbit
-        result.segments = 1        # 提前停止：只取了这一个分片
+        result.segments = 1  # 提前停止：只取了这一个分片
     return note
 
 
 def _resolution_text(video) -> str:  # noqa: ANN001
     """首条结果的画质标签：优先分集画质（源给的线路名），其次条目备注。"""
-    for episode in (getattr(video, "episodes", None) or []):
-        for quality in (getattr(episode, "qualities", None) or []):
+    for episode in getattr(video, "episodes", None) or []:
+        for quality in getattr(episode, "qualities", None) or []:
             label = str(getattr(quality, "label", "") or "").strip()
             if label:
                 return label
@@ -252,14 +266,14 @@ def _head(client, url: str, *, referer: str, timeout: float) -> None:
         return
     headers = {"Referer": referer} if referer else {}
     try:
-        _call_with_timeout(client.request, method="HEAD", url=url,
-                           headers=headers, timeout=timeout)
-    except Exception:  # noqa: BLE001
-        pass
+        _call_with_timeout(client.request, method="HEAD", url=url, headers=headers, timeout=timeout)
+    except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+        swallow("probe 中的可选步骤", error)
 
 
-def _measure_first_segment(provider, client, episode_url: str, *, referer: str,  # noqa: ANN001
-                           timeout: float, cancel) -> tuple[float, str]:  # noqa: ANN001
+def _measure_first_segment(
+    provider, client, episode_url: str, *, referer: str, timeout: float, cancel  # noqa: ANN001
+) -> tuple[float, str]:  # noqa: ANN001
     """取首个分片，返回 (Mbit/s, 说明)。失败时速度为 0、说明写进第二个元素。"""
     if not episode_url:
         return 0.0, "没有可测的分片地址"
@@ -276,7 +290,8 @@ def _measure_first_segment(provider, client, episode_url: str, *, referer: str, 
     started = time.monotonic()
     try:
         payload = _call_with_timeout(
-            client.get, segment,
+            client.get,
+            segment,
             headers={**headers, "Range": f"bytes=0-{SEGMENT_BYTES - 1}"},
             timeout=timeout,
         )

@@ -1,6 +1,6 @@
 """架构边界测试：用依赖规则锁住「板块之间互不影响」。
 
-规则（`docs/REFACTOR_PLAN.md` 第 2 节）：
+规则（`docs/ARCHITECTURE.md` 的「依赖规则」一节，本文件是它的**可执行版本**）：
 
     boards/<板块>  → 同板块包、boards.base、core/<同板块>、core.platform、core.llm、ui_kit、services
     boards/<板块>  ✗→ boards/<其他板块>、core/<其他板块>

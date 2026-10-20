@@ -1,4 +1,4 @@
-# 数据库设计与迁移（v1.0.0）
+# 数据库设计与迁移
 
 > 结构定义在代码里：`src/modu_workbench/core/platform/migrations/v1_initial.py`。
 > 本文是"给人看"的同一份设计（评审用），两者由 `tests/test_db_schema.py` 的结构快照测试绑定 ——

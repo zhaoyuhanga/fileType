@@ -1,9 +1,11 @@
 """墨软影视的应用级单例（板块内共享；其他板块不直接引用）。"""
+
 from __future__ import annotations
 
 from modu_workbench.core.platform.paths import app_db_path, video_dir
 from modu_workbench.core.video import VideoLibrary, VideoRegistry, VideoStorage
 from modu_workbench.core.video.sources import registry as video_source_registry
+from modu_workbench.core.platform.logging import swallow
 
 _video_storage: VideoStorage | None = None
 _video_library: VideoLibrary | None = None
@@ -24,8 +26,8 @@ def video_registry() -> VideoRegistry:
         _video_registry = video_source_registry()
         try:
             _video_registry.load_settings(video_storage())
-        except Exception:  # noqa: BLE001  配置损坏不应阻断板块加载
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("保存/加载设置", error)
     return _video_registry
 
 

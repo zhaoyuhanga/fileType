@@ -3,6 +3,7 @@
 音源的详细拖拽排序在板块内的「源设置」里；这里提供同样的启用开关，
 方便"按板块找设置"的用户直接在此完成。
 """
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -23,6 +24,7 @@ from modu_workbench.core.music.sources.quality import DEFAULT_MIN_FULL_SECONDS
 from modu_workbench.core.platform import paths as config
 
 from .base import SettingsPage, app_settings
+from modu_workbench.core.platform.logging import swallow
 
 
 class MusicSettingsPage(SettingsPage):
@@ -99,8 +101,9 @@ class MusicSettingsPage(SettingsPage):
         self._jamendo.textChanged.connect(self._sync_jamendo)
 
     def _pick_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(None, "选择音乐下载目录",
-                                                 self._download_dir.text())
+        folder = QFileDialog.getExistingDirectory(
+            None, "选择音乐下载目录", self._download_dir.text()
+        )
         if folder:
             self._download_dir.setText(folder)
 
@@ -118,15 +121,13 @@ class MusicSettingsPage(SettingsPage):
             or str(config.music_download_dir())
         )
         self._jamendo.setText(self._settings.value("music/jamendo_client_id", "", type=str))
-        self._auto_switch.setChecked(
-            self._settings.value("music/auto_switch", True, type=bool)
-        )
-        self._hide_preview.setChecked(
-            self._settings.value("music/hide_preview", True, type=bool)
-        )
+        self._auto_switch.setChecked(self._settings.value("music/auto_switch", True, type=bool))
+        self._hide_preview.setChecked(self._settings.value("music/hide_preview", True, type=bool))
         self._min_full.setValue(
-            int(self._settings.value("music/min_full_seconds",
-                                     DEFAULT_MIN_FULL_SECONDS) or DEFAULT_MIN_FULL_SECONDS)
+            int(
+                self._settings.value("music/min_full_seconds", DEFAULT_MIN_FULL_SECONDS)
+                or DEFAULT_MIN_FULL_SECONDS
+            )
         )
         for key, check in self._source_checks.items():
             check.setChecked(self._registry.is_enabled(key))
@@ -149,8 +150,8 @@ class MusicSettingsPage(SettingsPage):
             provider.set_credential(self._jamendo.text().strip())
         try:
             self._registry.save_settings(app_context.music_storage())
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("保存/加载设置", error)
         return True
 
 

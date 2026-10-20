@@ -11,6 +11,7 @@
 - **离线兜底**：没配模型时 `local_polish` / 抽取式摘要 / 规则计划仍然可用，
   因此"格式化、合并、循环美化"在完全离线时也能跑（只是 AI 那几步不参与）。
 """
+
 from __future__ import annotations
 
 import json
@@ -30,6 +31,7 @@ from . import quality
 from . import security
 from .models import AiCallRecord, DocumentIR, QualityScore, ToolCallRecord
 from .tools import TOOL_REGISTRY, ToolContext, call_tool, catalog_lines
+from modu_workbench.core.platform.logging import swallow
 
 
 class AiUnavailable(RuntimeError):
@@ -50,26 +52,30 @@ class SceneSpec:
 
 SCENES: dict[str, SceneSpec] = {
     "polish": SceneSpec(
-        "polish", "润色",
-        "润色下面的文档：修正病句与用词，保持原意与数据不变，保持原有段落结构。"),
+        "polish", "润色", "润色下面的文档：修正病句与用词，保持原意与数据不变，保持原有段落结构。"
+    ),
     "summary": SceneSpec(
-        "summary", "摘要",
-        "为下面的文档写摘要：{extra}。用中文，条目化，不要编造原文没有的信息。"),
+        "summary", "摘要", "为下面的文档写摘要：{extra}。用中文，条目化，不要编造原文没有的信息。"
+    ),
     "translate": SceneSpec(
-        "translate", "翻译",
-        "把下面的文档翻译成{extra}，保留段落结构与数字，专业术语保持准确。"),
+        "translate", "翻译", "把下面的文档翻译成{extra}，保留段落结构与数字，专业术语保持准确。"
+    ),
     "expand": SceneSpec(
-        "expand", "扩写",
-        "在不改变事实的前提下扩写下面的文档：{extra}。补充必要的说明与过渡，不要注水。"),
+        "expand",
+        "扩写",
+        "在不改变事实的前提下扩写下面的文档：{extra}。补充必要的说明与过渡，不要注水。",
+    ),
     "condense": SceneSpec(
-        "condense", "缩写",
-        "压缩下面的文档篇幅{extra}，保留全部关键数据与结论，删除重复与冗余表达。"),
+        "condense",
+        "缩写",
+        "压缩下面的文档篇幅{extra}，保留全部关键数据与结论，删除重复与冗余表达。",
+    ),
     "proofread": SceneSpec(
-        "proofread", "纠错",
-        "校对下面的文档：改正错别字、标点与语病{extra}。只输出改正后的正文。"),
+        "proofread", "纠错", "校对下面的文档：改正错别字、标点与语病{extra}。只输出改正后的正文。"
+    ),
     "rewrite": SceneSpec(
-        "rewrite", "改写",
-        "按「{extra}」的风格改写下面的文档，保留事实与数据，保持段落结构。"),
+        "rewrite", "改写", "按「{extra}」的风格改写下面的文档，保留事实与数据，保持段落结构。"
+    ),
 }
 
 SCENE_KEYS = tuple(SCENES)
@@ -110,8 +116,11 @@ def local_polish(text: str) -> str:
     lines: list[str] = []
     for line in result.split("\n"):
         stripped = line.rstrip()
-        if (len(stripped) >= 12 and re.search(rf"[{_CN_CHAR}]$", stripped)
-                and not re.search(r"[。！？；：，、）】」…\-—]$", stripped)):
+        if (
+            len(stripped) >= 12
+            and re.search(rf"[{_CN_CHAR}]$", stripped)
+            and not re.search(r"[。！？；：，、）】」…\-—]$", stripped)
+        ):
             stripped += "。"
         lines.append(stripped)
     return "\n".join(lines)
@@ -189,10 +198,16 @@ class AgentResult:
 class DocumentAi:
     """文档 AI 服务：场景变换 + 工具调用 + 质量评估 + 记账。"""
 
-    def __init__(self, router: Optional[ModelRouter] = None, storage: Any = None, *,
-                 permissions: Optional[security.Permissions] = None,
-                 kind: str = KIND_TEXT, price_per_1k: float = 0.0,
-                 permissions_provider: Optional[Callable[[], security.Permissions]] = None):
+    def __init__(
+        self,
+        router: Optional[ModelRouter] = None,
+        storage: Any = None,
+        *,
+        permissions: Optional[security.Permissions] = None,
+        kind: str = KIND_TEXT,
+        price_per_1k: float = 0.0,
+        permissions_provider: Optional[Callable[[], security.Permissions]] = None,
+    ):
         self._router = router
         self._storage = storage
         self.permissions = permissions or security.Permissions()
@@ -206,8 +221,8 @@ class DocumentAi:
         if self._permissions_provider is not None:
             try:
                 return self._permissions_provider()
-            except Exception:  # noqa: BLE001  读取设置失败时退回构造时的权限
-                pass
+            except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                swallow("ai 中的可选步骤", error)
         return self.permissions
 
     # ---------- 能力状态 ----------
@@ -240,8 +255,15 @@ class DocumentAi:
 
     # ---------- 场景变换 ----------
 
-    def transform(self, text: str, scene: str, *, extra: str = "", document_id: int = 0,
-                  on_attempt: Optional[Callable[[str, int, int], None]] = None) -> str:
+    def transform(
+        self,
+        text: str,
+        scene: str,
+        *,
+        extra: str = "",
+        document_id: int = 0,
+        on_attempt: Optional[Callable[[str, int, int], None]] = None,
+    ) -> str:
         """按场景处理文本（AI 优先，离线时用本地兜底）。"""
         content = (text or "").strip()
         if not content:
@@ -249,15 +271,28 @@ class DocumentAi:
         if self.available:
             if on_attempt is not None:
                 on_attempt(scene, 1, 1)
-            return self._chat(build_messages(content, scene, extra=extra), role=scene,
-                              document_id=document_id, scene=scene)
+            return self._chat(
+                build_messages(content, scene, extra=extra),
+                role=scene,
+                document_id=document_id,
+                scene=scene,
+            )
         fallback = local_transform(content, scene, extra=extra)
         if fallback is None:
             raise AiUnavailable(
                 f"「{SCENE_LABELS.get(scene, scene)}」需要配置大模型："
-                "请到「设置 → 大模型」添加文字模型（离线能力仍可用于美化/合并/计算）")
-        self._record(AiCallRecord(kind="local", role=scene, model="本地规则", ok=True,
-                                  detail="未配置大模型，使用本地规则", masked=0))
+                "请到「设置 → 大模型」添加文字模型（离线能力仍可用于美化/合并/计算）"
+            )
+        self._record(
+            AiCallRecord(
+                kind="local",
+                role=scene,
+                model="本地规则",
+                ok=True,
+                detail="未配置大模型，使用本地规则",
+                masked=0,
+            )
+        )
         return fallback
 
     def polish(self, text: str, **kwargs) -> str:  # noqa: ANN003
@@ -271,8 +306,9 @@ class DocumentAi:
 
     # ---------- 计划 ----------
 
-    def plan(self, goal: str, ir: DocumentIR, *, max_steps: int = 5,
-             document_id: int = 0) -> list[str]:
+    def plan(
+        self, goal: str, ir: DocumentIR, *, max_steps: int = 5, document_id: int = 0
+    ) -> list[str]:
         """把目标拆成工具调用序列（AI 优先；AI 不可用时按体检结果生成规则计划）。"""
         heuristic = heuristic_plan(goal, ir, max_steps=max_steps)
         if not self.available:
@@ -300,16 +336,24 @@ class DocumentAi:
 
     # ---------- 质量评估 ----------
 
-    def evaluate(self, ir: DocumentIR, goal: str = "", *,
-                 before: Optional[DocumentIR] = None,
-                 document_id: int = 0) -> QualityScore:
+    def evaluate(
+        self,
+        ir: DocumentIR,
+        goal: str = "",
+        *,
+        before: Optional[DocumentIR] = None,
+        document_id: int = 0,
+    ) -> QualityScore:
         """质量评分：AI 打分与本地规则各占一半（AI 失败就纯本地，绝不因此中断）。"""
         baseline = quality.heuristic_score(ir, goal, before=before)
         if not self.available:
             return baseline
         messages = [
             {"role": "system", "content": EVALUATE_SYSTEM},
-            {"role": "user", "content": f"目标：{goal or '（未指定）'}\n\n文档：\n{ir.text()[:6000]}"},
+            {
+                "role": "user",
+                "content": f"目标：{goal or '（未指定）'}\n\n文档：\n{ir.text()[:6000]}",
+            },
         ]
         try:
             reply = self._chat(messages, role="evaluate", document_id=document_id)
@@ -320,10 +364,14 @@ class DocumentAi:
             baseline.notes.append("AI 评分解析失败，已回退本地评分")
             return baseline
         blended = QualityScore(
-            format_consistency=_blend(scores.get("format_consistency"), baseline.format_consistency),
+            format_consistency=_blend(
+                scores.get("format_consistency"), baseline.format_consistency
+            ),
             language_quality=_blend(scores.get("language_quality"), baseline.language_quality),
             readability=_blend(scores.get("readability"), baseline.readability),
-            factual_consistency=_blend(scores.get("factual_consistency"), baseline.factual_consistency),
+            factual_consistency=_blend(
+                scores.get("factual_consistency"), baseline.factual_consistency
+            ),
             goal_match=_blend(scores.get("goal_match"), baseline.goal_match),
             notes=list(baseline.notes) + [f"AI 评分：{reply.strip()[:120]}"],
             source="ai",
@@ -332,10 +380,16 @@ class DocumentAi:
 
     # ---------- 工具调用循环 ----------
 
-    def run_agent(self, goal: str, context: ToolContext, *, max_steps: int = 4,
-                  tool_names: Sequence[str] | None = None,
-                  on_step: Optional[Callable[[ToolCallRecord], None]] = None,
-                  round_index: int = 0) -> AgentResult:
+    def run_agent(
+        self,
+        goal: str,
+        context: ToolContext,
+        *,
+        max_steps: int = 4,
+        tool_names: Sequence[str] | None = None,
+        on_step: Optional[Callable[[ToolCallRecord], None]] = None,
+        round_index: int = 0,
+    ) -> AgentResult:
         """让模型按"JSON 工具协议"多步调用工具，直到给出 final。"""
         if not self.available:
             return AgentResult(False, "需要先配置大模型才能让 AI 自主调用工具")
@@ -343,17 +397,22 @@ class DocumentAi:
         system = AGENT_SYSTEM.format(tools="\n".join(catalog_lines(only=allowed)))
         messages: list[dict] = [
             {"role": "system", "content": system},
-            {"role": "user", "content": (
-                f"目标：{goal}\n\n当前文档体检："
-                f"{json.dumps(quality.analyze_document(context.ir)['issues'], ensure_ascii=False)}\n\n"
-                f"文档开头：\n{context.ir.text()[:2000]}")},
+            {
+                "role": "user",
+                "content": (
+                    f"目标：{goal}\n\n当前文档体检："
+                    f"{json.dumps(quality.analyze_document(context.ir)['issues'], ensure_ascii=False)}\n\n"
+                    f"文档开头：\n{context.ir.text()[:2000]}"
+                ),
+            },
         ]
         steps: list[ToolCallRecord] = []
         transcript: list[str] = []
         for step in range(1, max_steps + 1):
             try:
-                reply = self._chat(messages, role="agent", document_id=context.document_id,
-                                   tool_names=allowed)
+                reply = self._chat(
+                    messages, role="agent", document_id=context.document_id, tool_names=allowed
+                )
             except AiUnavailable as error:
                 return AgentResult(False, str(error), steps, transcript)
             transcript.append(f"模型：{reply.strip()[:200]}")
@@ -365,8 +424,12 @@ class DocumentAi:
                 return AgentResult(True, reply.strip()[:200] or "完成", steps, transcript)
             if name not in allowed:
                 messages.append({"role": "assistant", "content": reply})
-                messages.append({"role": "user", "content":
-                                 f"工具 {name} 不存在，可用：{'、'.join(allowed[:12])}"})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"工具 {name} 不存在，可用：{'、'.join(allowed[:12])}",
+                    }
+                )
                 continue
             result = call_tool(name, context, action.get("args") or {}, round_index=round_index)
             steps.append(context.log[-1])
@@ -379,8 +442,15 @@ class DocumentAi:
 
     # ---------- 底层调用 ----------
 
-    def _chat(self, messages: list[dict], *, role: str = "", document_id: int = 0,
-              scene: str = "", tool_names: Sequence[str] = ()) -> str:
+    def _chat(
+        self,
+        messages: list[dict],
+        *,
+        role: str = "",
+        document_id: int = 0,
+        scene: str = "",
+        tool_names: Sequence[str] = (),
+    ) -> str:
         if self._router is None:
             raise AiUnavailable("未接入大模型配置")
         try:
@@ -389,7 +459,8 @@ class DocumentAi:
             raise AiUnavailable(str(error)) from error
         if not profiles:
             raise AiUnavailable(
-                "没有可用的文字大模型：请到「设置 → 大模型」添加并填写 API Key（本地 Ollama 也可）")
+                "没有可用的文字大模型：请到「设置 → 大模型」添加并填写 API Key（本地 Ollama 也可）"
+            )
 
         payload = "\n".join(str(message.get("content") or "") for message in messages)
         permissions = self.current_permissions()
@@ -400,8 +471,9 @@ class DocumentAi:
             if reason:
                 reasons.append(reason)
                 continue
-            prepared, masked = self._prepare_messages(messages, local=local,
-                                                      permissions=permissions)
+            prepared, masked = self._prepare_messages(
+                messages, local=local, permissions=permissions
+            )
             started = time.monotonic()
             client = OpenAiCompatClient(profile)
             try:
@@ -409,26 +481,49 @@ class DocumentAi:
             except Exception as error:  # noqa: BLE001  降级到下一份配置
                 duration = int((time.monotonic() - started) * 1000)
                 message = str(error) or error.__class__.__name__
-                self._record(AiCallRecord(
-                    kind="chat", role=role or scene, model=profile.label,
-                    prompt_preview=payload[:300], tools=list(tool_names), ok=False,
-                    detail=message, duration_ms=duration, masked=masked))
+                self._record(
+                    AiCallRecord(
+                        kind="chat",
+                        role=role or scene,
+                        model=profile.label,
+                        prompt_preview=payload[:300],
+                        tools=list(tool_names),
+                        ok=False,
+                        detail=message,
+                        duration_ms=duration,
+                        masked=masked,
+                    )
+                )
                 reasons.append(f"{profile.label}：{message}")
                 continue
             duration = int((time.monotonic() - started) * 1000)
             cost = self._estimate_cost(prepared, reply)
-            self._record(AiCallRecord(
-                kind="chat", role=role or scene, model=profile.label,
-                prompt_preview=payload[:300], output_preview=reply[:300],
-                tools=list(tool_names), ok=True, duration_ms=duration,
-                est_cost=cost, masked=masked))
+            self._record(
+                AiCallRecord(
+                    kind="chat",
+                    role=role or scene,
+                    model=profile.label,
+                    prompt_preview=payload[:300],
+                    output_preview=reply[:300],
+                    tools=list(tool_names),
+                    ok=True,
+                    duration_ms=duration,
+                    est_cost=cost,
+                    masked=masked,
+                )
+            )
             return reply
         raise AiUnavailable(
-            "所有模型配置都不可用或被权限拦下：\n" + "\n".join(f"· {item}" for item in reasons))
+            "所有模型配置都不可用或被权限拦下：\n" + "\n".join(f"· {item}" for item in reasons)
+        )
 
-    def _prepare_messages(self, messages: list[dict], *, local: bool,
-                          permissions: Optional[security.Permissions] = None,
-                          ) -> tuple[list[dict], int]:
+    def _prepare_messages(
+        self,
+        messages: list[dict],
+        *,
+        local: bool,
+        permissions: Optional[security.Permissions] = None,
+    ) -> tuple[list[dict], int]:
         """按权限决定是否脱敏后再发送（返回处理后的消息与脱敏命中数）。"""
         permissions = permissions or self.current_permissions()
         if local or not permissions.mask_before_upload:
@@ -453,8 +548,8 @@ class DocumentAi:
             return
         try:
             self._storage.record_ai_call(record)
-        except Exception:  # noqa: BLE001  记账失败不应影响业务
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("ai 中的可选步骤", error)
 
 
 # ---------------------------------------------------------------- 解析与计划
@@ -471,8 +566,11 @@ def _extract_json(text: str) -> Any:
     fenced = re.search(r"```(?:json)?\s*(.+?)```", body, re.S)
     if fenced:
         body = fenced.group(1).strip()
-    for candidate in (body, body[body.find("{"): body.rfind("}") + 1] if "{" in body else "",
-                      body[body.find("["): body.rfind("]") + 1] if "[" in body else ""):
+    for candidate in (
+        body,
+        body[body.find("{") : body.rfind("}") + 1] if "{" in body else "",
+        body[body.find("[") : body.rfind("]") + 1] if "[" in body else "",
+    ):
         if not candidate:
             continue
         try:
@@ -574,7 +672,8 @@ def capability_text() -> str:
     """能力说明（设置页/板块页头）。"""
     return (
         "AI 能力复用「设置 → 大模型」里的文字模型（同类型可配多份，失败自动降级）："
-        f"支持 {len(SCENES)} 个场景（" + "、".join(spec.label for spec in SCENES.values())
+        f"支持 {len(SCENES)} 个场景（"
+        + "、".join(spec.label for spec in SCENES.values())
         + f"），可调用 {len(TOOL_REGISTRY)} 个文档工具（读取/解析/写入/替换/排版/计算/"
         "表格/OCR/翻译/导出/合并/拆分/对比/摘要）；默认不上传云端、可自动脱敏。"
     )
@@ -582,8 +681,11 @@ def capability_text() -> str:
 
 def scene_matrix() -> list[dict[str, str]]:
     return [
-        {"key": spec.key, "label": spec.label, "instruction": spec.instruction.replace(
-            "{extra}", "（按用户要求）")}
+        {
+            "key": spec.key,
+            "label": spec.label,
+            "instruction": spec.instruction.replace("{extra}", "（按用户要求）"),
+        }
         for spec in SCENES.values()
     ]
 

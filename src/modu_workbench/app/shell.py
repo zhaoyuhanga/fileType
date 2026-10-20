@@ -1,4 +1,5 @@
 """应用主壳：顶栏导航 + 页面栈（首页 / 各板块）。"""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -16,6 +17,7 @@ from .. import APP_NAME, APP_SLOGAN, __version__
 from ..boards.home.page import HomePage
 from .registry import ACTIVE_BOARDS
 from ..ui_kit.widgets import make_nav_button, set_nav_active
+from modu_workbench.core.platform.logging import swallow
 
 HOME_KEY = "home"
 
@@ -31,11 +33,11 @@ class AppShell(QMainWindow):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} v{__version__}")   # 任务栏/标题栏显示墨软·工作台
+        self.setWindowTitle(f"{APP_NAME} v{__version__}")  # 任务栏/标题栏显示墨软·工作台
         self._nav_buttons: dict[str, QPushButton] = {}
-        self._pages: dict[str, int] = {}          # key -> 栈索引（构造后才有）
-        self._factories: dict[str, object] = {}   # key -> 页面工厂（BoardSpec.page）
-        self._built: dict[str, QWidget] = {}      # key -> 已构造的页面
+        self._pages: dict[str, int] = {}  # key -> 栈索引（构造后才有）
+        self._factories: dict[str, object] = {}  # key -> 页面工厂（BoardSpec.page）
+        self._built: dict[str, QWidget] = {}  # key -> 已构造的页面
         self.current_key = HOME_KEY
 
         root = QWidget()
@@ -68,7 +70,7 @@ class AppShell(QMainWindow):
         factory = self._factories.get(key)
         if factory is None:
             return None
-        page = factory()                      # type: ignore[operator]  契约：BoardSpec.page 可调用
+        page = factory()  # type: ignore[operator]  契约：BoardSpec.page 可调用
         self._stack.addWidget(page)
         self._pages[key] = self._stack.count() - 1
         self._built[key] = page
@@ -153,8 +155,8 @@ class AppShell(QMainWindow):
             if callable(hook):
                 try:
                     hook()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                    swallow("shell 中的可选步骤", error)
         super().closeEvent(event)
 
     def current_page(self) -> QWidget:

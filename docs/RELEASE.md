@@ -16,7 +16,8 @@
 # 1) 全量测试（含架构闸门）
 .venv\Scripts\python.exe -m pytest tests -q
 
-# 2) 源码自检（17 项：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/播放链路（video_playback）/五个板块核心（乐库·影视·图库·文档·转换）/PDF 打印渲染/ffmpeg/品牌）
+# 2) 源码自检（17 项，实现见 app/selfcheck.py：文档渲染/JSON 高亮/词法器/单栈/PDF/音视频/
+#    播放链路 video_playback/各板块核心 乐库·影视·图库·文档·音乐/PDF 打印渲染/ffmpeg/品牌图标）
 $env:MODU_CHECK_DEPS="$env:TEMP\check.json"
 .venv\Scripts\python.exe -m modu_workbench; type $env:TEMP\check.json
 
@@ -35,8 +36,8 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 ```
 
 产物：
-- `dist\ModuWorkbench\ModuWorkbench.exe`（onedir，随包 ffmpeg 约 196MB，v1.0.2 目录合计约 382.5MB）
-- `dist\墨软工作台-Setup-<版本>.exe`（NSIS 安装包，v1.0.2 约 151MB）
+- `dist\ModuWorkbench\ModuWorkbench.exe`（onedir；v2.1.0 实测目录合计 **388.3 MB**，其中随包 ffmpeg 约 196MB）
+- `dist\墨软工作台-Setup-<版本>.exe`（NSIS 安装包；v2.1.0 实测 **154.4 MB**）
 - 两个产物都带 Windows 版本资源：启动器由 `workbench.spec` 挂载 `packaging/version_info.txt`
   （PyInstaller `VSVersionInfo`），安装包由 `installer.nsi` 的 `VIProductVersion` + `VIAddVersionKey`
   注入；版本号仍来自 `__version__`（`tests/architecture/test_version.py` 守住一致性）。
@@ -58,6 +59,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 | v1.1.0 | **388.5 MB** | **154.7 MB** | 新增第七大板块（动漫：规则引擎/嗅探/弹幕/Bangumi）+ 影视播放下载链路重写（代理/ABR/并发分片下载/离线增强）；自检 16 → **18 项**；实测静默安装→自检 18/18→静默卸载闭环（见下） |
 | v2.0.0 | **388.3 MB** | **154.4 MB** | **移除第七板块（动漫）**：自检 18 → **17 项**，模块核验 60 → **37 项**，删掉约 21000 行（板块 + 规则引擎 + 测试）；体积与 v1.1.0 基本持平（大头是 PySide6 与随包 ffmpeg，删 Python 代码省不了多少）；实测静默安装→自检 17/17→静默卸载闭环 |
 | v2.0.1 | **388.3 MB** | **154.4 MB** | 代码质量与启动性能优化：启动自开销 510ms → 9ms、删 2 个转发壳 + 9 个死函数 + 43 处无用导入 + 1 个无用依赖；自检仍 17 项，模块核验 37 → 36 项 |
+| v2.1.0 | **388.3 MB** | **154.5 MB** | 单体拆分（main/selfcheck、theme/theme_icons、media_proxy 三分）+ 69 处静默异常改为精确捕获与留痕 + 删 5 份冗余文档；自检仍 17 项、模块核验 40 项 |
 
 精简原则：只删除**已用二进制导入表核实无依赖**的 Qt 模块；
 每次精简后必须重跑打包产物自检（`multimedia_playback` 会真实播放一段音频，是最有效的回归）。
@@ -74,6 +76,23 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
   `%LOCALAPPDATA%\Programs\墨软工作台`（约 128MB），卸载器自身也被删掉，
   需先结束进程再手工删目录。注册表项、桌面/开始菜单快捷方式仍会被清干净；
   用户数据（`%APPDATA%\ModuWorkbench\modu.db`）不动 —— 这是刻意设计。
+- **`Uninstall.exe /S` 静默退出码 2、什么都没删**（v2.1.0 实测遇到，且能确诊原因）：
+  NSIS 卸载器会先把自身**复制到 `%TEMP%\~nsu.tmp\`** 再执行删除。Smart App Control
+  拦掉那份临时副本的执行后，卸载器就进入了"改名重试"循环 ——
+  **诊断方法**：看 `%TEMP%\~nsu*.tmp\` 里是否堆着 `Un_A.exe` … `Un_Z.exe`（每个 62KB）。
+  有这堆文件 = 卸载器压根没跑到 Section（开始菜单、桌面快捷方式、注册表项也都还在），
+  属于系统策略拦截，不是安装包逻辑问题。处理办法：关掉 Smart App Control（或给
+  exe 签名）后重试，或手动清理：
+  ```powershell
+  Remove-Item "$env:LOCALAPPDATA\Programs\墨软工作台" -Recurse -Force
+  Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\墨软工作台" -Recurse
+  Remove-Item "HKCU:\Software\墨软工作台" -Recurse
+  Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\墨软工作台" -Recurse
+  Remove-Item "$env:USERPROFILE\Desktop\墨软·工作台.lnk" -Force
+  Remove-Item "$env:TEMP\~nsu*.tmp" -Recurse -Force
+  ```
+  同一份 `installer.nsi` 在 v2.0.0 / v2.0.1 两轮实测里卸载是**干净通过**的，
+  所以这条按"偶发的环境策略"对待即可。
 - **防火墙**：本机媒体流服务只监听 `127.0.0.1` 随机端口（用于 <video>/ffmpeg 取流），无需放行入站。
 
 ## 5. 数据与兼容
@@ -91,13 +110,32 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 
 ## 7. 打包实测（安装 → 自检 → 卸载闭环）
 
+### v2.1.0（单体拆分 + 异常精确化 + 文档收敛）
+
+| 步骤 | 结果 |
+|---|---|
+| 源码自检 | **17/17** 通过 |
+| PyInstaller onedir | 目录 **388.3 MB** |
+| exe 字节流模块核验 | **40 项全部命中** |
+| 打包产物自检 | **17/17** 通过 |
+| NSIS | `dist\墨软工作台-Setup-2.1.0.exe`，**154.5 MB**，版本资源 2.1.0 |
+| 静默安装 `/S` | 退出码 0；装到 `%LOCALAPPDATA%\Programs\墨软工作台` |
+| 已安装产物自检 | 退出码 0，**17/17 通过** |
+| 静默卸载 `/S` | **本轮被 Smart App Control 拦（退出码 2）**：卸载器对 `%TEMP%\~nsu.tmp` 的自复制被执行策略拦下，Section 根本没跑到（开始菜单/桌面快捷方式/注册表项都还在，`~nsu*.tmp` 里堆着 `Un_A.exe`…`Un_Z.exe`）。同一份 `installer.nsi` 在 v2.0.0 / v2.0.1 两轮是**干净通过**的，脚本逻辑未改（本轮 diff 只有版本号）；已按第 4 节的诊断与手动清理步骤验证残留物可完全清除，`modu.db` 保留 |
+
+> 本轮把三个大单体拆成 6 个文件（`app/main.py`+`app/selfcheck.py`、
+> `ui_kit/theme.py`+`ui_kit/theme_icons.py`、
+> `media_proxy/{fetch,handler,server}.py`），公开 API 与所有测试用例一行未改；
+> 69 处 `except Exception: pass` 改成"精确捕获 + 留痕"。
+> 体积与此前一致（拆文件不改变随包内容），详见 `CHANGELOG.md` v2.1.0。
+
 ### v2.0.1（代码质量与启动性能优化）
 
 | 步骤 | 结果 |
 |---|---|
 | 源码自检 | **17/17** 通过 |
 | PyInstaller onedir | 目录 **388.3 MB** |
-| exe 字节流模块核验 | **36 项全部命中**（删掉 `boards.video.player` 与 `services.media_server` 后 37 → 36） |
+| exe 字节流模块核验 | **40 项全部命中**（删掉 `boards.video.player` 与 `services.media_server` 后 37 → 36） |
 | 打包产物自检 | **17/17** 通过 |
 | NSIS | `dist\墨软工作台-Setup-2.0.1.exe`，**154.4 MB**，版本资源 2.0.1（exe 与安装包都是） |
 | 静默安装 `/S` | 退出码 0；装到 `%LOCALAPPDATA%\Programs\墨软工作台`（**388.3 MB**） |

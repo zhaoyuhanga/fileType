@@ -9,6 +9,7 @@
 界面（v1.0.0）：`ColumnPage` 页面骨架 + 两块 `SectionCard`（搜索 / 结果），
 结果为空时显示 `EmptyState` 而不是留一张空表格；状态与进度统一交给板块底部 `TaskBar`。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -58,6 +59,7 @@ from .widgets import (
     video_download_dir_pref,
     video_settings,
 )
+from modu_workbench.core.platform.logging import swallow
 
 COLUMNS = ["片名", "类型", "年份", "地区", "集数", "备注", "源"]
 
@@ -65,12 +67,19 @@ COLUMNS = ["片名", "类型", "年份", "地区", "集数", "备注", "源"]
 class VideoSearchPage(QWidget):
     """在线搜索页：搜索 → 选集 → 在线播放 / 下载 / 加入分类收藏。"""
 
-    playRequested = Signal(object, object, object)        # remote, episode, quality
-    downloadRequested = Signal(object, object, object)    # remote, [episodes], quality
+    playRequested = Signal(object, object, object)  # remote, episode, quality
+    downloadRequested = Signal(object, object, object)  # remote, [episodes], quality
     libraryChanged = Signal()
 
-    def __init__(self, library: VideoLibrary, storage: VideoStorage, toaster: Toaster,
-                 parent: QWidget | None = None, *, task_bar: TaskBar | None = None):
+    def __init__(
+        self,
+        library: VideoLibrary,
+        storage: VideoStorage,
+        toaster: Toaster,
+        parent: QWidget | None = None,
+        *,
+        task_bar: TaskBar | None = None,
+    ):
         super().__init__(parent)
         self._library = library
         self._storage = storage
@@ -98,7 +107,9 @@ class VideoSearchPage(QWidget):
         # ---- 搜索区 ----
         self._keyword = QLineEdit()
         self._keyword.setObjectName("searchBox")
-        self._keyword.setPlaceholderText("输入片名，例如：流浪地球、庆余年；也可直接粘贴 m3u8/mp4 直链")
+        self._keyword.setPlaceholderText(
+            "输入片名，例如：流浪地球、庆余年；也可直接粘贴 m3u8/mp4 直链"
+        )
         self._keyword.returnPressed.connect(self._start_search)
 
         self._kind = make_kind_combo(include_all=True)
@@ -112,14 +123,16 @@ class VideoSearchPage(QWidget):
         self._search_button.clicked.connect(self._start_search)
 
         search_card = SectionCard("搜索")
-        search_card.add(row(self._keyword, self._kind, self._source, self._search_button,
-                            stretch=self._keyword))
+        search_card.add(
+            row(self._keyword, self._kind, self._source, self._search_button, stretch=self._keyword)
+        )
         self._page_widget.add(search_card)
 
         # ---- 结果区 ----
         self._result_chip = chip("0 条结果")
         self._result_card = SectionCard(
-            "搜索结果", actions=[self._result_chip],
+            "搜索结果",
+            actions=[self._result_chip],
             hint="勾选后可批量播放/下载；右键单条操作",
         )
 
@@ -128,12 +141,13 @@ class VideoSearchPage(QWidget):
         attach_context_menu(self._table, self._row_menu)
 
         self._empty = EmptyState(
-            "🔍", "还没有搜索结果",
+            "🔍",
+            "还没有搜索结果",
             "在上方输入片名后点「搜索」，或直接粘贴 m3u8 / mp4 直链",
         )
         self._result_card.add(self._empty)
         self._result_card.add(self._table)
-        self._table.setVisible(False)          # 无数据时显示空状态，有数据时切回表格
+        self._table.setVisible(False)  # 无数据时显示空状态，有数据时切回表格
 
         # 批量操作
         self._check_all = ghost_button("全选")
@@ -152,9 +166,14 @@ class VideoSearchPage(QWidget):
         self._collect_button = ghost_button("加入分类")
         self._collect_button.clicked.connect(self._add_to_collection)
         self._actions_row = row(
-            self._check_all, self._check_none, self._detail_button,
-            self._play_button, self._download_button, self._collect_button,
-            spacer(), hint_label("双击选集 · 右键单条"),
+            self._check_all,
+            self._check_none,
+            self._detail_button,
+            self._play_button,
+            self._download_button,
+            self._collect_button,
+            spacer(),
+            hint_label("双击选集 · 右键单条"),
         )
         self._result_card.add(self._actions_row)
 
@@ -174,10 +193,10 @@ class VideoSearchPage(QWidget):
         self._compliance.toggled.connect(self._update_buttons)
         self._result_card.add(row(self._auto_switch, self._compliance, stretch_last=True))
 
-        self._actions_row.setVisible(False)      # 没有结果时不显示批量操作（避免空按钮排一行）
+        self._actions_row.setVisible(False)  # 没有结果时不显示批量操作（避免空按钮排一行）
         self._page_widget.add(self._result_card)
         self._tail_stretch = False
-        self._set_tail_stretch(True)             # 空结果：卡片按内容高度，别撑成大空框
+        self._set_tail_stretch(True)  # 空结果：卡片按内容高度，别撑成大空框
         self._update_buttons()
 
     # ------------------------------------------------------------------ 状态
@@ -185,7 +204,7 @@ class VideoSearchPage(QWidget):
     @property
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字统一显示在任务条上。"""
-        return self._task._label          # noqa: SLF001
+        return self._task._label  # noqa: SLF001
 
     def _note_fallback(self, message: str) -> None:
         """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
@@ -199,7 +218,7 @@ class VideoSearchPage(QWidget):
             if total or done:
                 self._task.report(message, done, total)
             else:
-                self._task.note(message)      # 纯信息：不显示进度条/取消
+                self._task.note(message)  # 纯信息：不显示进度条/取消
 
     def _busy(self, message: str) -> None:
         """进行中提示（搜索/导入/解析这类未知时长）。"""
@@ -255,8 +274,9 @@ class VideoSearchPage(QWidget):
         self._page = 1
         self._busy(f"搜索中：{keyword}（{MEDIA_KIND_LABELS.get(kind, '全部类型')}）…")
         self._search_button.setEnabled(False)
-        self._worker = SearchWorker(keyword, kind, source_key, 40, self._page, self,
-                                    library=self._library)
+        self._worker = SearchWorker(
+            keyword, kind, source_key, 40, self._page, self, library=self._library
+        )
         self._worker.finishedResults.connect(self._on_results)
         self._worker.failed.connect(self._on_search_failed)
         self._worker.finished.connect(self._on_search_finished)
@@ -423,7 +443,9 @@ class VideoSearchPage(QWidget):
         added = 0
         for remote in remotes:
             try:
-                video = self._library.ensure_video(remote, remote.episodes[0] if remote.episodes else None)
+                video = self._library.ensure_video(
+                    remote, remote.episodes[0] if remote.episodes else None
+                )
             except Exception:  # noqa: BLE001
                 continue
             added += self._storage.add_to_playlist(playlist_id, [video.id])
@@ -454,7 +476,12 @@ class VideoSearchPage(QWidget):
         has_results = len(self._results) > 0
         ok = self._compliance.isChecked() and not busy and has_results
         self._search_button.setEnabled(not busy)
-        for button in (self._detail_button, self._play_button, self._download_button, self._collect_button):
+        for button in (
+            self._detail_button,
+            self._play_button,
+            self._download_button,
+            self._collect_button,
+        ):
             button.setEnabled(ok)
         self._check_all.setEnabled(has_results)
         self._check_none.setEnabled(has_results)
@@ -465,9 +492,9 @@ class VideoSearchPage(QWidget):
     def shutdown(self) -> None:
         for dialog in list(self._dialogs):
             try:
-                dialog.shutdown()   # 等对话框自己的详情/清晰度线程收尾
-            except Exception:  # noqa: BLE001
-                pass
+                dialog.shutdown()  # 等对话框自己的详情/清晰度线程收尾
+            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                swallow("search 中的可选步骤", error)
             dialog.close()
         self._dialogs.clear()
         worker = self._worker

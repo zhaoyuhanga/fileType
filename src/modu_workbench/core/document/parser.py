@@ -17,6 +17,7 @@
 国产办公格式（wps/et/dps）先做 **OOXML 容器嗅探**，是 zip 就按对应族读，
 否则退回 LibreOffice。
 """
+
 from __future__ import annotations
 
 import base64
@@ -44,21 +45,55 @@ from .models import (
     DocumentIR,
     TableData,
 )
+from modu_workbench.core.platform.logging import swallow
 
 #: 单个表格最多读入的行数（超出时截断并给出告警，避免大文件卡死界面）
 MAX_TABLE_ROWS = 20000
 
 #: 文本族扩展名 → 代码块语言（预览高亮用）
 _CODE_LANGUAGES = {
-    "py": "python", "pyw": "python", "js": "javascript", "mjs": "javascript",
-    "cjs": "javascript", "ts": "typescript", "jsx": "jsx", "tsx": "tsx",
-    "css": "css", "scss": "scss", "less": "less", "html": "html", "htm": "html",
-    "xml": "xml", "json": "json", "sql": "sql", "java": "java", "c": "c",
-    "h": "c", "cpp": "cpp", "hpp": "cpp", "go": "go", "rs": "rust",
-    "php": "php", "rb": "ruby", "cs": "csharp", "kt": "kotlin", "swift": "swift",
-    "sh": "bash", "bash": "bash", "zsh": "bash", "bat": "bat", "cmd": "bat",
-    "ps1": "powershell", "vue": "html", "lua": "lua", "yaml": "yaml", "yml": "yaml",
-    "ini": "ini", "toml": "toml", "log": "text", "md": "markdown",
+    "py": "python",
+    "pyw": "python",
+    "js": "javascript",
+    "mjs": "javascript",
+    "cjs": "javascript",
+    "ts": "typescript",
+    "jsx": "jsx",
+    "tsx": "tsx",
+    "css": "css",
+    "scss": "scss",
+    "less": "less",
+    "html": "html",
+    "htm": "html",
+    "xml": "xml",
+    "json": "json",
+    "sql": "sql",
+    "java": "java",
+    "c": "c",
+    "h": "c",
+    "cpp": "cpp",
+    "hpp": "cpp",
+    "go": "go",
+    "rs": "rust",
+    "php": "php",
+    "rb": "ruby",
+    "cs": "csharp",
+    "kt": "kotlin",
+    "swift": "swift",
+    "sh": "bash",
+    "bash": "bash",
+    "zsh": "bash",
+    "bat": "bat",
+    "cmd": "bat",
+    "ps1": "powershell",
+    "vue": "html",
+    "lua": "lua",
+    "yaml": "yaml",
+    "yml": "yaml",
+    "ini": "ini",
+    "toml": "toml",
+    "log": "text",
+    "md": "markdown",
 }
 
 #: 启发式标题：真正被 `guess_heading_level` 采纳的模式（顺序即优先级）
@@ -82,7 +117,9 @@ class ParseError(ValueError):
 # ---------------------------------------------------------------- 入口
 
 
-def parse_document(path: str | Path, *, ocr: bool = False, max_rows: int = MAX_TABLE_ROWS) -> DocumentIR:
+def parse_document(
+    path: str | Path, *, ocr: bool = False, max_rows: int = MAX_TABLE_ROWS
+) -> DocumentIR:
     """把任意受支持的文件解析成 `DocumentIR`。"""
     target = Path(path)
     if not target.is_file():
@@ -125,8 +162,7 @@ def parse_document(path: str | Path, *, ocr: bool = False, max_rows: int = MAX_T
         ir.title = target.stem
     # 标题是"文件名"还是"文档自己的"要分清楚：导出时不给文件名造一行可见标题
     # （否则"打开 Word → 保存"会平白多出一行标题，见 writer._title_already_in_blocks）
-    ir.metadata.setdefault(
-        "title_source", "filename" if ir.title == target.stem else "content")
+    ir.metadata.setdefault("title_source", "filename" if ir.title == target.stem else "content")
     try:
         stat = target.stat()
         ir.metadata.setdefault("size_bytes", stat.st_size)
@@ -221,8 +257,11 @@ def parse_plain_text(text: str, *, title: str = "", infer_headings: bool = True)
         if len(lines) == 1:
             line = lines[0].strip()
             level = guess_heading_level(line) if infer_headings else 0
-            blocks.append(Block(kind=BLOCK_HEADING, text=line, level=level) if level
-                          else Block(kind=BLOCK_PARAGRAPH, text=line))
+            blocks.append(
+                Block(kind=BLOCK_HEADING, text=line, level=level)
+                if level
+                else Block(kind=BLOCK_PARAGRAPH, text=line)
+            )
             continue
         current: list[str] = []
         for line in lines:
@@ -296,8 +335,7 @@ def _local_image(src: str, base_dir: Optional[Path]) -> Optional[Path]:
         return None
 
 
-def _image_block(alt: str, src: str, *, base_dir: Optional[Path] = None,
-                 label: str = "") -> Block:
+def _image_block(alt: str, src: str, *, base_dir: Optional[Path] = None, label: str = "") -> Block:
     """图片引用 → image 块。
 
     - data URI 与本地相对路径：字节收进素材缓存（`media.py`），块上只留引用；
@@ -353,8 +391,13 @@ def parse_markdown(text: str, *, title: str = "", base_dir: Optional[Path] = Non
                 body.append(lines[index])
                 index += 1
             index += 1
-            blocks.append(Block(kind=BLOCK_CODE, text="\n".join(body).rstrip(),
-                                style={"language": language} if language else {}))
+            blocks.append(
+                Block(
+                    kind=BLOCK_CODE,
+                    text="\n".join(body).rstrip(),
+                    style={"language": language} if language else {},
+                )
+            )
             continue
 
         # 表格
@@ -372,8 +415,9 @@ def parse_markdown(text: str, *, title: str = "", base_dir: Optional[Path] = Non
         match = _MD_HEADING.match(line)
         if match:
             flush()
-            blocks.append(Block(kind=BLOCK_HEADING, text=match.group(2).strip(),
-                                level=len(match.group(1))))
+            blocks.append(
+                Block(kind=BLOCK_HEADING, text=match.group(2).strip(), level=len(match.group(1)))
+            )
             index += 1
             continue
 
@@ -399,7 +443,7 @@ def parse_markdown(text: str, *, title: str = "", base_dir: Optional[Path] = Non
             body = [quote.group(1)]
             index += 1
             while index < len(lines) and _MD_QUOTE.match(lines[index]):
-                body.append(_MD_QUOTE.match(lines[index]).group(1))     # type: ignore[union-attr]
+                body.append(_MD_QUOTE.match(lines[index]).group(1))  # type: ignore[union-attr]
                 index += 1
             blocks.append(Block(kind=BLOCK_QUOTE, text=join_wrapped_lines(body)))
             continue
@@ -489,8 +533,11 @@ def parse_html(text: str, *, title: str = "", base_dir: Optional[Path] = None) -
                 blocks.append(Block(kind=BLOCK_TABLE, table=TableData(rows=rows, header=True)))
             return
         if name == "img":
-            blocks.append(_image_block(node.get("alt") or "", node.get("src") or "",
-                                       base_dir=base_dir, label="图片"))
+            blocks.append(
+                _image_block(
+                    node.get("alt") or "", node.get("src") or "", base_dir=base_dir, label="图片"
+                )
+            )
             return
         if name == "hr":
             blocks.append(Block(kind=BLOCK_PAGE_BREAK))
@@ -533,10 +580,15 @@ def _parse_delimited(path: Path, format_key: str, *, max_rows: int) -> DocumentI
         rows.append([cell for cell in row])
     if not rows:
         raise ParseError(f"表格是空的：{path.name}")
-    table = TableData(rows=rows, name=path.stem, header=True,
-                      meta={"delimiter": delimiter, "truncated_rows": truncated})
-    ir = DocumentIR(blocks=[Block(kind=BLOCK_TABLE, table=table)], title=path.stem,
-                    format_key=format_key)
+    table = TableData(
+        rows=rows,
+        name=path.stem,
+        header=True,
+        meta={"delimiter": delimiter, "truncated_rows": truncated},
+    )
+    ir = DocumentIR(
+        blocks=[Block(kind=BLOCK_TABLE, table=table)], title=path.stem, format_key=format_key
+    )
     if truncated:
         ir.warnings.append(f"表格超过 {max_rows} 行，已截断（仅影响预览，导出仍按当前内容）")
     return ir
@@ -548,7 +600,7 @@ def _parse_sheet_family(path: Path, format_key: str, *, max_rows: int) -> Docume
         if container == "xlsx":
             return _parse_xlsx(path, max_rows=max_rows)
         if container == "":
-            pass        # 不是 zip：可能是旧 WPS 表格 → 交给 LibreOffice
+            pass  # 不是 zip：可能是旧 WPS 表格 → 交给 LibreOffice
     if format_key == "xls":
         return _parse_xls(path, max_rows=max_rows)
     converted = _soffice_convert(path, "xlsx")
@@ -606,7 +658,9 @@ def _parse_xlsx(path: Path, *, max_rows: int) -> DocumentIR:
             if truncated:
                 warnings.append(f"工作表「{sheet.title}」超过 {max_rows} 行，已截断预览")
             table = TableData(
-                rows=rows, name=sheet.title, header=True,
+                rows=rows,
+                name=sheet.title,
+                header=True,
                 meta={
                     "truncated_rows": truncated,
                     "formula_cells": formulas,
@@ -616,16 +670,17 @@ def _parse_xlsx(path: Path, *, max_rows: int) -> DocumentIR:
                         len(getattr(item, "rules", []) or [])
                         for item in (getattr(sheet, "conditional_formatting", []) or [])
                     ),
-                    "merged_cells": len(getattr(getattr(sheet, "merged_cells", None), "ranges", []) or []),
+                    "merged_cells": len(
+                        getattr(getattr(sheet, "merged_cells", None), "ranges", []) or []
+                    ),
                 },
             )
             blocks.append(Block(kind=BLOCK_TABLE, table=table))
     finally:
         try:
             workbook.close()
-        except Exception:  # noqa: BLE001
-            pass
-
+        except (OSError, ValueError) as error:  # 关闭失败可忽略
+            swallow("释放资源", error)
     if not blocks:
         raise ParseError(f"表格里没有可读数据：{path.name}")
     ir = DocumentIR(blocks=blocks, title=path.stem, format_key="xlsx", warnings=warnings)
@@ -643,13 +698,13 @@ def _parse_xls(path: Path, *, max_rows: int) -> DocumentIR:
     for sheet in book.sheets():
         rows: list[list[str]] = []
         for row_index in range(min(sheet.nrows, max_rows)):
-            rows.append([
-                _cell_text(sheet.cell_value(row_index, column))
-                for column in range(sheet.ncols)
-            ])
+            rows.append(
+                [_cell_text(sheet.cell_value(row_index, column)) for column in range(sheet.ncols)]
+            )
         if rows:
-            blocks.append(Block(kind=BLOCK_TABLE,
-                                table=TableData(rows=rows, name=sheet.name, header=True)))
+            blocks.append(
+                Block(kind=BLOCK_TABLE, table=TableData(rows=rows, name=sheet.name, header=True))
+            )
     if not blocks:
         raise ParseError(f"表格里没有可读数据：{path.name}")
     return DocumentIR(blocks=blocks, title=path.stem, format_key="xls")
@@ -687,7 +742,7 @@ def _parse_word_family(path: Path, format_key: str) -> DocumentIR:
         try:
             return _parse_odt(path)
         except ParseError:
-            pass        # 交给 LibreOffice
+            pass  # 交给 LibreOffice
     if suffix == ".rtf" or format_key == "rtf":
         try:
             return _parse_rtf(path)
@@ -758,29 +813,40 @@ def _parse_docx(path: Path) -> DocumentIR:
                 box_text = _docx_paragraph_text(inner).strip()
                 if box_text:
                     # 文本框在 IR 里没有"浮动位置"，退化为引用块而不是丢掉
-                    blocks.append(Block(kind=BLOCK_QUOTE, text=box_text,
-                                        style={"textbox": True}))
+                    blocks.append(Block(kind=BLOCK_QUOTE, text=box_text, style={"textbox": True}))
                     textbox_seen = True
             for image in _docx_images(paragraph, document, warnings):
                 # 图片不进 IR 正文，只留引用（见 `media.py`）：写出时重新嵌入
-                blocks.append(Block(kind=BLOCK_IMAGE, text=image["name"],
-                                    meta={"image": image}))
+                blocks.append(Block(kind=BLOCK_IMAGE, text=image["name"], meta={"image": image}))
         elif tag == qn("w:tbl"):
             table = DocxTable(child, document)
             rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
             if rows:
-                blocks.append(Block(kind=BLOCK_TABLE, table=TableData(
-                    rows=rows, header=True,
-                    styles={"style_name": (table.style.name if table.style is not None else "") or ""},
-                )))
+                blocks.append(
+                    Block(
+                        kind=BLOCK_TABLE,
+                        table=TableData(
+                            rows=rows,
+                            header=True,
+                            styles={
+                                "style_name": (table.style.name if table.style is not None else "")
+                                or ""
+                            },
+                        ),
+                    )
+                )
             # 表格单元格里的图片 IR 装不下位置，退化为"表格后面跟一张图"而不是丢掉
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         for image in _docx_images(paragraph, document, warnings):
-                            blocks.append(Block(kind=BLOCK_IMAGE,
-                                                text=f"{image['name']}（表格内图片）",
-                                                meta={"image": image, "from_table": True}))
+                            blocks.append(
+                                Block(
+                                    kind=BLOCK_IMAGE,
+                                    text=f"{image['name']}（表格内图片）",
+                                    meta={"image": image, "from_table": True},
+                                )
+                            )
 
     metadata: dict = {}
     try:
@@ -816,7 +882,7 @@ def _docx_paragraph_text(element: object) -> str:
 
     skipped = (qn("w:del"), qn("w:txbxContent"))
     parts: list[str] = []
-    for node in element.iter():                    # type: ignore[attr-defined]
+    for node in element.iter():  # type: ignore[attr-defined]
         tag = node.tag
         if tag == qn("w:t"):
             if _docx_inside(node, element, skipped):
@@ -831,7 +897,7 @@ def _docx_paragraph_text(element: object) -> str:
 
 def _docx_inside(node: object, top: object, tags: tuple) -> bool:
     """`node` 是否位于 `top` 之内、且中途经过 `tags` 里的容器。"""
-    current = node.getparent()                     # type: ignore[attr-defined]
+    current = node.getparent()  # type: ignore[attr-defined]
     while current is not None and current is not top:
         if current.tag in tags:
             return True
@@ -844,7 +910,7 @@ def _docx_textbox_paragraphs(element: object) -> list[object]:
     from docx.oxml.ns import qn
 
     boxes = []
-    for content in element.iter(qn("w:txbxContent")):   # type: ignore[attr-defined]
+    for content in element.iter(qn("w:txbxContent")):  # type: ignore[attr-defined]
         boxes.extend(content.iter(qn("w:p")))
     return boxes
 
@@ -861,12 +927,15 @@ def _docx_header_footer(document: object) -> dict:
         for section in sections:
             try:
                 holder = getattr(section, attr)
-                lines.extend(paragraph.text.strip() for paragraph in holder.paragraphs
-                             if paragraph.text.strip())
+                lines.extend(
+                    paragraph.text.strip()
+                    for paragraph in holder.paragraphs
+                    if paragraph.text.strip()
+                )
             except Exception:  # noqa: BLE001  链接到上一节/没有页眉部件时跳过
                 continue
         if lines:
-            result[part_name] = " / ".join(dict.fromkeys(lines))     # 去重但保持顺序
+            result[part_name] = " / ".join(dict.fromkeys(lines))  # 去重但保持顺序
     return result
 
 
@@ -887,14 +956,20 @@ def _docx_images(paragraph: object, document: object, warnings: list[str]) -> li
         extent = drawing.find(".//" + qn("wp:extent"))
         if extent is not None:
             try:
-                width_pt = int(extent.get("cx") or 0) / 12700.0     # EMU → pt
+                width_pt = int(extent.get("cx") or 0) / 12700.0  # EMU → pt
                 height_pt = int(extent.get("cy") or 0) / 12700.0
             except (TypeError, ValueError):
                 width_pt = height_pt = 0.0
         hint = _docx_image_hint(drawing)
         for blip in drawing.iter(qn("a:blip")):
-            image = _docx_image_ref(document, blip.get(qn("r:embed")) or blip.get(qn("r:link")),
-                                    warnings, width_pt=width_pt, height_pt=height_pt, name_hint=hint)
+            image = _docx_image_ref(
+                document,
+                blip.get(qn("r:embed")) or blip.get(qn("r:link")),
+                warnings,
+                width_pt=width_pt,
+                height_pt=height_pt,
+                name_hint=hint,
+            )
             if image:
                 images.append(image)
     for shape in element.iter(_VML_SHAPE):
@@ -903,8 +978,13 @@ def _docx_images(paragraph: object, document: object, warnings: list[str]) -> li
         width_pt = _vml_length(style, "width")
         height_pt = _vml_length(style, "height")
         for imagedata in shape.iter(_VML_IMAGEDATA):
-            image = _docx_image_ref(document, imagedata.get(qn("r:id")), warnings,
-                                    width_pt=width_pt, height_pt=height_pt)
+            image = _docx_image_ref(
+                document,
+                imagedata.get(qn("r:id")),
+                warnings,
+                width_pt=width_pt,
+                height_pt=height_pt,
+            )
             if image:
                 images.append(image)
     return images
@@ -928,7 +1008,7 @@ def _docx_image_hint(drawing: object) -> str:
     """
     from docx.oxml.ns import qn
 
-    doc_pr = drawing.find(".//" + qn("wp:docPr"))      # type: ignore[attr-defined]
+    doc_pr = drawing.find(".//" + qn("wp:docPr"))  # type: ignore[attr-defined]
     if doc_pr is None:
         return ""
     descr = str(doc_pr.get("descr") or "").strip()
@@ -937,15 +1017,21 @@ def _docx_image_hint(drawing: object) -> str:
     return ""
 
 
-def _docx_image_ref(document: object, rel_id: Optional[str], warnings: list[str], *,
-                    width_pt: float = 0.0, height_pt: float = 0.0,
-                    name_hint: str = "") -> Optional[dict]:
+def _docx_image_ref(
+    document: object,
+    rel_id: Optional[str],
+    warnings: list[str],
+    *,
+    width_pt: float = 0.0,
+    height_pt: float = 0.0,
+    name_hint: str = "",
+) -> Optional[dict]:
     """按关系 id 取出图片部件并落进素材缓存。"""
     if not rel_id:
         return None
     part = getattr(document, "part", None)
     try:
-        related = part.related_parts[rel_id]      # type: ignore[index]
+        related = part.related_parts[rel_id]  # type: ignore[index]
     except (KeyError, AttributeError, TypeError):
         return None
     blob = getattr(related, "blob", b"") or b""
@@ -953,9 +1039,13 @@ def _docx_image_ref(document: object, rel_id: Optional[str], warnings: list[str]
         return None
     part_name = str(getattr(related, "partname", "") or "")
     try:
-        return media.store_image(blob, content_type=str(getattr(related, "content_type", "") or ""),
-                                 name=name_hint or Path(part_name).name or "image",
-                                 width_pt=width_pt, height_pt=height_pt)
+        return media.store_image(
+            blob,
+            content_type=str(getattr(related, "content_type", "") or ""),
+            name=name_hint or Path(part_name).name or "image",
+            width_pt=width_pt,
+            height_pt=height_pt,
+        )
     except media.MediaError as error:
         warnings.append(f"Word 里有张图片没能保留：{error}")
         return None
@@ -1001,8 +1091,12 @@ def _parse_odt(path: Path) -> DocumentIR:
             if not text:
                 return
             if tag == "h":
-                level = int(node.attrib.get(
-                    "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}outline-level", "1") or 1)
+                level = int(
+                    node.attrib.get(
+                        "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}outline-level", "1"
+                    )
+                    or 1
+                )
                 blocks.append(Block(kind=BLOCK_HEADING, text=text, level=max(1, min(6, level))))
             else:
                 blocks.append(Block(kind=BLOCK_PARAGRAPH, text=text))
@@ -1012,7 +1106,11 @@ def _parse_odt(path: Path) -> DocumentIR:
             for row in node:
                 if local(row.tag) != "table-row":
                     continue
-                cells = [_odf_text(cell) for cell in row if local(cell.tag) in ("table-cell", "covered-table-cell")]
+                cells = [
+                    _odf_text(cell)
+                    for cell in row
+                    if local(cell.tag) in ("table-cell", "covered-table-cell")
+                ]
                 if any(cells):
                     rows.append(cells)
             if rows:
@@ -1048,7 +1146,7 @@ def _odf_text(node) -> str:  # noqa: ANN001
 def _parse_rtf(path: Path) -> DocumentIR:
     from modu_workbench.core.convert import office_io
 
-    text = office_io._extract_rtf(path)      # noqa: SLF001  复用转换板块的轻量 RTF 解析
+    text = office_io._extract_rtf(path)  # noqa: SLF001  复用转换板块的轻量 RTF 解析
     if not text.strip():
         raise ParseError("这个 RTF 解析不出正文，建议先用 LibreOffice 另存为 DOCX")
     ir = parse_plain_text(text, title=path.stem)
@@ -1085,12 +1183,14 @@ def _parse_pdf(path: Path, *, ocr: bool) -> DocumentIR:
             if not chunk:
                 continue
             level = guess_heading_level(chunk.split("\n")[0])
-            blocks.append(Block(
-                kind=BLOCK_HEADING if level else BLOCK_PARAGRAPH,
-                text=join_wrapped_lines(chunk.split("\n")) if not level else chunk,
-                level=level,
-                meta={"page": number},
-            ))
+            blocks.append(
+                Block(
+                    kind=BLOCK_HEADING if level else BLOCK_PARAGRAPH,
+                    text=join_wrapped_lines(chunk.split("\n")) if not level else chunk,
+                    level=level,
+                    meta={"page": number},
+                )
+            )
 
     ir = DocumentIR(blocks=blocks, title=path.stem, format_key="pdf")
     ir.metadata["pages"] = len(reader.pages)
@@ -1124,7 +1224,9 @@ def _ocr_pdf(path: Path, ir: DocumentIR) -> DocumentIR:
     for number, text in pages:
         for chunk in re.split(r"\n\s*\n", text):
             if chunk.strip():
-                blocks.append(Block(kind=BLOCK_PARAGRAPH, text=chunk.strip(), meta={"page": number}))
+                blocks.append(
+                    Block(kind=BLOCK_PARAGRAPH, text=chunk.strip(), meta={"page": number})
+                )
     if blocks:
         ir.blocks = blocks
         ir.metadata["ocr"] = True
@@ -1204,12 +1306,14 @@ def _parse_pptx(path: Path) -> DocumentIR:
             texts = _pptx_texts(bundle.read(name), ET)
             if not texts and not notes.get(index):
                 continue
-            blocks.append(Block(
-                kind=BLOCK_SLIDE,
-                text="\n".join(texts).strip(),
-                level=1,
-                meta={"slide": index, "notes": notes.get(index, "")},
-            ))
+            blocks.append(
+                Block(
+                    kind=BLOCK_SLIDE,
+                    text="\n".join(texts).strip(),
+                    level=1,
+                    meta={"slide": index, "notes": notes.get(index, "")},
+                )
+            )
     if not blocks:
         raise ParseError("演示文稿里没有可读文字（可能整份都是图片）")
     ir = DocumentIR(blocks=blocks, title=path.stem, format_key="pptx")
@@ -1256,8 +1360,9 @@ def _parse_odp(path: Path) -> DocumentIR:
                 if text:
                     lines.append(text)
         if lines:
-            blocks.append(Block(kind=BLOCK_SLIDE, text="\n".join(lines), level=1,
-                                meta={"slide": index}))
+            blocks.append(
+                Block(kind=BLOCK_SLIDE, text="\n".join(lines), level=1, meta={"slide": index})
+            )
     if not blocks:
         raise ParseError("演示文稿里没有可读文字")
     return DocumentIR(blocks=blocks, title=path.stem, format_key="odp")
@@ -1368,10 +1473,14 @@ def _parse_image(path: Path, format_key: str, *, ocr: bool) -> DocumentIR:
     try:
         with Image.open(path) as image:
             width, height = image.size
-            ir.metadata.update({
-                "width": width, "height": height,
-                "mode": image.mode, "frames": int(getattr(image, "n_frames", 1)),
-            })
+            ir.metadata.update(
+                {
+                    "width": width,
+                    "height": height,
+                    "mode": image.mode,
+                    "frames": int(getattr(image, "n_frames", 1)),
+                }
+            )
     except Exception as error:  # noqa: BLE001
         raise ParseError(f"无法读取图片：{error}") from error
 
@@ -1382,8 +1491,9 @@ def _parse_image(path: Path, format_key: str, *, ocr: bool) -> DocumentIR:
 
         text = ocr_image(path)
         if text:
-            ir.blocks.append(Block(kind=BLOCK_PARAGRAPH, text=text,
-                                   meta={"ocr": True, "source": str(path)}))
+            ir.blocks.append(
+                Block(kind=BLOCK_PARAGRAPH, text=text, meta={"ocr": True, "source": str(path)})
+            )
             ir.blocks[-1].ai_generated = False
             ir.metadata["ocr"] = True
             ir.warnings.append("OCR 结果可能有识别误差，请校对后再使用")
@@ -1432,8 +1542,8 @@ def _parse_epub(path: Path) -> DocumentIR:
         meta_title = book.get_metadata("DC", "title")
         if meta_title:
             title = str(meta_title[0][0]) or title
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+        swallow("parser 中的可选步骤", error)
     return DocumentIR(blocks=blocks, title=title, format_key="epub")
 
 

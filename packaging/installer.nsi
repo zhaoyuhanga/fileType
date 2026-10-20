@@ -1,11 +1,11 @@
 ﻿; 墨软·工作台 NSIS 安装脚本（onedir 包 → 安装程序）
-; 编译：makensis /DAPP_VERSION=2.0.1 packaging\installer.nsi
+; 编译：makensis /DAPP_VERSION=2.1.0 packaging\installer.nsi
 ; 路径默认相对本脚本（仓库内），可用 /DSOURCE_DIR=... /DOUTPUT_DIR=... 覆盖
 Unicode true
 !include "MUI2.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "2.0.1"   ; 仅手动编译时的兜底；正式打包由 build_installer.ps1 传 /DAPP_VERSION
+  !define APP_VERSION "2.1.0"   ; 仅手动编译时的兜底；正式打包由 build_installer.ps1 传 /DAPP_VERSION
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "${__FILEDIR__}\..\dist\ModuWorkbench"

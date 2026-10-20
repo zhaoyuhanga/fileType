@@ -12,10 +12,12 @@
 - `WidgetSurface`：`QVideoWidget` 旧路径（显卡异常时的一键回退）；
 - `make_surface(prefer)`：按设置选，`auto` 时优先 graphics。
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QVBoxLayout, QWidget
+from modu_workbench.core.platform.logging import swallow
 
 #: `video/render_path` 的取值
 RENDER_AUTO = "auto"
@@ -162,11 +164,12 @@ def read_render_path() -> str:
         from PySide6.QtCore import QSettings
 
         value = QSettings("ModuWorkbench", "modu-workbench").value(
-            "video/render_path", RENDER_AUTO, type=str)
+            "video/render_path", RENDER_AUTO, type=str
+        )
         if value in (RENDER_AUTO, RENDER_GRAPHICS, RENDER_WIDGET):
             return str(value)
-    except Exception:  # noqa: BLE001
-        pass
+    except (ImportError, RuntimeError, TypeError, ValueError) as error:
+        swallow("读取设置", error)
     return RENDER_AUTO
 
 
@@ -205,6 +208,12 @@ def make_surface(prefer: str = "") -> VideoSurface | WidgetSurface | None:
 
 
 __all__ = [
-    "RENDER_AUTO", "RENDER_GRAPHICS", "RENDER_WIDGET", "VideoSurface",
-    "WidgetSurface", "graphics_available", "make_surface", "read_render_path",
+    "RENDER_AUTO",
+    "RENDER_GRAPHICS",
+    "RENDER_WIDGET",
+    "VideoSurface",
+    "WidgetSurface",
+    "graphics_available",
+    "make_surface",
+    "read_render_path",
 ]

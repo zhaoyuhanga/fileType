@@ -13,6 +13,7 @@
 
 说明：文档板块的 PDF **文本层**解析走 `parser.py`；这里只做"页面级"操作。
 """
+
 from __future__ import annotations
 
 import re
@@ -20,6 +21,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
+from modu_workbench.core.platform.logging import debug, swallow
 
 #: A4 尺寸（点）—— 新建覆盖层时的默认页面大小
 A4_WIDTH_PT = 595.0
@@ -68,8 +70,9 @@ class PdfInfo:
 # ---------------------------------------------------------------- 读取
 
 
-def _open_reader(path: str | Path, password: str = "", *,
-                 require_decrypted: bool = True):  # noqa: ANN202
+def _open_reader(
+    path: str | Path, password: str = "", *, require_decrypted: bool = True
+):  # noqa: ANN202
     """打开 PDF。
 
     `require_decrypted=False` 用于"只看概况"的场景：加密文件也能报出
@@ -150,8 +153,8 @@ def pdf_info(path: str | Path, *, password: str = "") -> PdfInfo:
         info.title = str(metadata.get("/Title") or "")
         info.author = str(metadata.get("/Author") or "")
         info.producer = str(metadata.get("/Producer") or "")
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+        swallow("pdf_tools 中的可选步骤", error)
     if info.pages:
         try:
             box = reader.pages[0].mediabox
@@ -202,8 +205,9 @@ def parse_pages(spec: str, total: int) -> list[int]:
 # ---------------------------------------------------------------- 合并 / 拆分
 
 
-def merge_pdfs(paths: Sequence[str | Path], output: str | Path, *,
-               bookmarks: bool = True, password: str = "") -> Path:
+def merge_pdfs(
+    paths: Sequence[str | Path], output: str | Path, *, bookmarks: bool = True, password: str = ""
+) -> Path:
     """把多个 PDF 合成一份（可选按文件名加书签）。"""
     files = [Path(item) for item in paths if str(item).strip()]
     if len(files) < 2:
@@ -218,14 +222,21 @@ def merge_pdfs(paths: Sequence[str | Path], output: str | Path, *,
         if bookmarks:
             try:
                 writer.add_outline_item(source.stem, start)
-            except Exception:  # noqa: BLE001  书签失败不影响合并
-                pass
+            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                swallow("pdf_tools 中的可选步骤", error)
     return _save(writer, output)
 
 
-def split_pdf(path: str | Path, output_dir: str | Path, *, mode: str = "each",
-              ranges: str = "", every: int = 1, prefix: str = "",
-              password: str = "") -> list[Path]:
+def split_pdf(
+    path: str | Path,
+    output_dir: str | Path,
+    *,
+    mode: str = "each",
+    ranges: str = "",
+    every: int = 1,
+    prefix: str = "",
+    password: str = "",
+) -> list[Path]:
     """拆分 PDF。
 
     - `mode="each"`：每页一个文件；
@@ -264,8 +275,9 @@ def split_pdf(path: str | Path, output_dir: str | Path, *, mode: str = "each",
     return produced
 
 
-def extract_pages(path: str | Path, output: str | Path, *, pages: str = "",
-                  password: str = "") -> Path:
+def extract_pages(
+    path: str | Path, output: str | Path, *, pages: str = "", password: str = ""
+) -> Path:
     """抽取指定页另存为新的 PDF（`pages` 为空 = 全部页面）。"""
     pypdf = _require_pypdf()
     reader = _open_reader(path, password)
@@ -298,8 +310,9 @@ def _segment_label(group: Sequence[int]) -> str:
 # ---------------------------------------------------------------- 压缩 / 旋转
 
 
-def compress_pdf(path: str | Path, output: str | Path, *, level: str = "medium",
-                 password: str = "") -> Path:
+def compress_pdf(
+    path: str | Path, output: str | Path, *, level: str = "medium", password: str = ""
+) -> Path:
     """压缩 PDF：重写内容流 + 去重相同对象 + 清理元数据。
 
     `level`：`light`（只重写内容流）/ `medium`（+去重）/ `strong`（+清元数据与书签）。
@@ -314,8 +327,10 @@ def compress_pdf(path: str | Path, output: str | Path, *, level: str = "medium",
     if level in ("medium", "strong"):
         # pypdf 7 把参数改名（remove_orphans→remove_unreferenced、remove_identicals→remove_duplicates），
         # 这里按"新名字 → 旧名字"依次尝试，两个大版本都能用
-        for kwargs in ({"remove_duplicates": True, "remove_unreferenced": True},
-                       {"remove_identicals": True, "remove_orphans": True}):
+        for kwargs in (
+            {"remove_duplicates": True, "remove_unreferenced": True},
+            {"remove_identicals": True, "remove_orphans": True},
+        ):
             try:
                 writer.compress_identical_objects(**kwargs)  # type: ignore[attr-defined]
                 break
@@ -326,13 +341,14 @@ def compress_pdf(path: str | Path, output: str | Path, *, level: str = "medium",
     if level == "strong":
         try:
             writer.metadata = None  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+            swallow("pdf_tools 中的可选步骤", error)
     return _save(writer, output)
 
 
-def rotate_pdf(path: str | Path, output: str | Path, *, angle: int = 90,
-               pages: str = "", password: str = "") -> Path:
+def rotate_pdf(
+    path: str | Path, output: str | Path, *, angle: int = 90, pages: str = "", password: str = ""
+) -> Path:
     """旋转页面（90 的倍数）；`pages` 为空 = 全部页面。"""
     if angle % 90 != 0:
         raise PdfError("旋转角度必须是 90 的倍数（90 / 180 / 270）")
@@ -351,7 +367,9 @@ def rotate_pdf(path: str | Path, output: str | Path, *, angle: int = 90,
 # ---------------------------------------------------------------- 加密 / 解密
 
 
-def _permission_flags(*, allow_printing: bool, allow_copying: bool, allow_modifying: bool):  # noqa: ANN202
+def _permission_flags(
+    *, allow_printing: bool, allow_copying: bool, allow_modifying: bool
+):  # noqa: ANN202
     """构造 pypdf 的权限位（不同版本常量名不同，用 getattr 兜底）。"""
     from pypdf.constants import UserAccessPermissions as UAP
 
@@ -371,10 +389,17 @@ def _permission_flags(*, allow_printing: bool, allow_copying: bool, allow_modify
     return value
 
 
-def encrypt_pdf(path: str | Path, output: str | Path, *, user_password: str,
-                owner_password: str = "", allow_printing: bool = True,
-                allow_copying: bool = False, allow_modifying: bool = False,
-                password: str = "") -> Path:
+def encrypt_pdf(
+    path: str | Path,
+    output: str | Path,
+    *,
+    user_password: str,
+    owner_password: str = "",
+    allow_printing: bool = True,
+    allow_copying: bool = False,
+    allow_modifying: bool = False,
+    password: str = "",
+) -> Path:
     """加密 PDF（AES-128/RC4 由 pypdf 决定；权限位控制打印/复制/修改）。"""
     if not user_password.strip():
         raise PdfError("请设置打开密码（为空等于没加密）")
@@ -385,8 +410,10 @@ def encrypt_pdf(path: str | Path, output: str | Path, *, user_password: str,
             user_password=user_password,
             owner_password=owner_password or user_password,
             permissions_flag=_permission_flags(
-                allow_printing=allow_printing, allow_copying=allow_copying,
-                allow_modifying=allow_modifying),
+                allow_printing=allow_printing,
+                allow_copying=allow_copying,
+                allow_modifying=allow_modifying,
+            ),
         )
     except TypeError:
         # 老版本签名只有位置参数
@@ -406,12 +433,25 @@ def decrypt_pdf(path: str | Path, output: str | Path, *, password: str) -> Path:
 # ---------------------------------------------------------------- 水印
 
 
-def watermark_pdf(path: str | Path, output: str | Path, *, text: str, footer: str = "",
-                  tracking_id: str = "", password: str = "") -> Path:
+def watermark_pdf(
+    path: str | Path,
+    output: str | Path,
+    *,
+    text: str,
+    footer: str = "",
+    tracking_id: str = "",
+    password: str = "",
+) -> Path:
     """给每一页加浅灰水印文字与页脚（覆盖层与页面同尺寸，不会被缩放拉花）。"""
-    line = " · ".join(item for item in (text.strip(), footer.strip(),
-                                        f"标识：{tracking_id.strip()}" if tracking_id.strip() else "")
-                      if item)
+    line = " · ".join(
+        item
+        for item in (
+            text.strip(),
+            footer.strip(),
+            f"标识：{tracking_id.strip()}" if tracking_id.strip() else "",
+        )
+        if item
+    )
     if not line:
         raise PdfError("请填写水印文字或页脚内容")
     pypdf = _require_pypdf()
@@ -455,8 +495,14 @@ def render_overlay_pdf(line: str, output: str | Path, *, width: float, height: f
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
     printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
     printer.setOutputFileName(str(destination))
-    printer.setPageSize(QPageSize(QSizeF(max(72.0, width), max(72.0, height)),
-                                  QPageSize.Unit.Point, "custom", QPageSize.SizeMatchPolicy.ExactMatch))
+    printer.setPageSize(
+        QPageSize(
+            QSizeF(max(72.0, width), max(72.0, height)),
+            QPageSize.Unit.Point,
+            "custom",
+            QPageSize.SizeMatchPolicy.ExactMatch,
+        )
+    )
     document = QTextDocument()
     document.setDefaultFont(QFont("Microsoft YaHei", 14))
     font_size = max(12, min(int(height / 22), 40))
@@ -465,13 +511,14 @@ def render_overlay_pdf(line: str, output: str | Path, *, width: float, height: f
         "<div style='text-align:center;margin-top:%dpt;color:#c9cede;font-size:%dpt;"
         "font-weight:bold'>%s</div>"
         "<div style='text-align:center;color:#b9c0d2;font-size:10pt'>%s</div>"
-        % (int(height / 2.6), font_size, escaped, escaped))
+        % (int(height / 2.6), font_size, escaped, escaped)
+    )
     document.print_(printer)
     return destination
 
 
 def _escape(text: str) -> str:
-    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 # ---------------------------------------------------------------- 表单
@@ -493,14 +540,15 @@ def list_form_fields(path: str | Path, *, password: str = "") -> list[dict]:
             states = field.get("/_States_")
             if states:
                 entry["options"] = [str(item) for item in states]
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+            swallow("pdf_tools 中的可选步骤", error)
         result.append(entry)
     return result
 
 
-def fill_form(path: str | Path, output: str | Path, values: dict, *,
-              password: str = "", flatten: bool = False) -> Path:
+def fill_form(
+    path: str | Path, output: str | Path, values: dict, *, password: str = "", flatten: bool = False
+) -> Path:
     """填写 PDF 表单字段（`values` = {字段名: 值}）。"""
     if not values:
         raise PdfError("没有要填写的字段")
@@ -524,8 +572,8 @@ def fill_form(path: str | Path, output: str | Path, values: dict, *,
         root = writer._root_object  # noqa: SLF001
         if "/AcroForm" in root:
             root["/AcroForm"][NameObject("/NeedAppearances")] = BooleanObject(True)
-    except Exception:  # noqa: BLE001  个别版本结构不同，忽略
-        pass
+    except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+        swallow("pdf_tools 中的可选步骤", error)
     if flatten:
         for page in writer.pages:
             try:
@@ -556,20 +604,27 @@ def list_annotations(path: str | Path, *, password: str = "") -> list[dict]:
                 text = str(obj.get("/Contents") or obj.get("/T") or "").strip()
                 if not text:
                     continue
-                result.append({
-                    "page": page_index,
-                    "type": subtype.lstrip("/"),
-                    "text": text,
-                    "author": str(obj.get("/T") or ""),
-                })
+                result.append(
+                    {
+                        "page": page_index,
+                        "type": subtype.lstrip("/"),
+                        "text": text,
+                        "author": str(obj.get("/T") or ""),
+                    }
+                )
             except Exception:  # noqa: BLE001  单条损坏不影响其余
                 continue
     return result
 
 
-def annotate_pdf(path: str | Path, output: str | Path,
-                 notes: Sequence[dict | tuple], *, password: str = "",
-                 author: str = "墨软文档") -> Path:
+def annotate_pdf(
+    path: str | Path,
+    output: str | Path,
+    notes: Sequence[dict | tuple],
+    *,
+    password: str = "",
+    author: str = "墨软文档",
+) -> Path:
     """给 PDF 加**真实批注**（`pypdf.annotations.FreeText`）。
 
     `notes` 支持两种写法：`{"page": 1, "text": "..."}` 或 `(页码, 文字)`（页码从 1 开始）。
@@ -591,27 +646,32 @@ def annotate_pdf(path: str | Path, output: str | Path,
 
     reader = _open_reader(path, password)
     writer = _writer_from(reader)
-    total = len(writer.pages)                      # type: ignore[attr-defined]
+    total = len(writer.pages)  # type: ignore[attr-defined]
     per_page: dict[int, int] = {}
     for page_number, text in items:
         if page_number < 1 or page_number > total:
             raise PdfError(f"页码超出范围：{page_number}（这份 PDF 共 {total} 页）")
         offset = per_page.get(page_number, 0)
         per_page[page_number] = offset + 1
-        width, height = _page_size(writer.pages[page_number - 1])   # type: ignore[attr-defined]
+        width, height = _page_size(writer.pages[page_number - 1])  # type: ignore[attr-defined]
         top = max(24.0, height - 48.0 - offset * 34.0)
-        rectangle = (max(8.0, width - 240.0), top - 28.0,
-                     max(80.0, width - 12.0), top)
-        writer.add_annotation(                        # type: ignore[attr-defined]
+        rectangle = (max(8.0, width - 240.0), top - 28.0, max(80.0, width - 12.0), top)
+        writer.add_annotation(  # type: ignore[attr-defined]
             page_number=page_number - 1,
-            annotation=FreeText(text=text, rect=rectangle, font_size="10pt",
-                                font_color="1f2430", border_color="1452C4",
-                                background_color="eef1f8"),
+            annotation=FreeText(
+                text=text,
+                rect=rectangle,
+                font_size="10pt",
+                font_color="1f2430",
+                border_color="1452C4",
+                background_color="eef1f8",
+            ),
         )
     return _save(writer, output)
 
 
 # ---------------------------------------------------------------- 文本与图片
+
 
 def extract_text(path: str | Path, *, pages: str = "", password: str = "") -> str:
     """抽取文本层（`pages` 为空 = 全部页）。"""
@@ -628,15 +688,17 @@ def extract_text(path: str | Path, *, pages: str = "", password: str = "") -> st
     return "\n\n".join(chunk for chunk in chunks if chunk)
 
 
-def to_images(path: str | Path, output_dir: str | Path, *, pages: str = "",
-              dpi: int = 150) -> list[Path]:
+def to_images(
+    path: str | Path, output_dir: str | Path, *, pages: str = "", dpi: int = 150
+) -> list[Path]:
     """PDF → PNG（扫描件 OCR 的前置步骤）；需要 PyMuPDF，缺失时给可操作提示。"""
     try:
         import fitz  # PyMuPDF
     except Exception as error:  # noqa: BLE001
         raise PdfError(
             "PDF 转图片需要 PyMuPDF（pip install pymupdf）："
-            "装好后可把扫描件转成图片再做 OCR，或用「墨软转换」的 PDF → 图片") from error
+            "装好后可把扫描件转成图片再做 OCR，或用「墨软转换」的 PDF → 图片"
+        ) from error
     reader_pages = _open_reader(path)
     folder = Path(output_dir)
     folder.mkdir(parents=True, exist_ok=True)
@@ -653,13 +715,14 @@ def to_images(path: str | Path, output_dir: str | Path, *, pages: str = "",
     finally:
         try:
             document.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except (OSError, ValueError) as error:  # 关闭失败可忽略
+            swallow("释放资源", error)
     return produced
 
 
-def document_to_images(path: str | Path, output_dir: str | Path, *, pages: str = "",
-                       dpi: int = 150) -> list[Path]:
+def document_to_images(
+    path: str | Path, output_dir: str | Path, *, pages: str = "", dpi: int = 150
+) -> list[Path]:
     """把**任意受支持文档**导出为 PNG（PDF 直接渲染；Office 先经 LibreOffice 转 PDF）。
 
     这是需求 6.2「演示文稿导出 PDF/图片」的落地点：PPTX/PPT/ODP 先由 LibreOffice 转成
@@ -681,7 +744,8 @@ def document_to_images(path: str | Path, output_dir: str | Path, *, pages: str =
     if office_io.find_soffice() is None:
         raise PdfError(
             "把 Office 文档导出为图片需要 LibreOffice（soffice）：安装后可一键导出，"
-            "或改用「导出 PDF」再自行截图")
+            "或改用「导出 PDF」再自行截图"
+        )
     generated = office_io.soffice_convert(source, target="pdf")
     if generated is None:
         raise PdfError(f"LibreOffice 无法转换这份文档：{source.name}")
@@ -695,10 +759,12 @@ def document_to_images(path: str | Path, output_dir: str | Path, *, pages: str =
 
 
 def capability_text() -> str:
-    return ("PDF 工具：拆分（每页/每 N 页/按段）、合并（可加书签）、抽取指定页、压缩（轻/中/强）、"
-            "加密与解密（可控制打印/复制/修改权限）、旋转、水印与追踪标识、表单域列出与填写、"
-            "批注（读取与写入 FreeText 标注）、文本层抽取、PDF → PNG（需 PyMuPDF）、"
-            "任意文档 → PNG（Office 文档经 LibreOffice 转 PDF 再渲染）")
+    return (
+        "PDF 工具：拆分（每页/每 N 页/按段）、合并（可加书签）、抽取指定页、压缩（轻/中/强）、"
+        "加密与解密（可控制打印/复制/修改权限）、旋转、水印与追踪标识、表单域列出与填写、"
+        "批注（读取与写入 FreeText 标注）、文本层抽取、PDF → PNG（需 PyMuPDF）、"
+        "任意文档 → PNG（Office 文档经 LibreOffice 转 PDF 再渲染）"
+    )
 
 
 __all__ = [

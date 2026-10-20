@@ -207,6 +207,11 @@ $required = @(
     "modu_workbench.services.media_proxy.server",
     "modu_workbench.services.media_proxy.upstream",
     "modu_workbench.services.media_proxy.cache",
+    # v2.1.0：单体拆分后的新模块（fetch/handler 被 server 与 playlist 引用）
+    "modu_workbench.services.media_proxy.fetch",
+    "modu_workbench.services.media_proxy.handler",
+    "modu_workbench.ui_kit.theme_icons",
+    "modu_workbench.app.selfcheck",
     "modu_workbench.ui_kit.media.player",
     "modu_workbench.ui_kit.media.surface",
     "modu_workbench.ui_kit.media.decode",
@@ -279,13 +284,13 @@ if (Test-Path $checkOut2) {
         Write-Ok "全部自检项通过（含 video_core）"
     }
     if ($null -eq $json2.video_core) {
-        Write-Warn2 "自检结果里没有 video_core 项，请确认 app/main.py 的 record(\"video_core\", ...) 存在。"
+        Write-Warn2 "自检结果里没有 video_core 项，请确认 app/selfcheck.py 的 record(\"video_core\", ...) 存在。"
     }
     if ($null -eq $json2.gallery_core) {
-        Write-Warn2 "自检结果里没有 gallery_core 项，请确认 app/main.py 的 record(\"gallery_core\", ...) 存在。"
+        Write-Warn2 "自检结果里没有 gallery_core 项，请确认 app/selfcheck.py 的 record(\"gallery_core\", ...) 存在。"
     }
     if ($null -eq $json2.document_core) {
-        Write-Warn2 "自检结果里没有 document_core 项，请确认 app/main.py 的 record(\"document_core\", ...) 存在。"
+        Write-Warn2 "自检结果里没有 document_core 项，请确认 app/selfcheck.py 的 record(\"document_core\", ...) 存在。"
     }
     if ($null -eq $json2.pdf_print_engine) {
         Write-Warn2 "自检结果里没有 pdf_print_engine 项：文档板块打印 PDF 需要 QtPdf，请确认 spec 的 EXCLUDES 没有排除 PySide6.QtPdf（以及 Qt6Pdf.dll）。"

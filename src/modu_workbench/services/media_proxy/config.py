@@ -4,12 +4,14 @@
 （测试、ffmpeg 子进程、无界面自检），因此读取设置绝不能硬依赖 QSettings。
 这里按「数据库 app_settings → QSettings → 默认值」三级回退。
 """
+
 from __future__ import annotations
 
 import os
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
+from modu_workbench.core.platform.logging import swallow
 
 # ---------------------------------------------------------------- 默认值
 #: 分片缓存配额（MB）—— 与 docs/VIDEO_PLAN.md 3.4 的 video/cache_quota_mb 一致
@@ -83,16 +85,16 @@ def _read_setting(key: str, default: str) -> str:
                 conn.close()
             if row and row[0] not in (None, ""):
                 return str(row[0])
-    except Exception:  # noqa: BLE001  设置读不到就用默认值，绝不影响播放
-        pass
+    except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+        swallow("config 中的可选步骤", error)
     try:  # ② Qt 设置（界面上刚改完、尚未落库时命中这里）
         from PySide6.QtCore import QSettings
 
         value = QSettings("ModuWorkbench", "modu-workbench").value(f"video/{key}", "")
         if value not in (None, ""):
             return str(value)
-    except Exception:  # noqa: BLE001
-        pass
+    except (ImportError, RuntimeError, TypeError, ValueError) as error:
+        swallow("读取设置", error)
     return default
 
 
@@ -122,9 +124,9 @@ class ProxyConfig:
 
 #: 缓冲档位 →（缓存配额 MB, 预取片数）
 BUFFER_MODES: dict[str, tuple[int, int]] = {
-    "low": (256, 2),        # 省流
+    "low": (256, 2),  # 省流
     "balanced": (1024, 3),  # 均衡（默认）
-    "high": (2048, 6),      # 高质
+    "high": (2048, 6),  # 高质
 }
 
 
@@ -184,12 +186,31 @@ def with_overrides(**kwargs) -> ProxyConfig:  # noqa: ANN003
 
 
 __all__ = [
-    "BUFFER_MODES", "DEFAULT_CACHE_QUOTA_MB", "DEFAULT_PREFETCH_SEGMENTS",
-    "DEFAULT_PROXY_CONCURRENCY", "IMAGE_MAX_AGE", "MAX_IMAGE_BYTES",
-    "MAX_PLAYLIST_BYTES", "MAX_SEGMENT_BYTES", "PLAYLIST_TTL_SECONDS",
-    "ProxyConfig", "RETRY_IMAGE", "RETRY_PLAYLIST", "RETRY_SEGMENT",
-    "SEGMENT_MAX_AGE", "SEGMENT_RETRY_BACKOFF", "TIMEOUT_DIRECT",
-    "TIMEOUT_IMAGE", "TIMEOUT_PLAYLIST", "TIMEOUT_SEGMENT", "UA",
-    "buffer_mode_defaults", "get_config", "load_config", "reset_config",
-    "set_config", "video_cache_dir", "with_overrides",
+    "BUFFER_MODES",
+    "DEFAULT_CACHE_QUOTA_MB",
+    "DEFAULT_PREFETCH_SEGMENTS",
+    "DEFAULT_PROXY_CONCURRENCY",
+    "IMAGE_MAX_AGE",
+    "MAX_IMAGE_BYTES",
+    "MAX_PLAYLIST_BYTES",
+    "MAX_SEGMENT_BYTES",
+    "PLAYLIST_TTL_SECONDS",
+    "ProxyConfig",
+    "RETRY_IMAGE",
+    "RETRY_PLAYLIST",
+    "RETRY_SEGMENT",
+    "SEGMENT_MAX_AGE",
+    "SEGMENT_RETRY_BACKOFF",
+    "TIMEOUT_DIRECT",
+    "TIMEOUT_IMAGE",
+    "TIMEOUT_PLAYLIST",
+    "TIMEOUT_SEGMENT",
+    "UA",
+    "buffer_mode_defaults",
+    "get_config",
+    "load_config",
+    "reset_config",
+    "set_config",
+    "video_cache_dir",
+    "with_overrides",
 ]

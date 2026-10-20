@@ -18,6 +18,7 @@
 对外 API 与旧 `boards/video/player.py::VideoPlayerDialog` **完全兼容**
 （同名信号 + 同参数 + 同方法），旧调用方与旧测试不需要改动。
 """
+
 from __future__ import annotations
 
 import os
@@ -44,6 +45,7 @@ from modu_workbench.ui_kit.toast import Toaster
 from . import danmaku as danmaku_ops
 from . import subtitle as subtitle_ops
 from .surface import VideoSurface, make_surface, read_render_path
+from modu_workbench.core.platform.logging import swallow
 
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 
@@ -141,7 +143,7 @@ class VideoPlayerDialog(QDialog):
         has_prev: bool = False,
         has_next: bool = False,
         render_path: str = "",
-        diagnostics_provider=None,      # noqa: ANN001  Callable[[], dict]
+        diagnostics_provider=None,  # noqa: ANN001  Callable[[], dict]
         subtitle_path: str = "",
     ):
         super().__init__(parent)
@@ -192,8 +194,14 @@ class VideoPlayerDialog(QDialog):
 
     # ------------------------------------------------------------------ 界面
 
-    def _build_ui(self, qualities: list[str], current_quality: str, episode_label: str,
-                  has_prev: bool, has_next: bool) -> None:
+    def _build_ui(
+        self,
+        qualities: list[str],
+        current_quality: str,
+        episode_label: str,
+        has_prev: bool,
+        has_next: bool,
+    ) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -344,7 +352,8 @@ class VideoPlayerDialog(QDialog):
         if isinstance(surface, VideoSurface):
             self._overlay = _Overlay(surface)
         self._engine_label.setText(
-            "原生解码 · 可叠加" if isinstance(surface, VideoSurface) else "原生解码 · 基础路径")
+            "原生解码 · 可叠加" if isinstance(surface, VideoSurface) else "原生解码 · 基础路径"
+        )
 
         self._player = QMediaPlayer(self)
         self._audio = QAudioOutput(self)
@@ -372,8 +381,7 @@ class VideoPlayerDialog(QDialog):
         # 远程地址统一走本机代理（新代理：连接池 + 流式 + 磁盘缓存 + 预热）
         if url.lower().startswith(("http://", "https://")) and not proxy.is_local_url(url):
             try:
-                play_url = (proxy.hls_url(url, referer) if is_hls
-                            else proxy.stream_url(url, referer))
+                play_url = proxy.hls_url(url, referer) if is_hls else proxy.stream_url(url, referer)
             except Exception:  # noqa: BLE001  代理不可用时退回直连
                 play_url = url
         else:
@@ -384,7 +392,8 @@ class VideoPlayerDialog(QDialog):
             self._start_native(play_url)
         else:
             self._status.setText(
-                "⚠ 当前环境缺少 QtMultimedia（音视频后端），无法播放；请安装完整版 PySide6")
+                "⚠ 当前环境缺少 QtMultimedia（音视频后端），无法播放；请安装完整版 PySide6"
+            )
 
     def _start_native(self, play_url: str) -> None:
         import time
@@ -396,8 +405,10 @@ class VideoPlayerDialog(QDialog):
         self._last_position = -1
         self._healed = {"downgrade": False, "switch_source": False, "download": False}
         self._engine_label.setText(
-            "原生解码 · 可叠加" if isinstance(self._surface, VideoSurface)
-            else "原生解码 · 基础路径")
+            "原生解码 · 可叠加"
+            if isinstance(self._surface, VideoSurface)
+            else "原生解码 · 基础路径"
+        )
         if self._native_holder is not None:
             self._stack.setCurrentWidget(self._native_holder)
         self._player.setSource(QUrl(play_url, QUrl.ParsingMode.TolerantMode))
@@ -436,8 +447,7 @@ class VideoPlayerDialog(QDialog):
             self._status.setText("仍未能起播，正在尝试更换线路…")
             self.stallDetected.emit("switch_source")
         else:
-            self._status.setText(
-                "该地址长时间未能起播：建议先「下载到本地」再播放，或手动换源。")
+            self._status.setText("该地址长时间未能起播：建议先「下载到本地」再播放，或手动换源。")
             self.stallDetected.emit("download")
 
     def _check_native_started(self) -> None:
@@ -447,14 +457,15 @@ class VideoPlayerDialog(QDialog):
         from PySide6.QtMultimedia import QMediaPlayer
 
         status = self._player.mediaStatus()
-        if status in (QMediaPlayer.MediaStatus.LoadingMedia,
-                      QMediaPlayer.MediaStatus.BufferingMedia,
-                      QMediaPlayer.MediaStatus.BufferedMedia,
-                      QMediaPlayer.MediaStatus.StalledMedia):
+        if status in (
+            QMediaPlayer.MediaStatus.LoadingMedia,
+            QMediaPlayer.MediaStatus.BufferingMedia,
+            QMediaPlayer.MediaStatus.BufferedMedia,
+            QMediaPlayer.MediaStatus.StalledMedia,
+        ):
             self._grace_waits += 1
             return
-        self._status.setText(
-            "⚠ 该地址未能起播。可尝试切换清晰度/换源，或先下载到本地再播放。")
+        self._status.setText("⚠ 该地址未能起播。可尝试切换清晰度/换源，或先下载到本地再播放。")
 
     # ------------------------------------------------------------------ 控制
 
@@ -475,7 +486,8 @@ class VideoPlayerDialog(QDialog):
         if self._duration_ms:
             self._time_label.setText(
                 f"{format_time(int(value * self._duration_ms / 1000))} / "
-                f"{format_time(self._duration_ms)}")
+                f"{format_time(self._duration_ms)}"
+            )
 
     def _on_slider_released(self) -> None:
         self._dragging = False
@@ -557,8 +569,7 @@ class VideoPlayerDialog(QDialog):
         if self._duration_ms:
             if not self._dragging:
                 self._slider.setValue(int(position * 1000 / self._duration_ms))
-            self._time_label.setText(
-                f"{format_time(position)} / {format_time(self._duration_ms)}")
+            self._time_label.setText(f"{format_time(position)} / {format_time(self._duration_ms)}")
         self._render_overlays(position)
 
     def _on_native_duration(self, duration: int) -> None:
@@ -583,8 +594,7 @@ class VideoPlayerDialog(QDialog):
 
         from PySide6.QtMultimedia import QMediaPlayer
 
-        if status in (QMediaPlayer.MediaStatus.LoadedMedia,
-                      QMediaPlayer.MediaStatus.BufferedMedia):
+        if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             # 只有真正"有数据/已加载"才算起播成功；BufferingMedia 不算
             # （否则三段自愈会在还在缓冲时就误判成"已起播"）
             if not self._native_ok:
@@ -592,8 +602,10 @@ class VideoPlayerDialog(QDialog):
                 self._first_frame_at = time.monotonic()
                 self._stall_started = None
             self._status.setText("")
-        elif status in (QMediaPlayer.MediaStatus.StalledMedia,
-                        QMediaPlayer.MediaStatus.BufferingMedia):
+        elif status in (
+            QMediaPlayer.MediaStatus.StalledMedia,
+            QMediaPlayer.MediaStatus.BufferingMedia,
+        ):
             self._status.setText("正在缓冲…（已由本地代理预取，通常很快）")
             self._on_stall()
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -641,7 +653,8 @@ class VideoPlayerDialog(QDialog):
             from PySide6.QtCore import QSettings
 
             return QSettings("ModuWorkbench", "modu-workbench").value(
-                "video/auto_next", True, type=bool)
+                "video/auto_next", True, type=bool
+            )
         except Exception:  # noqa: BLE001
             return True
 
@@ -711,8 +724,10 @@ class VideoPlayerDialog(QDialog):
         try:
             from PySide6.QtCore import QSettings
 
-            return int(QSettings("ModuWorkbench", "modu-workbench").value(
-                "video/subtitle_font_size", 22) or 22)
+            return int(
+                QSettings("ModuWorkbench", "modu-workbench").value("video/subtitle_font_size", 22)
+                or 22
+            )
         except Exception:  # noqa: BLE001
             return 22
 
@@ -721,8 +736,10 @@ class VideoPlayerDialog(QDialog):
             try:
                 from PySide6.QtCore import QSettings
 
-                configured = int(QSettings("ModuWorkbench", "modu-workbench").value(
-                    "video/danmaku_max_lines", 0) or 0)
+                configured = int(
+                    QSettings("ModuWorkbench", "modu-workbench").value("video/danmaku_max_lines", 0)
+                    or 0
+                )
             except Exception:  # noqa: BLE001
                 configured = 0
             self._grade_cache = danmaku_ops.machine_grade()
@@ -739,7 +756,8 @@ class VideoPlayerDialog(QDialog):
         from PySide6.QtWidgets import QFileDialog
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择字幕文件", "", "字幕 (*.srt *.vtt *.ass *.ssa *.sub);;所有文件 (*)")
+            self, "选择字幕文件", "", "字幕 (*.srt *.vtt *.ass *.ssa *.sub);;所有文件 (*)"
+        )
         if path:
             self.load_subtitle(path)
 
@@ -777,9 +795,10 @@ class VideoPlayerDialog(QDialog):
         menu = QMenu(self)
         action = menu.addAction("导入本地弹幕 XML…")
         action.triggered.connect(lambda: self.danmakuImportRequested.emit())
-        menu.addAction(f"当前 {len(self._danmaku_items)} 条"
-                       + ("（已显示）" if self._danmaku_enabled else "（已隐藏）")
-                       ).setEnabled(False)
+        menu.addAction(
+            f"当前 {len(self._danmaku_items)} 条"
+            + ("（已显示）" if self._danmaku_enabled else "（已隐藏）")
+        ).setEnabled(False)
         menu.exec(self._danmaku_button.mapToGlobal(self._danmaku_button.rect().bottomLeft()))
 
     def set_danmaku_enabled(self, enabled: bool) -> None:
@@ -803,30 +822,37 @@ class VideoPlayerDialog(QDialog):
         info: dict = {
             "后端": os.environ.get("QT_MEDIA_BACKEND", "(默认)"),
             "硬解设备": os.environ.get("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", "(默认)"),
-            "纹理转换": "关闭" if os.environ.get("QT_DISABLE_HW_TEXTURES_CONVERSION") == "1"
-                        else "开启",
-            "渲染路径": "QGraphicsVideoItem" if isinstance(self._surface, VideoSurface)
-                        else "QVideoWidget",
+            "纹理转换": (
+                "关闭" if os.environ.get("QT_DISABLE_HW_TEXTURES_CONVERSION") == "1" else "开启"
+            ),
+            "渲染路径": (
+                "QGraphicsVideoItem" if isinstance(self._surface, VideoSurface) else "QVideoWidget"
+            ),
             "播放地址": self._play_url[:120],
             "时长": format_time(self._duration_ms),
             "当前位置": format_time(self._position_ms),
-            "起播耗时_ms": int((self._first_frame_at - self._started_at) * 1000)
-                            if self._first_frame_at else -1,
+            "起播耗时_ms": (
+                int((self._first_frame_at - self._started_at) * 1000)
+                if self._first_frame_at
+                else -1
+            ),
             "卡顿次数": self._stall_count,
             "已播放_s": int(time.monotonic() - self._started_at) if self._started_at else 0,
         }
         try:
-            info.update({f"代理/{key}": value for key, value in proxy.get_stats().snapshot().items()})
+            info.update(
+                {f"代理/{key}": value for key, value in proxy.get_stats().snapshot().items()}
+            )
             cache = proxy.get_cache().stats()
             info["缓存/占用_MB"] = round(cache["bytes"] / 1048576, 1)
             info["缓存/分片数"] = cache["count"]
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+            swallow("player 中的可选步骤", error)
         if self._diagnostics_provider is not None:
             try:
                 info.update(self._diagnostics_provider() or {})
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                swallow("player 中的可选步骤", error)
         return info
 
     def toggle_diagnostics(self) -> None:
@@ -887,8 +913,16 @@ class VideoPlayerDialog(QDialog):
     def set_status(self, message: str) -> None:
         self._status.setText(message)
 
-    def switch_source(self, url: str, *, is_hls: bool, referer: str = "", title: str = "",
-                      start_ms: int = 0, status: str = "") -> None:
+    def switch_source(
+        self,
+        url: str,
+        *,
+        is_hls: bool,
+        referer: str = "",
+        title: str = "",
+        start_ms: int = 0,
+        status: str = "",
+    ) -> None:
         """换清晰度 / 换线路 / 换集后，就地切换播放地址（不重建窗口）。"""
         if title:
             self._title_label.setText(title)
@@ -909,8 +943,8 @@ class VideoPlayerDialog(QDialog):
         if self._player is not None:
             try:
                 self._player.stop()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                swallow("player 中的可选步骤", error)
         self.closed.emit(int(self._position_ms))
         super().closeEvent(event)
 
@@ -939,8 +973,17 @@ def local_file_url(path: str | Path) -> str:
 
 
 __all__ = [
-    "AUTO_NEXT_COUNTDOWN_S", "NATIVE_GRACE_HLS_MS", "NATIVE_GRACE_MS",
-    "SELF_HEAL_DOWNGRADE_MS", "SELF_HEAL_DOWNLOAD_MS", "SELF_HEAL_SWITCH_SOURCE_MS",
-    "SPEEDS", "STALL_DOWNGRADE_MS", "STALL_SWITCH_SOURCE_MS", "VideoPlayerDialog",
-    "format_time", "local_file_url", "player_available",
+    "AUTO_NEXT_COUNTDOWN_S",
+    "NATIVE_GRACE_HLS_MS",
+    "NATIVE_GRACE_MS",
+    "SELF_HEAL_DOWNGRADE_MS",
+    "SELF_HEAL_DOWNLOAD_MS",
+    "SELF_HEAL_SWITCH_SOURCE_MS",
+    "SPEEDS",
+    "STALL_DOWNGRADE_MS",
+    "STALL_SWITCH_SOURCE_MS",
+    "VideoPlayerDialog",
+    "format_time",
+    "local_file_url",
+    "player_available",
 ]

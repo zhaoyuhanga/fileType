@@ -9,6 +9,7 @@
 - **测试隔离**：任何存储类都可以指向任意 sqlite 文件（`Storage(tmp_path/"x.db")`），
   迁移会在该文件上自动建好完整结构，因此单测无需共享全局库。
 """
+
 from __future__ import annotations
 
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .migrations import MIGRATIONS, apply_migrations
+from modu_workbench.core.platform.logging import swallow
 
 
 def run_migrations(conn: sqlite3.Connection) -> int:
@@ -93,8 +95,8 @@ class SqliteStore:
         with self._lock:
             try:
                 self._conn.close()
-            except Exception:  # noqa: BLE001  关闭失败不影响退出
-                pass
+            except sqlite3.Error as error:  # 关闭失败不影响退出
+                swallow("关闭数据库连接", error)
 
     def __enter__(self):  # noqa: ANN204
         return self
@@ -108,7 +110,9 @@ class SqliteStore:
         return f"{self.settings_namespace}/{key}" if self.settings_namespace else key
 
     def get_setting(self, key: str, default: str = "") -> str:
-        row = self.query_one("SELECT value FROM app_settings WHERE key = ?", (self._setting_key(key),))
+        row = self.query_one(
+            "SELECT value FROM app_settings WHERE key = ?", (self._setting_key(key),)
+        )
         return row["value"] if row else default
 
     def set_setting(self, key: str, value: str) -> None:
@@ -126,7 +130,9 @@ class SqliteStore:
         rows = self.query("SELECT key, value FROM app_settings ORDER BY key")
         if not prefix:
             return {row["key"]: row["value"] for row in rows}
-        return {row["key"][len(prefix):]: row["value"] for row in rows if row["key"].startswith(prefix)}
+        return {
+            row["key"][len(prefix) :]: row["value"] for row in rows if row["key"].startswith(prefix)
+        }
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -154,5 +160,3 @@ def app_db() -> SqliteStore:
         import_legacy_databases(store, app_data_dir())
         _app_store = store
     return _app_store
-
-

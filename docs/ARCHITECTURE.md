@@ -6,7 +6,7 @@
 
 - 产品名：**墨软·工作台**；形态：**全 Python 单应用**（PySide6/Qt6），onedir 分发 + NSIS 安装包；
 - 仓库：沿用 fileType 仓库演进（历史保留），旧 Electron/React 代码归档于 `archive/electron-formatflow/`；
-- 板块化：首页 + 可扩展板块入口，当前为「墨软书库」「墨软转换」「墨软乐库」「墨软影视」「墨软图库」「墨软文档」，未来可继续追加；
+- 板块化：首页 + 可扩展板块入口，**当前六个板块**：「墨软书库」「墨软转换」「墨软乐库」「墨软影视」「墨软图库」「墨软文档」（v2.0.0 移除了第七板块「墨软动漫」，原因见 CHANGELOG.md）；
 - 后端主技术：**Python**（无 Node/Python 双运行时）；SQLite 用 Python 标准库 `sqlite3`；
 - **界面技术（v1.0.0：Qt 单栈）**：全部界面为 PySide6 原生控件 —— 转换板块为 Qt 表格 + 动作面板，
   文档预览用 `QTextBrowser`（Markdown/JSON/HTML/TXT 由 `QTextDocument` 渲染），
@@ -25,7 +25,8 @@
     `boards/document/`（墨软文档）；
   - 每个板块包固定以 `board.py` 作为入口（装配导航 + 子页），其余按功能拆分
     （`search.py` / `detail.py` / `player.py` / `widgets.py` …）；
-  - `ACTIVE_BOARDS` 的**前五个板块顺序固定**（既有约定），第六大板块「墨软文档」追加在末尾。
+  - `ACTIVE_BOARDS` 的顺序就是界面顺序（首页 → 书库 → 转换 → 乐库 → 影视 → 图库 → 文档）；
+    新增板块一律追加在末尾，不要插队（顶栏顺序是用户的肌肉记忆）。
 - `src/modu_workbench/ui_kit/`：统一设计令牌（ThemeTokens）+ QSS + 基础组件 + 分板块设置页。
 - `src/modu_workbench/core/book/`：墨软书库引擎（自 win-e-book 迁移：parser/storage/library/online）。
 - `src/modu_workbench/core/convert/`：墨软转换引擎（自 fileType 行为重写：registry、text/pdf/image/media/archive 等）。
@@ -35,9 +36,61 @@
 - `src/modu_workbench/core/document/`：墨软文档引擎（formats/models/parser/writer/beautify/sheet/merge/
   quality/security/tools/ai/loop/storage/library/ocr）。
 - `src/modu_workbench/core/llm/`：大模型能力中心（跨板块共用：配置 / 路由 / 降级）。
-- `src/modu_workbench/services/`：跨板块的本地服务（数据目录 `config.py`、应用级单例 `app_context.py`、
-  本机媒体流 `media_server.py`）。
-- `tests/`：pytest 单元 / 集成 / 无头 UI 冒烟；`tests/test_architecture.py` 锁死上面的依赖规则。
+- `src/modu_workbench/core/platform/`：板块无关的公共能力（`db` 迁移执行器、`paths` 数据布局、
+  `settings`、`media` ffmpeg 定位、`http`、`textutil` 标题/集数归一化、`logging` 忽略失败留痕）。
+- `src/modu_workbench/services/`：跨板块服务 ——
+  `media_proxy/`（本机媒体代理，拆成 `fetch` / `handler` / `server` / `cache` / `playlist` /
+  `upstream` / `config` / `stats` 8 个模块）、`dandanplay.py`（弹弹play 只读弹幕）、
+  `app_context.py`（跨板块单例的**合法中介**，见下）。
+- `src/modu_workbench/app/` 只做装配：`main.py`（59 行，起 Qt + 主壳）、`selfcheck.py`
+  （打包自检 17 项）、`shell.py`（主壳，板块页**按需构造**）、`registry.py`（板块元数据，
+  用 `page_target` 字符串**延迟导入**板块模块）。
+- `tests/`：pytest 单元 / 集成 / 无头 UI 冒烟。
+
+## 依赖规则（唯一来源；`tests/architecture/test_architecture.py` 是它的可执行版本）
+
+```
+boards/<板块>   →  同板块包、boards.base、core/<同板块>、core/platform、core/llm、ui_kit、services
+boards/<板块>   ✗→ boards/<其他板块>、core/<其他板块>、app.*
+core/<板块>     ✗→ core/<其他板块>（只允许经 core/platform 或 core/llm）
+core.platform   ✗→ 任何 core/<板块>
+ui_kit          ✗→ boards/<板块>、core/<板块>
+app             →  随便依赖（装配层），但**不允许被下层反向依赖**（除 registry 的元数据）
+```
+
+三条容易被"优化"破坏、但**必须存在**的例外：
+
+1. **`services/app_context.py` 不是死代码**：`boards/convert` 要把转换产物导入书库，
+   而板块之间不允许互相依赖 → `services` 是唯一合规通道。删掉它，架构闸门会立刻报
+   `boards.convert -> modu_workbench.app.context` 违规。
+2. **`core/convert` 是跨板块共享引擎**：图库/乐库/影视都复用它做格式转换，
+   因此允许被 `core/<其他板块>` 引用，但它**不得反向依赖任何板块**。
+3. **`ui_kit` 里可以放跨板块复用的播放器/弹幕**（`ui_kit/media/`）：它们不含业务规则，
+   只依赖 `services`/`core/platform`，所以符合"ui_kit 不依赖板块"。
+
+## 视觉与主题的分层
+
+`ui_kit/tokens.py`（唯一令牌来源）→ `ui_kit/theme.py`（组装 QSS，约 800 行）→
+`ui_kit/theme_icons.py`（QPainter 现画 QSS 需要的箭头/勾选 PNG，v2.1.0 从 theme 拆出）
+→ `ui_kit/components/`（页面模板与通用控件）。**改主题色只动 tokens；改控件样式动 theme。**
+
+## 忽略失败的写法（v2.1.0 起的统一约定）
+
+"失败可以忽略"的位置**不允许**再写 `except Exception: pass`：
+
+```python
+from modu_workbench.core.platform.logging import swallow
+
+try:
+    storage.save_position(book_id, index)      # 进度存不下不该让阅读崩
+except sqlite3.Error as error:                 # 只吞得起的类型
+    swallow("保存阅读进度", error)              # 但必须留痕
+```
+
+- 能确定异常类型的 → **收窄类型**（`OSError`/`ValueError`/`sqlite3.Error`/`PdfError`…），
+  其它类型属于代码 bug，就该炸出来；
+- 第三方回调/Qt 槽等确实可能抛任何异常的边界 → 保留宽捕获，但把 `pass` 换成 `swallow(...)`；
+- 高频路径用 `debug(...)`（只在 `MODU_LOG_LEVEL=debug` 时输出），避免日志刷屏。
 
 ## 墨软乐库设计要点
 

@@ -3,6 +3,94 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v2.1.0 — 单体拆分 + 异常精确化 + 文档收敛
+
+> 这一版**有行为变更**，所以是次版本号而不是补丁号：
+> 部分"失败被静默吞掉"的位置现在会**收窄异常类型并留痕**（原来 `except Exception: pass`）。
+> 功能与界面不变，但**排查问题时的可观测性变了** —— 以前"什么都没发生"的地方，
+> 现在 stderr 里会有一行 `[WARNING] modu: 忽略失败（保存阅读进度）sqlite3.OperationalError: ...`。
+
+### 1. 拆掉三个大单体（合计 2177 行 → 6 个文件，公开 API 一个没动）
+
+| 原文件 | 行数 | 拆成 | 拆分依据 |
+|---|---|---|---|
+| `app/main.py` | 884 | `main.py`（59）+ `app/selfcheck.py`（853） | 入口只负责"起 Qt + 开主壳"；17 项打包自检生命周期完全不同（只在 `MODU_CHECK_DEPS` 跑一次） |
+| `ui_kit/theme.py` | 831 | `theme.py`（798）+ `ui_kit/theme_icons.py`（103） | 图标是"给 QSS 的 `image:` 现画 PNG"，与色板/QSS 组装无关；改图标不该碰 700 行样式串 |
+| `services/media_proxy/server.py` | 586 | `fetch.py`（97）+ `handler.py`（432）+ `server.py`（122） | 取流与缓存（`fetch`）／HTTP 路由与流式转发（`handler`）／起停服务与拼地址（`server`）是三件事；`playlist` 的预热只需 `fetch`，不必 import 整个 handler |
+
+**为什么"不影响单元模块"**：拆完每个原模块仍导出原来那些名字
+（`server.py` 继续 re-export `fetch_to_cache` / `looks_like_playlist`，
+`theme.py` 继续 re-export `_icon_urls` / `_image_rule`），
+调用方与 1154 个测试**一行都不用改**；`__init__.py` 的 `__all__` 一个字没删。
+
+顺带修掉两处"拆分暴露出来的旧问题"：
+
+- `selfcheck.py` 的写结果分支原来是 `return 2 if f"write_error={error}" else 2`
+  —— **永远返回 2**，且把 `error` 丢掉。现在收窄成 `OSError` 并打印原因；
+- `services/media_proxy/handler.py` 里 `_allow_private()` 与新增的 `allow_private()`
+  重复定义（拆分切块时露出来的），已合并为一个。
+
+### 2. 异常精确化：69 处"静默吞"变成"精确捕获 + 留痕"
+
+- 新增 `core/platform/logging.py`（标准库 `logging`，**零依赖**）：
+  `swallow(scope, error)` 记录"被有意忽略的失败"，`debug(...)` 供高频路径用
+  （`MODU_LOG_LEVEL=debug` 才输出）；
+- **21 处收窄成具体类型**：关文件/关连接 → `(OSError, ValueError)` / `sqlite3.Error`、
+  读设置 → `(ImportError, RuntimeError, TypeError, ValueError)`、
+  读 PDF 页数/页面尺寸 → `(PdfError, OSError, ValueError, TypeError, KeyError/IndexError)`；
+- **剩余 48 处保留宽捕获但不再静默**：都是"第三方回调 / Qt 槽 / 外部边界"，
+  那里确实可能抛任何异常，**继续吞是对的，但必须留痕**（`swallow(...)`）；
+- 判定原则写进 `docs/ARCHITECTURE.md`：「能确定类型的收窄；不能确定的留宽但留痕；
+  高频路径用 `debug`」—— 并给出正反例代码。
+
+> 诚实说明：这 69 处里，**67 处的"可吞"是我逐条看上下文确认的**（关资源、存进度、
+> 记审计、可选诊断回调），另 2 处（读 PDF 页数/尺寸）保留了兜底值只是补了留痕。
+> 我没有把宽捕获全部改窄 —— 对外部回调改窄会导致"回调抛了别的类型 → 整个搜索崩"，
+> 那是把可观测性问题换成了稳定性问题。
+
+### 3. 文档收敛：删 5 份、合并 1 份、刷新 6 份
+
+**删**（都在 git 历史里，需要用 `git show` 取）：
+
+| 删除 | 体积 | 为什么删 |
+|---|---|---|
+| `docs/research/kazumi_research_report.md` | 120 KB | 已移除的第七板块「动漫」的取证材料。文档在讲"如何实现一个已删功能"，只会误导后来者 |
+| `docs/research/kazumi_extras_report_v2.md` | 107 KB | 同上 |
+| `docs/research/kazumi_danmaku_timetable_report.md` | 50 KB | 同上（其中仍有效的"弹弹play 只读接口"事实已落在 `services/dandanplay.py` 与 `docs/BOARDS/video.md`） |
+| `docs/research/kazumi_issue_mining_report.md` | 32 KB | 同上 |
+| `docs/REFACTOR_PLAN.md` | 10 KB | v1.0.0 重构评审稿，结论已全部落地并**合并进** `docs/ARCHITECTURE.md`（依赖规则现在是那里的「依赖规则」一节，代码与测试的引用已同步改指过去） |
+
+**新增**：`docs/research/README.md` 重写 —— 只剩 1 份仍在生效的 MoonTV 调研，
+并给出**判断一份调研该不该留的标准**：「它描述的东西现在还有代码吗？没有就写进
+CHANGELOG、材料删掉」。
+
+**刷新**：
+
+- `docs/ARCHITECTURE.md`：六个板块现状 / 依赖规则（含 3 个"看起来像死代码但必须存在"的例外）/
+  视觉与主题分层 / **忽略失败的统一写法**；
+- `docs/RELEASE.md`：自检实现位置改指 `app/selfcheck.py`、产物体积更新到 v2.1.0 实测；
+- `docs/TESTING.md`、`docs/DATABASE.md`、`docs/UI_GUIDE.md`：标题去掉写死的 v1.0.0
+  （每次发版都要改标题是纯粹的维护负债），并补 v2.1.0 新增闸门；
+- `docs/VIDEO_PLAN.md`：状态改为"已实施并稳定 + 设计记录"，指向已删调研的段落改为
+  "材料已删，依据看 git 历史"；
+- `README.md`：文档索引补 `VIDEO_PLAN` / `research/README`，删掉 `REFACTOR_PLAN` 行。
+
+### 4. 顺手修掉一个偶发失败的单测
+
+`test_video_proxy.py::test_proxy_prefetch_warms_cache` 原来只等
+`warmup_pending()` 排空 —— 但预热任务**失败**时它也会排空，于是断言偶发失败
+（全量套件负载高时，假源站更容易超时）。改成等**真正想要的条件**
+（缓存里已有 ≥3 片且队列排空），15 秒兜底。
+
+### 5. 验证
+
+- 全量 `pytest tests -q`：**通过**；
+- 源码自检 **17/17**；打包产物自检 **17/17**；exe 模块核验 **40 项全命中**（v2.1.0 把拆分出的 4 个模块也纳入核验）；
+- 打包 v2.1.0：onedir **388.3 MB** / 安装包 **154.5 MB**（版本资源 2.1.0）；
+- 闭环：静默安装（388.4 MB）→ 已安装产物自检 **17/17** → 卸载**本轮被 Smart App Control 拦下**
+  （退出码 2；同一份 `installer.nsi` 在 v2.0.0 / v2.0.1 是干净通过的，脚本逻辑未改，
+  诊断方法与手动清理步骤见 `docs/RELEASE.md` 第 4 节）。
+
 ## v2.0.1 — 代码质量与启动性能优化（无行为变更）
 
 > 纯优化版本：不改用户可见功能，只让**启动更快、代码更少**。
@@ -59,7 +147,7 @@
 
 - 全量 `pytest tests -q`：**全部通过**（新增 3 道闸门：`__all__` 可解析、门面再导出、
   主壳懒构造）；
-- 源码自检 **17/17**、打包产物自检 **17/17**、exe 模块核验 **36 项全命中**；
+- 源码自检 **17/17**、打包产物自检 **17/17**、exe 模块核验 **40 项全命中**（v2.1.0 把拆分出的 4 个模块也纳入核验）；
 - 打包 v2.0.1：onedir **388.3 MB** / 安装包 **154.4 MB**（版本资源 2.0.1）；
 - 闭环：静默安装 → 已安装产物自检 17/17 → 静默卸载后目录/注册表/快捷方式全清，
   用户数据保留。

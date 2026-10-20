@@ -16,6 +16,7 @@
 暂停/继续用四个检查点（取清单后 / 每片开始前 / 每片写盘后 / 拼接前）等门闸，
 `shutdown()` 保证线程退出且 `.parts/` 保留，因此"下几十集中途关掉、明天继续"成立。
 """
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ import requests
 from .hls import HlsPlaylist, parse_m3u8, segment_iv
 from .models import Episode, Quality, RemoteVideo
 from .sources import SourceError, describe_network_error
+from modu_workbench.core.platform.logging import swallow
 
 #: 默认并发（取 LunaTV-EE 的 6 worker 与 Kazumi "分片并发 3" 之间的折中）
 DEFAULT_CONCURRENCY = 6
@@ -55,8 +57,12 @@ class SegmentPlan:
     expected_size: int = 0
 
     def to_meta(self) -> dict:
-        return {"index": self.index, "url": self.url, "duration": self.duration,
-                "expected_size": self.expected_size}
+        return {
+            "index": self.index,
+            "url": self.url,
+            "duration": self.duration,
+            "expected_size": self.expected_size,
+        }
 
 
 @dataclass
@@ -197,7 +203,7 @@ class SegmentDownloader:
         retries: int = DEFAULT_RETRIES,
         timeout: float = 20.0,
         headers: dict | None = None,
-        on_progress=None,            # noqa: ANN001  Callable[[SegmentProgress], None]
+        on_progress=None,  # noqa: ANN001  Callable[[SegmentProgress], None]
         cancel: threading.Event | None = None,
         pause_event: threading.Event | None = None,
         speed_limit_bps: float = 0.0,
@@ -237,8 +243,8 @@ class SegmentDownloader:
         for session in sessions:
             try:
                 session.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
 
     def __enter__(self) -> SegmentDownloader:
         return self
@@ -310,17 +316,23 @@ class SegmentDownloader:
         state = _ProgressState(total_parts=len(plan), total_bytes=self._estimate_total(plan))
         state.done_bytes = self._existing_bytes(parts_dir, plan)
         state.done_parts = resumed
-        self._report(state, f"分片 {resumed}/{len(plan)} 已在本地，继续下载…" if resumed
-                     else f"开始下载 {len(plan)} 个分片（并发 {self.concurrency}）")
+        self._report(
+            state,
+            (
+                f"分片 {resumed}/{len(plan)} 已在本地，继续下载…"
+                if resumed
+                else f"开始下载 {len(plan)} 个分片（并发 {self.concurrency}）"
+            ),
+        )
 
         gate = _WriteGate(start_index=resumed)
         bad: list[int] = []
-        stopped = False            # 停止"补投新任务"（含正常的"全部投完"与异常）
-        interrupted = False        # 真正没下完（坏片/取消/写盘失败）
+        stopped = False  # 停止"补投新任务"（含正常的"全部投完"与异常）
+        interrupted = False  # 真正没下完（坏片/取消/写盘失败）
         paused = False
         results: dict[int, bytes] = {}
         results_lock = threading.Condition()
-        cur = [resumed]                                     # 写游标（只被写线程推进）
+        cur = [resumed]  # 写游标（只被写线程推进）
         writer_error: list[BaseException] = []
 
         def writer() -> None:
@@ -331,8 +343,7 @@ class SegmentDownloader:
             """
             while True:
                 with results_lock:
-                    while (cur[0] not in results and not stopped
-                           and cur[0] < len(plan)):
+                    while cur[0] not in results and not stopped and cur[0] < len(plan):
                         results_lock.wait(timeout=0.2)
                     if cur[0] >= len(plan) or stopped:
                         return
@@ -351,10 +362,10 @@ class SegmentDownloader:
                 self._report(state)
 
         try:
-            with ThreadPoolExecutor(max_workers=self.concurrency,
-                                    thread_name_prefix="seg-dl") as pool:
-                writer_thread = threading.Thread(target=writer, name="seg-dl-writer",
-                                                 daemon=True)
+            with ThreadPoolExecutor(
+                max_workers=self.concurrency, thread_name_prefix="seg-dl"
+            ) as pool:
+                writer_thread = threading.Thread(target=writer, name="seg-dl-writer", daemon=True)
                 writer_thread.start()
                 pending: dict[Future, int] = {}
                 queue = [item for item in plan if item.index >= resumed]
@@ -362,8 +373,9 @@ class SegmentDownloader:
 
                 def submit_more() -> None:
                     nonlocal cursor
-                    while (len(pending) < self.concurrency * 2 and cursor < len(queue)
-                           and not stopped):
+                    while (
+                        len(pending) < self.concurrency * 2 and cursor < len(queue) and not stopped
+                    ):
                         item = queue[cursor]
                         cursor += 1
                         pending[pool.submit(self._fetch_part, item)] = item.index
@@ -387,14 +399,14 @@ class SegmentDownloader:
                             stopped = True
                             interrupted = True
                             continue
-                        except Exception as error:      # noqa: BLE001  坏片走这里
+                        except Exception as error:  # noqa: BLE001  坏片走这里
                             bad.append(index)
                             if self._should_abort(bad, plan):
                                 stopped = True
                                 interrupted = True
                                 outcome.message = (
-                                    f"坏片过多（{len(bad)}/{len(plan)}）："
-                                    f"{_short(error)}")
+                                    f"坏片过多（{len(bad)}/{len(plan)}）：" f"{_short(error)}"
+                                )
                             continue
                         if key is not None and payload:
                             payload = self._decrypt(payload, key, playlist, index)
@@ -463,8 +475,9 @@ class SegmentDownloader:
         plan: list[SegmentPlan] = []
         for index, url in enumerate(playlist.segments):
             duration = float(durations[index]) if index < len(durations) else 0.0
-            plan.append(SegmentPlan(index=index, url=url, duration=duration,
-                                    expected_size=expected))
+            plan.append(
+                SegmentPlan(index=index, url=url, duration=duration, expected_size=expected)
+            )
         return plan
 
     @staticmethod
@@ -487,7 +500,8 @@ class SegmentDownloader:
         if not playlist.aes128:
             raise SourceError(
                 f"该视频流使用 {playlist.key_method or '未知'} 加密，需要 ffmpeg 才能下载；"
-                "请安装 ffmpeg 或改用其他源")
+                "请安装 ffmpeg 或改用其他源"
+            )
         response = self._session().get(playlist.key_uri, timeout=self.timeout)
         response.raise_for_status()
         key = response.content
@@ -542,8 +556,9 @@ class SegmentDownloader:
                 total += path.stat().st_size
         return total
 
-    def _restore_progress(self, parts_dir: Path, manifest_path: Path,
-                          plan: list[SegmentPlan]) -> int:
+    def _restore_progress(
+        self, parts_dir: Path, manifest_path: Path, plan: list[SegmentPlan]
+    ) -> int:
         """断点续传：返回"从第几片开始"（前面都已存在且尺寸合理）。
 
         校验规则：存在 + 非空（拿到期望大小时要求 ≥ 50%）。宽度放宽是有意的 ——
@@ -555,7 +570,7 @@ class SegmentDownloader:
             try:
                 meta = json.loads(manifest_path.read_text(encoding="utf-8"))
                 if int(meta.get("total_parts") or 0) not in (0, len(plan)):
-                    return 0        # 清单变了（集数/分片数不同）→ 不续传，避免拼错
+                    return 0  # 清单变了（集数/分片数不同）→ 不续传，避免拼错
             except Exception:  # noqa: BLE001
                 return 0
         index = 0
@@ -569,15 +584,23 @@ class SegmentDownloader:
             index += 1
         return index
 
-    def _write_manifest(self, parts_dir: Path, manifest_path: Path,
-                        plan: list[SegmentPlan]) -> None:
+    def _write_manifest(
+        self, parts_dir: Path, manifest_path: Path, plan: list[SegmentPlan]
+    ) -> None:
         try:
             parts_dir.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(json.dumps({
-                "total_parts": len(plan),
-                "created_at": int(time.time()),
-                "parts": [item.to_meta() for item in plan],
-            }, ensure_ascii=False, indent=1), encoding="utf-8")
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "total_parts": len(plan),
+                        "created_at": int(time.time()),
+                        "parts": [item.to_meta() for item in plan],
+                    },
+                    ensure_ascii=False,
+                    indent=1,
+                ),
+                encoding="utf-8",
+            )
         except OSError:
             pass
 
@@ -647,8 +670,8 @@ class SegmentDownloader:
         )
         try:
             self.on_progress(progress)
-        except Exception:  # noqa: BLE001  回调异常不能中断下载
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("segment_downloader 中的可选步骤", error)
 
     def _should_abort(self, bad: list[int], plan: list[SegmentPlan]) -> bool:
         return len(bad) / max(1, len(plan)) > BAD_PART_RATIO
@@ -718,13 +741,13 @@ def download_hls(
     playlist_url: str,
     dest: Path,
     *,
-    video: RemoteVideo | None = None,        # noqa: ARG001  兼容 downloader 的调用形状
-    episode: Episode | None = None,          # noqa: ARG001
-    quality: Quality | None = None,          # noqa: ARG001
+    video: RemoteVideo | None = None,  # noqa: ARG001  兼容 downloader 的调用形状
+    episode: Episode | None = None,  # noqa: ARG001
+    quality: Quality | None = None,  # noqa: ARG001
     referer: str = "",
     concurrency: int = DEFAULT_CONCURRENCY,
     speed_limit_bps: float = 0.0,
-    on_progress=None,          # noqa: ANN001  Callable[[SegmentProgress], None]
+    on_progress=None,  # noqa: ANN001  Callable[[SegmentProgress], None]
     cancel: threading.Event | None = None,
     pause_event: threading.Event | None = None,
     resume: bool = True,
@@ -737,8 +760,12 @@ def download_hls(
     """
     headers = build_headers(playlist_url, referer)
     downloader = SegmentDownloader(
-        concurrency=concurrency, headers=headers, on_progress=on_progress,
-        cancel=cancel, pause_event=pause_event, speed_limit_bps=speed_limit_bps,
+        concurrency=concurrency,
+        headers=headers,
+        on_progress=on_progress,
+        cancel=cancel,
+        pause_event=pause_event,
+        speed_limit_bps=speed_limit_bps,
         pause_timeout=pause_timeout,
     )
     try:
@@ -760,12 +787,31 @@ def remux_to_mp4(ts_path: Path, *, ffmpeg: str, target: Path | None = None) -> P
     if not source.is_file():
         return None
     output = Path(target) if target else source.with_suffix(".mp4")
-    args = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(source), "-c", "copy", "-movflags", "+faststart", str(output)]
+    args = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
-                                errors="replace", creationflags=creationflags, timeout=600)
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creationflags,
+            timeout=600,
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0 or not output.is_file():
@@ -775,7 +821,15 @@ def remux_to_mp4(ts_path: Path, *, ffmpeg: str, target: Path | None = None) -> P
 
 
 __all__ = [
-    "BAD_PART_RATIO", "DEFAULT_CONCURRENCY", "DEFAULT_RETRIES", "DownloadOutcome",
-    "RateLimiter", "SegmentDownloader", "SegmentPlan", "SegmentProgress",
-    "build_headers", "download_hls", "remux_to_mp4",
+    "BAD_PART_RATIO",
+    "DEFAULT_CONCURRENCY",
+    "DEFAULT_RETRIES",
+    "DownloadOutcome",
+    "RateLimiter",
+    "SegmentDownloader",
+    "SegmentPlan",
+    "SegmentProgress",
+    "build_headers",
+    "download_hls",
+    "remux_to_mp4",
 ]

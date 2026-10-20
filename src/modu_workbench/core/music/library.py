@@ -1,4 +1,5 @@
 """墨软乐库本地曲库：导入扫描、元数据补全、时长探测、格式转换入口。"""
+
 from __future__ import annotations
 
 import os
@@ -14,6 +15,7 @@ from modu_workbench.core.platform.media import (
 
 from .models import AUDIO_EXTENSIONS, MUSIC_TARGETS, RemoteTrack, Track, parse_track_name
 from .storage import MusicStorage
+from modu_workbench.core.platform.logging import swallow
 
 ProgressFn = Callable[[int, int, str], None]
 
@@ -74,8 +76,13 @@ class MusicLibrary:
             category=category,
         )
 
-    def import_paths(self, paths: Iterable[str | Path], *, category: str = "",
-                     on_progress: ProgressFn | None = None) -> List[Track]:
+    def import_paths(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        category: str = "",
+        on_progress: ProgressFn | None = None,
+    ) -> List[Track]:
         """导入文件/文件夹到曲库，返回新增或更新的曲目。"""
         files = scan_audio_files(paths)
         tracks: list[Track] = []
@@ -88,8 +95,13 @@ class MusicLibrary:
                 on_progress(index, len(files), f"已导入 {index}/{len(files)}：{track.display()}")
         return tracks
 
-    def import_and_copy(self, paths: Iterable[str | Path], *, category: str = "",
-                        on_progress: ProgressFn | None = None) -> List[Track]:
+    def import_and_copy(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        category: str = "",
+        on_progress: ProgressFn | None = None,
+    ) -> List[Track]:
         """把外部文件复制进音乐库目录后再入库（便于统一管理）。"""
         copied: list[Path] = []
         for file_path in scan_audio_files(paths):
@@ -150,7 +162,9 @@ class MusicLibrary:
 
     def refresh_durations(self, track_ids: Iterable[int] | None = None) -> int:
         """为缺少时长的曲目补齐 duration_ms。"""
-        ids = list(track_ids) if track_ids is not None else [t.id for t in self.storage.list_tracks()]
+        ids = (
+            list(track_ids) if track_ids is not None else [t.id for t in self.storage.list_tracks()]
+        )
         updated = 0
         for track_id in ids:
             track = self.storage.get_track(track_id)
@@ -194,9 +208,14 @@ class MusicLibrary:
 
     # ---------- 转换 ----------
 
-    def convert(self, track_id: int, target_format: str, output_dir: str | Path | None = None,
-                cancel: threading.Event | None = None,
-                on_progress: ProgressFn | None = None) -> Path:
+    def convert(
+        self,
+        track_id: int,
+        target_format: str,
+        output_dir: str | Path | None = None,
+        cancel: threading.Event | None = None,
+        on_progress: ProgressFn | None = None,
+    ) -> Path:
         """把曲目转换为目标音频格式，返回输出路径。"""
         from modu_workbench.core.convert.media_io import convert_media
 
@@ -229,8 +248,6 @@ class MusicLibrary:
         # 转换结果自动入库（同目录时）
         try:
             self.import_paths([target], category=track.category)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("library 中的可选步骤", error)
         return target
-
-

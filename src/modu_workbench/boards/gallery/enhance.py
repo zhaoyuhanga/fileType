@@ -7,6 +7,7 @@
 
 DeepSeek 的文本能力不在这里（它不能改像素），见图库的「AI 描述/标签」。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,6 +43,7 @@ from modu_workbench.core.gallery import (
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import EnhanceWorker, ITEM_ROLE
+from modu_workbench.core.platform.logging import swallow
 
 PREVIEW_MAX = 420
 
@@ -56,10 +58,11 @@ def _pil_to_pixmap(image) -> QPixmap:  # noqa: ANN001
 class EnhanceDialog(QDialog):
     """选择优化方式 → 预览前后对比 → 批量执行（不覆盖原图）。"""
 
-    finishedAll = Signal(object, object)   # (ok 列表, 错误列表)
+    finishedAll = Signal(object, object)  # (ok 列表, 错误列表)
 
-    def __init__(self, library: ImageLibrary, items: list[ImageItem],
-                 parent: QWidget | None = None):
+    def __init__(
+        self, library: ImageLibrary, items: list[ImageItem], parent: QWidget | None = None
+    ):
         super().__init__(parent)
         self.setWindowTitle("AI 图片优化（本地算法）")
         self.resize(1080, 720)
@@ -152,7 +155,7 @@ class EnhanceDialog(QDialog):
         chips = QGridLayout()
         chips.setSpacing(6)
         self._style_buttons: dict[str, QPushButton] = {}
-        self._style = QComboBox()          # 仍保留一个隐藏控件，便于程序化读写
+        self._style = QComboBox()  # 仍保留一个隐藏控件，便于程序化读写
         self._style.setVisible(False)
         for index, (key, (label, tip)) in enumerate(STYLE_PRESETS.items()):
             self._style.addItem(label, key)
@@ -271,8 +274,10 @@ class EnhanceDialog(QDialog):
 
     def _on_spec_changed(self) -> None:
         spec = self._current_spec()
-        self._desc.setText(f"【{spec.label}】{spec.description}"
-                           f"　保真度：{spec.fidelity_label}　耗时：{spec.cost}")
+        self._desc.setText(
+            f"【{spec.label}】{spec.description}"
+            f"　保真度：{spec.fidelity_label}　耗时：{spec.cost}"
+        )
         accepts = set(spec.accepts)
         wants_scale = "scale" in accepts
         wants_strength = bool({"strength", "amount"} & accepts)
@@ -287,12 +292,23 @@ class EnhanceDialog(QDialog):
         self._bg_label.setVisible(wants_background)
         self._background.setVisible(wants_background)
         # 一项参数都不需要的算法（一键增强/去雾/老照片…）直接把参数区收起来
-        self._params_card.setVisible(any((wants_scale, wants_strength, wants_style,
-                                     wants_background)))
+        self._params_card.setVisible(
+            any((wants_scale, wants_strength, wants_style, wants_background))
+        )
         self._params_title.setText(
-            "参数 · " + "、".join(name for name, flag in (
-                ("放大倍数", wants_scale), ("强度", wants_strength),
-                ("风格", wants_style), ("背景", wants_background)) if flag) or "参数")
+            "参数 · "
+            + "、".join(
+                name
+                for name, flag in (
+                    ("放大倍数", wants_scale),
+                    ("强度", wants_strength),
+                    ("风格", wants_style),
+                    ("背景", wants_background),
+                )
+                if flag
+            )
+            or "参数"
+        )
         if wants_style:
             self._pick_style(str(self._style.currentData() or next(iter(STYLE_PRESETS))))
         if spec.fidelity == "approximate":
@@ -384,8 +400,8 @@ class EnhanceDialog(QDialog):
         finally:
             try:
                 processed.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         self._status.setText(f"已预览「{spec.label}」；满意后应用到图片（结果另存为新图）。")
         if self._save_preview.isChecked():
             self._save_item_preview(spec)
@@ -456,8 +472,8 @@ class EnhanceDialog(QDialog):
         if self._source is not None:
             try:
                 self._source.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         super().closeEvent(event)
 
 

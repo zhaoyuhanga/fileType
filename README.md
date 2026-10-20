@@ -2,7 +2,7 @@
 
 > 本地离线的一站式阅读、转换、音乐、影视、图库与文档工作台 —— 板块化设计，能力可扩展。
 
-**当前版本：v2.0.1** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：`dist\ModuWorkbench\ModuWorkbench.exe`（PyInstaller onedir）与 `dist\墨软工作台-Setup-2.0.1.exe`（NSIS 安装包）。
+**当前版本：v2.1.0** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：`dist\ModuWorkbench\ModuWorkbench.exe`（PyInstaller onedir）与 `dist\墨软工作台-Setup-2.1.0.exe`（NSIS 安装包）。
 
 > **v2.0.0 是一个"减法"定版**：整体移除了 v1.1.0 引入的第七板块「墨软动漫」。
 > 原因写在 [CHANGELOG.md](CHANGELOG.md) 的 v2.0.0 小节：那套「规则驱动采集」依赖第三方站点规则，
@@ -529,7 +529,7 @@ workbench_mac.spec             # PyInstaller 配置（macOS，BUNDLE）
 packaging/                     # 一键打包/安装包脚本 + 图标与界面截图工具
 archive/electron-formatflow/   # 旧 Electron 版归档（仅历史参考，不参与构建）
 tools/ffmpeg/                  # 随包 ffmpeg / ffprobe
-docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / RELEASE / REFACTOR_PLAN / BOARDS
+docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / RELEASE / VIDEO_PLAN / BOARDS / research
 ```
 
 ## 文档索引
@@ -541,7 +541,8 @@ docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / 
 | `docs/UI_GUIDE.md` | 设计令牌、组件库、页面模板、截图验收 |
 | `docs/TESTING.md` | 测试分层、写测试约定、每板块冒烟清单 |
 | `docs/RELEASE.md` | 发版检查、打包与自检、环境限制 |
-| `docs/REFACTOR_PLAN.md` | v1.0.0 重构方案与阶段验收 |
+| `docs/VIDEO_PLAN.md` | 影视板块设计记录（代理/选路/下载/弹幕的依据与"诚实边界"） |
+| `docs/research/README.md` | 调研材料的取舍标准（只保留仍在生效的那一份） |
 | `docs/BOARDS/<板块>.md` | 各板块的目录、数据表、界面约定与变更须知 |
 
 ## 里程碑

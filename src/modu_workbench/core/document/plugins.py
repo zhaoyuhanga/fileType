@@ -25,6 +25,7 @@
             parameters={"old": "原文字", "new": "新文字"}, category="edit",
             handler=handler))
 """
+
 from __future__ import annotations
 
 import time
@@ -41,6 +42,7 @@ from .tools import (
     register_tool as register_document_tool,
     tool_names,
 )
+from modu_workbench.core.platform.logging import swallow
 
 PLUGIN_DIR_NAME = "plugins"
 PLUGIN_SUFFIX = ".py"
@@ -140,8 +142,11 @@ def plugin_dir() -> Path:
 
 def discover() -> list[Path]:
     """插件目录里的 `*.py`（按文件名排序，跳过下划线开头的文件）。"""
-    return sorted(path for path in plugin_dir().glob(f"*{PLUGIN_SUFFIX}")
-                  if path.is_file() and not path.name.startswith("_"))
+    return sorted(
+        path
+        for path in plugin_dir().glob(f"*{PLUGIN_SUFFIX}")
+        if path.is_file() and not path.name.startswith("_")
+    )
 
 
 def plugins_enabled(storage=None) -> bool:
@@ -168,8 +173,10 @@ def load_file(path: str | Path, *, api: Optional[PluginApi] = None) -> PluginRec
         record.error = f"读取失败：{error}"
         return record
     if record.size_bytes > MAX_PLUGIN_BYTES:
-        record.error = (f"文件过大（{record.size_bytes / 1024:.0f} KB > "
-                        f"{MAX_PLUGIN_BYTES / 1024:.0f} KB）：插件只应注册小工具")
+        record.error = (
+            f"文件过大（{record.size_bytes / 1024:.0f} KB > "
+            f"{MAX_PLUGIN_BYTES / 1024:.0f} KB）：插件只应注册小工具"
+        )
         return record
     try:
         code = source_path.read_text(encoding="utf-8")
@@ -184,7 +191,7 @@ def load_file(path: str | Path, *, api: Optional[PluginApi] = None) -> PluginRec
         "__doc__": None,
     }
     try:
-        exec(compile(code, str(source_path), "exec"), namespace)   # noqa: S102 插件即代码
+        exec(compile(code, str(source_path), "exec"), namespace)  # noqa: S102 插件即代码
     except Exception as error:  # noqa: BLE001  语法错误 / 顶层异常
         record.error = f"{error.__class__.__name__}：{error}"
         return record
@@ -220,8 +227,8 @@ def load_plugins(*, enabled: Optional[bool] = None, storage=None) -> list[Plugin
         for record in records:
             try:
                 storage.add_audit("plugin", record.path, record.summary(), "local")
-            except Exception:  # noqa: BLE001  审计失败不影响加载结果
-                pass
+            except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                swallow("plugins 中的可选步骤", error)
     return records
 
 
@@ -235,9 +242,11 @@ def write_example_plugin(name: str = EXAMPLE_NAME, *, overwrite: bool = False) -
 
 
 def capability_text() -> str:
-    return (f"插件目录：{plugin_dir()}（默认关闭）。插件是普通 Python 文件，"
-            "定义 register(api) 即可注册自定义工具，与内置工具同权；"
-            "加载失败只记录原因，不影响板块其它功能。")
+    return (
+        f"插件目录：{plugin_dir()}（默认关闭）。插件是普通 Python 文件，"
+        "定义 register(api) 即可注册自定义工具，与内置工具同权；"
+        "加载失败只记录原因，不影响板块其它功能。"
+    )
 
 
 def status_text(storage=None) -> str:

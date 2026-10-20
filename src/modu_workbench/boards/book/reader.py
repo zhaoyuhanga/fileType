@@ -1,4 +1,5 @@
 """阅读视图：章节浏览 / 阅读主题 / 字号 / 进度记忆 / 快捷键。"""
+
 from __future__ import annotations
 
 import html as html_mod
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.book import Book, BookRecord, Library
+from modu_workbench.core.platform.logging import swallow
 
 # 5 套阅读主题（名称, 背景, 前景）
 READ_THEMES: list[tuple[str, str, str]] = [
@@ -159,7 +161,9 @@ class ReaderView(QWidget):
 
     def _render(self) -> None:
         if not self._chapters:
-            self._browser.setHtml('<html><body><p style="color:#888;">（无可显示章节）</p></body></html>')
+            self._browser.setHtml(
+                '<html><body><p style="color:#888;">（无可显示章节）</p></body></html>'
+            )
             self._title_label.setText(self._parsed.title if self._parsed else "")
             self._status_label.setText("")
             self._next.setEnabled(False)
@@ -168,7 +172,9 @@ class ReaderView(QWidget):
         if self._chapters_combo.count() != len(self._chapters):
             self._chapters_combo.blockSignals(True)
             self._chapters_combo.clear()
-            self._chapters_combo.addItems([f"{i + 1}. {chapter.title}" for i, chapter in enumerate(self._chapters)])
+            self._chapters_combo.addItems(
+                [f"{i + 1}. {chapter.title}" for i, chapter in enumerate(self._chapters)]
+            )
             self._chapters_combo.setCurrentIndex(self._index)
             self._chapters_combo.blockSignals(False)
 
@@ -224,11 +230,15 @@ class ReaderView(QWidget):
         chapter = self._chapters[self._index]
         try:
             self._library.save_position(
-                self._record_id, self._index, 0, 0.0,
-                chapter_title=chapter.title, action="chapter",
+                self._record_id,
+                self._index,
+                0,
+                0.0,
+                chapter_title=chapter.title,
+                action="chapter",
             )
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("reader 中的可选步骤", error)
 
     def change_font(self, delta: int) -> None:
         self._font_size = min(FONT_MAX, max(FONT_MIN, self._font_size + delta))
@@ -258,9 +268,11 @@ class ReaderView(QWidget):
         chapter = self._chapters[self._index]
         offset = int(progress * max(0, len(chapter.content or "") - 1))
         try:
-            self._library.storage.save_position(self._record_id, self._index, offset, min(1.0, max(0.0, progress)))
-        except Exception:  # noqa: BLE001
-            pass
+            self._library.storage.save_position(
+                self._record_id, self._index, offset, min(1.0, max(0.0, progress))
+            )
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("reader 中的可选步骤", error)
 
     def _go_back(self) -> None:
         self._save_now()

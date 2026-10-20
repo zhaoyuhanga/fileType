@@ -1,4 +1,4 @@
-# 测试规范（TESTING，v1.0.0）
+# 测试规范（TESTING）
 
 > 目录约定见 `tests/README.md`；架构边界由 `tests/architecture/` 锁死；
 > 所有 UI 测试离屏运行（`QT_QPA_PLATFORM=offscreen`），数据目录隔离（`MODU_DATA_DIR`）。
@@ -47,6 +47,10 @@ $env:MODU_CHECK_DEPS="$env:TEMP\check.json"; .venv\Scripts\python.exe -m modu_wo
 
 > v2.0.0 已移除第七板块「墨软动漫」：本清单同步删除对应条目。
 > 动漫类内容请走「墨软影视」的类型筛选（电影/电视剧/动漫/综艺）。
+>
+> v2.1.0 新增的闸门（都在 `tests/architecture/` 与 `tests/smoke/`，无需手动过）：
+> `test_module_contracts.py`（模块 `__all__` 必须可解析、门面再导出不得被误删）、
+> `test_shell_lazy_pages.py`（板块页按需构造、重复进入复用实例）。
 
 | 板块 | 冒烟路径 |
 |---|---|

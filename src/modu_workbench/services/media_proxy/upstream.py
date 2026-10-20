@@ -10,6 +10,7 @@
 时绝不伪造长度 —— 要么按 chunked 原样转发，要么读完再发（缓存写入路径），
 避免"长度与内容不符"这类播放器难以诊断的错误（V1-n）。
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -34,6 +35,7 @@ from .config import (
     UA,
 )
 from .stats import get_stats
+from modu_workbench.core.platform.logging import swallow
 
 #: 请求类别 →（连接超时, 读超时）
 TIMEOUTS: dict[str, tuple[float, float]] = {
@@ -84,8 +86,12 @@ def _host_is_private(host: str) -> bool:
 
 def _address_is_private(address: ipaddress._BaseAddress) -> bool:  # noqa: SLF001
     return bool(
-        address.is_loopback or address.is_private or address.is_link_local
-        or address.is_multicast or address.is_reserved or address.is_unspecified
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
     )
 
 
@@ -197,8 +203,8 @@ class UpstreamResponse:
     def close(self) -> None:
         try:
             self.body.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except (OSError, ValueError) as error:  # 关闭失败可忽略
+            swallow("释放资源", error)
 
     def __enter__(self) -> UpstreamResponse:
         return self
@@ -214,9 +220,15 @@ class UpstreamClient:
     默认按目标主机维护最多 8 个 Session，其余主机共用溢出 Session。
     """
 
-    def __init__(self, *, pool_connections: int = 8, pool_maxsize: int = 16,
-                 max_sessions: int = 8, idle_keepalive: float = 30.0,
-                 allow_private: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        pool_connections: int = 8,
+        pool_maxsize: int = 16,
+        max_sessions: int = 8,
+        idle_keepalive: float = 30.0,
+        allow_private: bool = False,
+    ) -> None:
         self.pool_connections = pool_connections
         self.pool_maxsize = pool_maxsize
         self.max_sessions = max_sessions
@@ -224,7 +236,7 @@ class UpstreamClient:
         self._lock = threading.Lock()
         self._sessions: dict[str, requests.Session] = {}
         self._overflow: requests.Session | None = None
-        self.adapter_calls = 0        # 观测用：实际发起的上游请求数
+        self.adapter_calls = 0  # 观测用：实际发起的上游请求数
 
     # ------------------------------------------------------------------ Session
 
@@ -233,7 +245,7 @@ class UpstreamClient:
         adapter = HTTPAdapter(
             pool_connections=self.pool_connections,
             pool_maxsize=self.pool_maxsize,
-            max_retries=0,            # 重试由本模块控制（要分层，不能交给 urllib3）
+            max_retries=0,  # 重试由本模块控制（要分层，不能交给 urllib3）
             pool_block=False,
         )
         session.mount("http://", adapter)
@@ -269,8 +281,8 @@ class UpstreamClient:
         for session in sessions:
             try:
                 session.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
 
     # ------------------------------------------------------------------ 取流
 
@@ -308,8 +320,11 @@ class UpstreamClient:
                 started = time.time()
                 try:
                     response = self.session_for(url).get(
-                        url, headers=request_headers, timeout=timeout,
-                        allow_redirects=True, stream=stream,
+                        url,
+                        headers=request_headers,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        stream=stream,
                     )
                 except requests.RequestException as error:
                     last_error = error
@@ -324,7 +339,8 @@ class UpstreamClient:
                 if response.status_code in (401, 403) and retry_referer:
                     response.close()
                     last_error = requests.HTTPError(
-                        f"{response.status_code} from upstream", response=response)
+                        f"{response.status_code} from upstream", response=response
+                    )
                     break
                 return UpstreamResponse(
                     status=response.status_code,
@@ -340,12 +356,20 @@ class UpstreamClient:
                 print(f"[media] upstream failed: {url[:120]} -> {last_error}", file=sys.stderr)
         return None
 
-    def get_bytes(self, url: str, *, headers: dict | None = None, referer: str = "",
-                  extra: str = "", kind: str = "playlist",
-                  max_bytes: int = 4 * 1024 * 1024) -> bytes:
+    def get_bytes(
+        self,
+        url: str,
+        *,
+        headers: dict | None = None,
+        referer: str = "",
+        extra: str = "",
+        kind: str = "playlist",
+        max_bytes: int = 4 * 1024 * 1024,
+    ) -> bytes:
         """读完整响应体（清单/密钥这类小文件用；有硬上限）。"""
-        response = self.get(url, headers=headers, referer=referer, extra=extra,
-                            kind=kind, stream=True)
+        response = self.get(
+            url, headers=headers, referer=referer, extra=extra, kind=kind, stream=True
+        )
         if response is None:
             raise requests.RequestException(f"上游请求失败：{url[:120]}")
         with response:
@@ -410,7 +434,15 @@ def reset_client() -> None:
 
 
 __all__ = [
-    "BlockedTarget", "TIMEOUTS", "UpstreamClient", "UpstreamResponse",
-    "build_headers", "env_allows_private", "get_client", "guess_referer",
-    "referer_candidates", "reset_client", "validate_target",
+    "BlockedTarget",
+    "TIMEOUTS",
+    "UpstreamClient",
+    "UpstreamResponse",
+    "build_headers",
+    "env_allows_private",
+    "get_client",
+    "guess_referer",
+    "referer_candidates",
+    "reset_client",
+    "validate_target",
 ]

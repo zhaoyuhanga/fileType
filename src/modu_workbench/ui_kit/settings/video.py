@@ -9,6 +9,7 @@ v1.1.0 新增三组（对应 docs/VIDEO_PLAN.md 3.4 的设置键）：
 - **缓存/网络**：缓冲档位（省流/均衡/高质）、磁盘配额、预取深度、并发与限速；
 - **弹幕**：总开关、不透明度、速度、屏蔽词（关键词 + `/正则/`）。
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -30,6 +31,7 @@ from modu_workbench.app import context as app_context
 from modu_workbench.core.platform import paths as config
 
 from .base import SettingsPage, app_settings
+from modu_workbench.core.platform.logging import swallow
 
 #: 解码后端选项 → (值, 展示文案)
 MEDIA_BACKENDS = (
@@ -131,7 +133,8 @@ class VideoSettingsPage(SettingsPage):
             self._media_backend.addItem(label, value)
         self._media_backend.setToolTip(
             "Windows 的 Media Foundation 不支持 HLS，所以默认固定 FFmpeg 后端。"
-            "环境变量在进程启动时注入，**改动后需重开播放窗口/重启应用生效**。")
+            "环境变量在进程启动时注入，**改动后需重开播放窗口/重启应用生效**。"
+        )
         play_form.addRow("解码后端", self._media_backend)
 
         self._hw_decode = QComboBox()
@@ -139,7 +142,8 @@ class VideoSettingsPage(SettingsPage):
             self._hw_decode.addItem(label, value)
         self._hw_decode.setToolTip(
             "硬解（d3d11va/d3d12va/dxva2）能把 1080p 软解的 CPU 占用从 ~100% 降到 ~25%。"
-            "若出现花屏/黑屏请改为「关闭硬解」。")
+            "若出现花屏/黑屏请改为「关闭硬解」。"
+        )
         play_form.addRow("硬件解码", self._hw_decode)
 
         self._texture_conversion = QCheckBox("启用 GPU 纹理转换（关闭可解决部分显卡的花屏）")
@@ -151,7 +155,9 @@ class VideoSettingsPage(SettingsPage):
         self._render_path = QComboBox()
         for value, label in RENDER_PATHS:
             self._render_path.addItem(label, value)
-        self._render_path.setToolTip("QGraphicsVideoItem 才能叠加弹幕/字幕/统计浮层；异常时切回旧路径。")
+        self._render_path.setToolTip(
+            "QGraphicsVideoItem 才能叠加弹幕/字幕/统计浮层；异常时切回旧路径。"
+        )
         play_form.addRow("渲染路径", self._render_path)
 
         self._quality_policy = QComboBox()
@@ -175,7 +181,9 @@ class VideoSettingsPage(SettingsPage):
         self._buffer_mode = QComboBox()
         for value, label, tip in BUFFER_MODES:
             self._buffer_mode.addItem(label, value)
-            self._buffer_mode.setItemData(self._buffer_mode.count() - 1, tip, Qt.ItemDataRole.ToolTipRole)
+            self._buffer_mode.setItemData(
+                self._buffer_mode.count() - 1, tip, Qt.ItemDataRole.ToolTipRole
+            )
         self._buffer_mode.setToolTip("缓冲档位同时决定磁盘缓存配额与预取深度。")
         cache_form.addRow("缓冲档位", self._buffer_mode)
 
@@ -221,7 +229,8 @@ class VideoSettingsPage(SettingsPage):
         self._skip_ads = QCheckBox("下载时跳过疑似广告分片（实验性，默认关）")
         self._skip_ads.setToolTip(
             "只跳「时长明显短于中位且与前一 片不同目录」的分片，最多 3 片，并会提示跳了哪些。"
-            "误判会丢正片内容，所以默认关闭。")
+            "误判会丢正片内容，所以默认关闭。"
+        )
         cache_form.addRow("广告分片", self._skip_ads)
 
         # v3-e：测速排序默认关（测速结果会波动，顺序变化必须由用户显式开启，见 3.3.5）
@@ -229,14 +238,16 @@ class VideoSettingsPage(SettingsPage):
         self._sort_by_speed.setToolTip(
             "关闭时：搜索先后、去重保留谁、换源顺序都按「源设置」里的顺序；"
             "打开后改为按延迟/速度/分辨率的综合评分降序"
-            "（评分只用来选源，不决定缓冲档位）。测速在「源设置」里点「测速」。")
+            "（评分只用来选源，不决定缓冲档位）。测速在「源设置」里点「测速」。"
+        )
         cache_form.addRow("源排序", self._sort_by_speed)
 
         self._speed_concurrency = QSpinBox()
         self._speed_concurrency.setRange(1, 6)
         self._speed_concurrency.setSuffix(" 并发")
         self._speed_concurrency.setToolTip(
-            "同时测几个源；最多测 20 个（顺序最靠前的 5 个 + 其余随机 15 个）")
+            "同时测几个源；最多测 20 个（顺序最靠前的 5 个 + 其余随机 15 个）"
+        )
         cache_form.addRow("测速并发", self._speed_concurrency)
 
         self._cache_usage = QLabel("")
@@ -310,8 +321,9 @@ class VideoSettingsPage(SettingsPage):
         box.setCurrentIndex(index if index >= 0 else 0)
 
     def _pick_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(None, "选择视频下载目录",
-                                                 self._download_dir.text())
+        folder = QFileDialog.getExistingDirectory(
+            None, "选择视频下载目录", self._download_dir.text()
+        )
         if folder:
             self._download_dir.setText(folder)
 
@@ -329,87 +341,89 @@ class VideoSettingsPage(SettingsPage):
         used_mb = info["bytes"] / 1048576
         quota_mb = max(1, info["quota_bytes"] // 1048576)
         self._cache_usage.setText(
-            f"{used_mb:.0f} MB / {quota_mb} MB（{info['count']} 个分片，可安全清理）")
+            f"{used_mb:.0f} MB / {quota_mb} MB（{info['count']} 个分片，可安全清理）"
+        )
 
     def load(self) -> None:
         self._download_dir.setText(
             self._settings.value("video/download_dir", "", type=str)
             or str(config.video_download_dir())
         )
-        self._auto_switch.setChecked(
-            self._settings.value("video/auto_switch", True, type=bool)
-        )
-        self._compliance.setChecked(
-            self._settings.value("video/compliance", True, type=bool)
-        )
+        self._auto_switch.setChecked(self._settings.value("video/auto_switch", True, type=bool))
+        self._compliance.setChecked(self._settings.value("video/compliance", True, type=bool))
         for key, check in self._source_checks.items():
             check.setChecked(self._registry.is_enabled(key))
 
         # ---- 播放 ----
-        self._select_data(self._media_backend,
-                          self._settings.value("video/media_backend", "auto", type=str))
-        self._select_data(self._hw_decode,
-                          self._settings.value("video/hw_decode", "auto", type=str))
+        self._select_data(
+            self._media_backend, self._settings.value("video/media_backend", "auto", type=str)
+        )
+        self._select_data(
+            self._hw_decode, self._settings.value("video/hw_decode", "auto", type=str)
+        )
         self._texture_conversion.setChecked(
-            self._settings.value("video/hw_texture_conversion", True, type=bool))
+            self._settings.value("video/hw_texture_conversion", True, type=bool)
+        )
         self._profile_mismatch.setChecked(
-            self._settings.value("video/hw_profile_mismatch", False, type=bool))
-        self._select_data(self._render_path,
-                          self._settings.value("video/render_path", "auto", type=str))
-        self._select_data(self._quality_policy,
-                          self._settings.value("video/quality_policy", "auto", type=str))
+            self._settings.value("video/hw_profile_mismatch", False, type=bool)
+        )
+        self._select_data(
+            self._render_path, self._settings.value("video/render_path", "auto", type=str)
+        )
+        self._select_data(
+            self._quality_policy, self._settings.value("video/quality_policy", "auto", type=str)
+        )
         self._auto_downgrade.setChecked(
-            self._settings.value("video/auto_downgrade", True, type=bool))
-        self._auto_upgrade.setChecked(
-            self._settings.value("video/auto_upgrade", False, type=bool))
-        self._auto_next.setChecked(
-            self._settings.value("video/auto_next", True, type=bool))
+            self._settings.value("video/auto_downgrade", True, type=bool)
+        )
+        self._auto_upgrade.setChecked(self._settings.value("video/auto_upgrade", False, type=bool))
+        self._auto_next.setChecked(self._settings.value("video/auto_next", True, type=bool))
 
         # ---- 缓存与网络 ----
-        self._select_data(self._buffer_mode,
-                          self._settings.value("video/buffer_mode", "balanced", type=str))
-        self._cache_quota.setValue(
-            int(self._settings.value("video/cache_quota_mb", 1024) or 1024))
-        self._prefetch.setValue(
-            int(self._settings.value("video/prefetch_segments", 3) or 0))
+        self._select_data(
+            self._buffer_mode, self._settings.value("video/buffer_mode", "balanced", type=str)
+        )
+        self._cache_quota.setValue(int(self._settings.value("video/cache_quota_mb", 1024) or 1024))
+        self._prefetch.setValue(int(self._settings.value("video/prefetch_segments", 3) or 0))
         self._proxy_concurrency.setValue(
-            int(self._settings.value("video/proxy_concurrency", 16) or 16))
+            int(self._settings.value("video/proxy_concurrency", 16) or 16)
+        )
         self._segment_concurrency.setValue(
-            int(self._settings.value("video/segment_concurrency", 6) or 6))
+            int(self._settings.value("video/segment_concurrency", 6) or 6)
+        )
         self._download_parallel.setValue(
-            int(self._settings.value("video/download_parallel", 2) or 1))
+            int(self._settings.value("video/download_parallel", 2) or 1)
+        )
         self._speed_limit.setValue(
-            int(self._settings.value("video/download_speed_limit_mbps", 0) or 0))
-        self._skip_ads.setChecked(
-            self._settings.value("video/skip_ad_segments", False, type=bool))
+            int(self._settings.value("video/download_speed_limit_mbps", 0) or 0)
+        )
+        self._skip_ads.setChecked(self._settings.value("video/skip_ad_segments", False, type=bool))
         self._sort_by_speed.setChecked(
-            self._settings.value("video/sort_by_speed", False, type=bool))
+            self._settings.value("video/sort_by_speed", False, type=bool)
+        )
         self._speed_concurrency.setValue(
-            int(self._settings.value("video/speed_test_concurrency", 3) or 3))
+            int(self._settings.value("video/speed_test_concurrency", 3) or 3)
+        )
         # 让核心层拿到同一份排序开关（它不读 QSettings；此处兜住"启动后没进过设置页"的场景）
         try:
             self._registry.set_sort_by_speed(self._sort_by_speed.isChecked())
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("video 中的可选步骤", error)
         self._refresh_cache_usage()
 
         # ---- 弹幕 ----
         self._danmaku_enabled.setChecked(
-            self._settings.value("video/danmaku_enabled", False, type=bool))
-        self._danmaku_app_id.setText(
-            self._settings.value("video/danmaku_app_id", "", type=str))
-        self._danmaku_secret.setText(
-            self._settings.value("video/danmaku_app_secret", "", type=str))
-        self._danmaku_opacity.setValue(
-            int(self._settings.value("video/danmaku_opacity", 80) or 80))
-        self._danmaku_speed.setValue(
-            int(self._settings.value("video/danmaku_speed", 8) or 8))
-        self._danmaku_lines.setValue(
-            int(self._settings.value("video/danmaku_max_lines", 0) or 0))
-        self._danmaku_block.setText(
-            self._settings.value("video/danmaku_block_words", "", type=str))
+            self._settings.value("video/danmaku_enabled", False, type=bool)
+        )
+        self._danmaku_app_id.setText(self._settings.value("video/danmaku_app_id", "", type=str))
+        self._danmaku_secret.setText(self._settings.value("video/danmaku_app_secret", "", type=str))
+        self._danmaku_opacity.setValue(int(self._settings.value("video/danmaku_opacity", 80) or 80))
+        self._danmaku_speed.setValue(int(self._settings.value("video/danmaku_speed", 8) or 8))
+        self._danmaku_lines.setValue(int(self._settings.value("video/danmaku_max_lines", 0) or 0))
+        self._danmaku_block.setText(self._settings.value("video/danmaku_block_words", "", type=str))
         self._danmaku_dedupe.setChecked(
-            self._settings.value("video/danmaku_dedupe", False, type=bool))
+            self._settings.value("video/danmaku_dedupe", False, type=bool)
+        )
 
     def save(self) -> bool:
         self._settings.setValue("video/download_dir", self._download_dir.text().strip())
@@ -419,9 +433,8 @@ class VideoSettingsPage(SettingsPage):
             self._registry.set_enabled(key, check.isChecked())
         try:
             self._registry.save_settings(app_context.video_storage())
-        except Exception:  # noqa: BLE001
-            pass
-
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("保存/加载设置", error)
         # ---- 播放 ----
         self._settings.setValue("video/media_backend", self._media_backend.currentData())
         self._settings.setValue("video/hw_decode", self._hw_decode.currentData())
@@ -448,14 +461,12 @@ class VideoSettingsPage(SettingsPage):
         # 所以保存后立刻把值注入注册表，否则要重启应用才生效。
         try:
             self._registry.set_sort_by_speed(self._sort_by_speed.isChecked())
-        except Exception:  # noqa: BLE001
-            pass
-
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("video 中的可选步骤", error)
         # ---- 弹幕 ----
         self._settings.setValue("video/danmaku_enabled", self._danmaku_enabled.isChecked())
         self._settings.setValue("video/danmaku_app_id", self._danmaku_app_id.text().strip())
-        self._settings.setValue("video/danmaku_app_secret",
-                                self._danmaku_secret.text().strip())
+        self._settings.setValue("video/danmaku_app_secret", self._danmaku_secret.text().strip())
         self._settings.setValue("video/danmaku_opacity", self._danmaku_opacity.value())
         self._settings.setValue("video/danmaku_speed", self._danmaku_speed.value())
         self._settings.setValue("video/danmaku_max_lines", self._danmaku_lines.value())
@@ -468,16 +479,18 @@ class VideoSettingsPage(SettingsPage):
 
             media_proxy.reset_config()
             media_proxy.get_config(refresh=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+            swallow("video 中的可选步骤", error)
         return True
 
     def _danmaku_block_text(self) -> str:
         return self._danmaku_block.text().strip()
 
     def hint(self) -> str:
-        return ("解码后端/硬解是**进程级**环境变量：改动后需重开播放窗口（必要时重启应用）生效。"
-                "缓冲档位同时决定磁盘缓存配额与预取深度；分片缓存可随时清空，会自动重建。")
+        return (
+            "解码后端/硬解是**进程级**环境变量：改动后需重开播放窗口（必要时重启应用）生效。"
+            "缓冲档位同时决定磁盘缓存配额与预取深度；分片缓存可随时清空，会自动重建。"
+        )
 
 
 __all__ = ["VideoSettingsPage"]

@@ -4,6 +4,7 @@
 主用的挂了/超限了要能自动换下一个。这里就是那份"候选名单"的编辑界面：
 左侧选类型，中间是候选列表（从上到下 = 调用优先级），右侧编辑选中项的参数。
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -37,6 +38,7 @@ from modu_workbench.core.llm import (
 from modu_workbench.app import context as app_context
 
 from .base import SettingsPage
+from modu_workbench.core.platform.logging import swallow
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
 KIND_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -109,8 +111,10 @@ class LlmSettingsPage(SettingsPage):
         list_box.addWidget(self._profiles, 1)
 
         move_row = QHBoxLayout()
-        for label, delta, tip in (("↑ 上移", -1, "提高调用优先级"),
-                                  ("↓ 下移", 1, "降低调用优先级")):
+        for label, delta, tip in (
+            ("↑ 上移", -1, "提高调用优先级"),
+            ("↓ 下移", 1, "降低调用优先级"),
+        ):
             button = QPushButton(label)
             button.setToolTip(tip)
             button.clicked.connect(lambda _=False, d=delta: self._move(d))
@@ -230,8 +234,9 @@ class LlmSettingsPage(SettingsPage):
             entry = QListWidgetItem(f"{position}. {profile.label}")
             entry.setData(ITEM_ROLE, profile.id)
             entry.setFlags(entry.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            entry.setCheckState(Qt.CheckState.Checked if profile.enabled
-                                else Qt.CheckState.Unchecked)
+            entry.setCheckState(
+                Qt.CheckState.Checked if profile.enabled else Qt.CheckState.Unchecked
+            )
             entry.setToolTip(profile.model or "未填模型名")
             self._profiles.addItem(entry)
         self._loading = False
@@ -281,15 +286,32 @@ class LlmSettingsPage(SettingsPage):
     def _fill_form(self, profile: ModelProfile | None) -> None:
         self._loading = True
         has = profile is not None
-        for widget in (self._name, self._base_url, self._api_key, self._model,
-                       self._vision_model, self._note):
+        for widget in (
+            self._name,
+            self._base_url,
+            self._api_key,
+            self._model,
+            self._vision_model,
+            self._note,
+        ):
             widget.setEnabled(has)
-        for widget in (self._provider, self._temperature, self._max_tokens,
-                       self._timeout, self._enabled):
+        for widget in (
+            self._provider,
+            self._temperature,
+            self._max_tokens,
+            self._timeout,
+            self._enabled,
+        ):
             widget.setEnabled(has)
         if not has:
-            for widget in (self._name, self._base_url, self._api_key, self._model,
-                           self._vision_model, self._note):
+            for widget in (
+                self._name,
+                self._base_url,
+                self._api_key,
+                self._model,
+                self._vision_model,
+                self._note,
+            ):
                 widget.setText("")
             self._loading = False
             return
@@ -347,8 +369,12 @@ class LlmSettingsPage(SettingsPage):
     def _add_profile(self) -> None:
         preset = PROVIDER_PRESETS[0]
         profile = ModelProfile(
-            kind=self.kind, name="", provider=preset.key, base_url=preset.base_url,
-            model=preset.text_model, vision_model=preset.image_model,
+            kind=self.kind,
+            name="",
+            provider=preset.key,
+            base_url=preset.base_url,
+            model=preset.text_model,
+            vision_model=preset.image_model,
             priority=self._storage.next_priority(self.kind),
         )
         profile_id = self._storage.save_profile(profile)
@@ -378,8 +404,11 @@ class LlmSettingsPage(SettingsPage):
         if self._current is None:
             return
         answer = QMessageBox.question(
-            self, "删除配置", f"确定删除「{self._current.label}」？", 
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            self,
+            "删除配置",
+            f"确定删除「{self._current.label}」？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
         if answer != QMessageBox.StandardButton.Yes:
             return
         self._storage.delete_profile(self._current.id)
@@ -409,8 +438,8 @@ class LlmSettingsPage(SettingsPage):
         # 旧版「图库 → DeepSeek」配置自动迁移成一份文字配置 + 一份图片配置
         try:
             self._migrate_legacy()
-        except Exception:  # noqa: BLE001  迁移失败不影响页面可用
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("llm 中的可选步骤", error)
         self._status.setText(KIND_DESCRIPTIONS.get(self.kind, ""))
         self._reload_profiles()
         self._refresh_usage()
@@ -425,15 +454,20 @@ class LlmSettingsPage(SettingsPage):
         if not legacy.configured:
             return
         self._storage.migrate_legacy(
-            api_key=legacy.api_key, base_url=legacy.base_url, model=legacy.model,
-            vision_model=legacy.vision_model, temperature=legacy.temperature,
-            max_tokens=legacy.max_tokens)
+            api_key=legacy.api_key,
+            base_url=legacy.base_url,
+            model=legacy.model,
+            vision_model=legacy.vision_model,
+            temperature=legacy.temperature,
+            max_tokens=legacy.max_tokens,
+        )
 
     def _refresh_usage(self) -> None:
         calls = self._storage.recent_calls(limit=5)
         if not calls:
-            self._usage.setText("还没有调用记录。调用时会自动按优先级降级，"
-                                "这里会显示最近用的是哪一份配置。")
+            self._usage.setText(
+                "还没有调用记录。调用时会自动按优先级降级，" "这里会显示最近用的是哪一份配置。"
+            )
             return
         lines = []
         for call in calls:
@@ -451,8 +485,10 @@ class LlmSettingsPage(SettingsPage):
         return True
 
     def hint(self) -> str:
-        return ("同一类型的多份配置按列表顺序调用，失败会自动降级到下一个；"
-                "「图库」页的 AI 描述/标签用的是图片大模型，检索与参数建议用文字大模型。")
+        return (
+            "同一类型的多份配置按列表顺序调用，失败会自动降级到下一个；"
+            "「图库」页的 AI 描述/标签用的是图片大模型，检索与参数建议用文字大模型。"
+        )
 
 
 __all__ = ["LlmSettingsPage"]

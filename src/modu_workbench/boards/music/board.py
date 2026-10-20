@@ -1,4 +1,5 @@
 """墨软乐库板块：搜索下载 / 我的音乐 / 歌单 / 格式转换 / 播放历史 + 底部播放条。"""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -28,6 +29,7 @@ from .history import MusicHistoryPage
 from .library_page import MusicConvertPage, MusicLibraryPage
 from .playlist import MusicPlaylistPage
 from .search import MusicSearchPage
+from modu_workbench.core.platform.logging import swallow
 
 SEARCH_KEY = "search"
 LIBRARY_KEY = "library"
@@ -132,7 +134,11 @@ class MusicPlayerBar(QFrame):
         parts = [track.artist or "未知歌手"]
         if track.album:
             parts.append(track.album)
-        parts.append("在线试听" if not getattr(track, "id", 0) else PLAY_MODE_LABELS.get(self._player.mode, ""))
+        parts.append(
+            "在线试听"
+            if not getattr(track, "id", 0)
+            else PLAY_MODE_LABELS.get(self._player.mode, "")
+        )
         self._meta.setText(" · ".join(p for p in parts if p))
         self._favorite.setText("★ 已收藏" if track.favorited else "☆ 收藏")
 
@@ -140,7 +146,9 @@ class MusicPlayerBar(QFrame):
         if duration:
             self._duration_ms = duration
         if not self._dragging:
-            self._position.setValue(int(position * 1000 / self._duration_ms) if self._duration_ms else 0)
+            self._position.setValue(
+                int(position * 1000 / self._duration_ms) if self._duration_ms else 0
+            )
         self._time.setText(f"{format_duration(position)} / {format_duration(self._duration_ms)}")
 
     def _on_state(self, state: str) -> None:
@@ -234,16 +242,21 @@ class MusicBoardPage(QWidget):
         self._task_bar.cancelled.connect(self._cancel_current_task)
 
         self._stack = QStackedWidget()
-        self._search = MusicSearchPage(self._library, self._storage, self._toaster,
-                                      task_bar=self._task_bar)
-        self._library_page = MusicLibraryPage(self._library, self._storage, self._player, self._toaster,
-                                              task_bar=self._task_bar)
-        self._playlist_page = MusicPlaylistPage(self._library, self._storage, self._player, self._toaster,
-                                                task_bar=self._task_bar)
-        self._convert_page = MusicConvertPage(self._library, self._storage, self._toaster,
-                                              task_bar=self._task_bar)
-        self._history_page = MusicHistoryPage(self._library, self._storage, self._player, self._toaster,
-                                              task_bar=self._task_bar)
+        self._search = MusicSearchPage(
+            self._library, self._storage, self._toaster, task_bar=self._task_bar
+        )
+        self._library_page = MusicLibraryPage(
+            self._library, self._storage, self._player, self._toaster, task_bar=self._task_bar
+        )
+        self._playlist_page = MusicPlaylistPage(
+            self._library, self._storage, self._player, self._toaster, task_bar=self._task_bar
+        )
+        self._convert_page = MusicConvertPage(
+            self._library, self._storage, self._toaster, task_bar=self._task_bar
+        )
+        self._history_page = MusicHistoryPage(
+            self._library, self._storage, self._player, self._toaster, task_bar=self._task_bar
+        )
 
         self._indexes = {
             SEARCH_KEY: self._stack.addWidget(self._search),
@@ -340,11 +353,11 @@ class MusicBoardPage(QWidget):
         is_preview = self._player.is_preview or not getattr(track, "id", 0)
         self._bar.set_preview_mode(bool(is_preview))
         if is_preview:
-            return   # 在线试听不入库、不记历史
+            return  # 在线试听不入库、不记历史
         try:
             self._library.record_play(track.id)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("board 中的可选步骤", error)
         self._history_page.reload()
         self._bar.refresh_favorite(track.favorited)
 

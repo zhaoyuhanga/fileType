@@ -10,6 +10,7 @@
 的设置以读取器形式注入：`permissions_provider`（AI 调用前）、`version_keep_provider`
 （每次裁剪版本快照前）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,6 +26,7 @@ from modu_workbench.core.document.storage import MAX_VERSIONS_PER_DOCUMENT
 from modu_workbench.core.llm.context import llm_router  # noqa: F401  文档 AI 复用大模型配置
 from modu_workbench.core.platform.paths import app_db_path, document_dir
 from modu_workbench.ui_kit.settings import app_settings
+from modu_workbench.core.platform.logging import swallow
 
 _storage: DocumentStorage | None = None
 _library: DocumentLibrary | None = None
@@ -33,8 +35,10 @@ _ai: DocumentAi | None = None
 
 def _read_version_keep() -> int:
     """设置页的「版本保留」（每次裁剪都读一次，改完立即生效）。"""
-    return int(app_settings().value("document/max_versions", MAX_VERSIONS_PER_DOCUMENT)
-               or MAX_VERSIONS_PER_DOCUMENT)
+    return int(
+        app_settings().value("document/max_versions", MAX_VERSIONS_PER_DOCUMENT)
+        or MAX_VERSIONS_PER_DOCUMENT
+    )
 
 
 def document_storage() -> DocumentStorage:
@@ -54,9 +58,12 @@ def document_ai() -> DocumentAi:
     global _ai
     if _ai is None:
         _ai = DocumentAi(
-            llm_router(), document_storage(),
-            permissions=_read_permissions(), permissions_provider=_read_permissions,
-            price_per_1k=float(app_settings().value("document/price_per_1k", 0.0) or 0.0))
+            llm_router(),
+            document_storage(),
+            permissions=_read_permissions(),
+            permissions_provider=_read_permissions,
+            price_per_1k=float(app_settings().value("document/price_per_1k", 0.0) or 0.0),
+        )
     return _ai
 
 
@@ -77,8 +84,9 @@ def default_options() -> BeautifyOptions:
     options = BeautifyOptions()
     options.template = str(settings.value("document/template", "general") or "general")
     options.font_cn = str(settings.value("document/font_cn", options.font_cn) or options.font_cn)
-    options.body_size = float(settings.value("document/body_size", options.body_size)
-                              or options.body_size)
+    options.body_size = float(
+        settings.value("document/body_size", options.body_size) or options.body_size
+    )
     # 布尔值一律用 `type=bool`：Windows 注册表里 Qt 存的是 "true"/"false" 字符串，
     # 直接 bool(value) 会把 "false" 当成 True（设置页关了却不生效）
     options.auto_number = bool(settings.value("document/auto_number", False, type=bool))
@@ -86,11 +94,12 @@ def default_options() -> BeautifyOptions:
     options.beautify_tables = bool(settings.value("document/beautify_tables", True, type=bool))
     options.freeze_header = bool(settings.value("document/freeze_header", True, type=bool))
     options.conditional_format = bool(
-        settings.value("document/conditional_format", False, type=bool))
-    options.data_validation = bool(
-        settings.value("document/data_validation", False, type=bool))
-    options.brand_color = str(settings.value("document/brand_color", options.brand_color)
-                              or options.brand_color)
+        settings.value("document/conditional_format", False, type=bool)
+    )
+    options.data_validation = bool(settings.value("document/data_validation", False, type=bool))
+    options.brand_color = str(
+        settings.value("document/brand_color", options.brand_color) or options.brand_color
+    )
     return options
 
 
@@ -98,15 +107,18 @@ def document_library() -> DocumentLibrary:
     global _library
     if _library is None:
         _library = DocumentLibrary(
-            document_storage(), ai=document_ai(), output_dir=str(document_output_dir()),
-            options=default_options())
+            document_storage(),
+            ai=document_ai(),
+            output_dir=str(document_output_dir()),
+            options=default_options(),
+        )
         # 插件默认关闭（等于执行本机代码）；启用后在这里注册自定义工具
         try:
             from modu_workbench.core.document import plugins as document_plugins
 
             _library.load_plugins(enabled=document_plugins.plugins_enabled(_library.storage))
-        except Exception:  # noqa: BLE001  插件加载失败不影响板块启动
-            pass
+        except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+            swallow("context 中的可选步骤", error)
     return _library
 
 

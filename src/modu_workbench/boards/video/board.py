@@ -9,6 +9,7 @@
 2. **下载**：解析 → 后台下载（HLS 合流 / 直链）→ 入库 → 记历史；
 3. **播放器内换清晰度/换集**：复用同一条解析链路，就地在播放器里切换地址。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,6 +55,7 @@ from .widgets import (
     video_auto_switch_pref,
     video_download_dir_pref,
 )
+from modu_workbench.core.platform.logging import swallow
 
 SEARCH_KEY = "search"
 LIBRARY_KEY = "library"
@@ -86,9 +88,14 @@ class VideoBoardPage(QWidget):
     同时支持注入 —— 便于测试隔离，也便于将来做「多库」扩展。
     """
 
-    def __init__(self, parent: QWidget | None = None, *, library: VideoLibrary | None = None,
-                 storage: VideoStorage | None = None,
-                 registry: VideoRegistry | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        library: VideoLibrary | None = None,
+        storage: VideoStorage | None = None,
+        registry: VideoRegistry | None = None,
+    ):
         super().__init__(parent)
         self._toaster = Toaster(self)
         # 单一事实来源：一切播放/下载解析都走 self._library.registry。
@@ -97,7 +104,9 @@ class VideoBoardPage(QWidget):
         if library is not None:
             self._library: VideoLibrary = library
         elif registry is not None:
-            self._library = VideoLibrary(storage or app_context.video_storage(), video_dir(), registry)
+            self._library = VideoLibrary(
+                storage or app_context.video_storage(), video_dir(), registry
+            )
         else:
             self._library = app_context.video_library()
         self._storage = storage or app_context.video_storage()
@@ -176,15 +185,18 @@ class VideoBoardPage(QWidget):
         # 统一任务条：全板块只此一条，空闲时自动收起进度与取消
         self._task_bar = TaskBar("就绪。搜索后双击条目选集，可在线播放或下载到本地。")
         self._task_bar.cancelled.connect(self._cancel_download)
-        self._cancel_download_button = self._task_bar._cancel   # noqa: SLF001  兼容既有调用
+        self._cancel_download_button = self._task_bar._cancel  # noqa: SLF001  兼容既有调用
 
         self._stack = QStackedWidget()
-        self._search = VideoSearchPage(self._library, self._storage, self._toaster,
-                                      task_bar=self._task_bar)
-        self._library_page = VideoLibraryPage(self._library, self._storage, self._toaster,
-                                              task_bar=self._task_bar)
-        self._history_page = VideoHistoryPage(self._library, self._storage, self._toaster,
-                                              task_bar=self._task_bar)
+        self._search = VideoSearchPage(
+            self._library, self._storage, self._toaster, task_bar=self._task_bar
+        )
+        self._library_page = VideoLibraryPage(
+            self._library, self._storage, self._toaster, task_bar=self._task_bar
+        )
+        self._history_page = VideoHistoryPage(
+            self._library, self._storage, self._toaster, task_bar=self._task_bar
+        )
         self._indexes = {
             SEARCH_KEY: self._stack.addWidget(self._search),
             LIBRARY_KEY: self._stack.addWidget(self._library_page),
@@ -192,7 +204,7 @@ class VideoBoardPage(QWidget):
         }
         layout.addWidget(self._stack, 1)
         layout.addWidget(self._task_bar)
-        
+
         # 数据联动
         self._search.playRequested.connect(self._play_online)
         self._search.downloadRequested.connect(self._handle_download_request)
@@ -212,12 +224,12 @@ class VideoBoardPage(QWidget):
     @property
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字来自统一任务条。"""
-        return self._task_bar._label          # noqa: SLF001
+        return self._task_bar._label  # noqa: SLF001
 
     @property
     def _progress(self) -> QProgressBar:
         """兼容旧引用：进度来自统一任务条。"""
-        return self._task_bar._progress       # noqa: SLF001
+        return self._task_bar._progress  # noqa: SLF001
 
     # ------------------------------------------------------------------ 导航
 
@@ -271,8 +283,9 @@ class VideoBoardPage(QWidget):
 
     # ------------------------------------------------------------------ 在线播放
 
-    def _play_online(self, remote: RemoteVideo, episode: Episode | None,
-                     quality) -> None:  # noqa: ANN001
+    def _play_online(
+        self, remote: RemoteVideo, episode: Episode | None, quality
+    ) -> None:  # noqa: ANN001
         """搜索页请求播放：缺剧集就补，再解析地址。"""
         if remote is None:
             return
@@ -290,28 +303,42 @@ class VideoBoardPage(QWidget):
         target = episode or (remote.episodes[0] if remote.episodes else None)
         self._resolve_and_play(remote, target, quality)
 
-    def _resolve_and_play(self, remote: RemoteVideo, episode: Episode | None,
-                          quality, *, quality_label: str = "",
-                          start_ms: int = 0, title: str = "") -> None:  # noqa: ANN001
+    def _resolve_and_play(
+        self,
+        remote: RemoteVideo,
+        episode: Episode | None,
+        quality,
+        *,
+        quality_label: str = "",
+        start_ms: int = 0,
+        title: str = "",
+    ) -> None:  # noqa: ANN001
         """解析播放地址 → 打开/复用播放器。"""
         if self._resolve_worker is not None and self._resolve_worker.isRunning():
             self._toaster.info("正在解析上一个播放地址，请稍候")
             return
         self._task_bar.report(f"正在解析播放地址：{remote.title} {episode.name if episode else ''}")
         worker = ResolveWorker(
-            remote, episode, quality,
-            allow_cross_source=video_auto_switch_pref(), parent=self,
+            remote,
+            episode,
+            quality,
+            allow_cross_source=video_auto_switch_pref(),
+            parent=self,
             library=self._library,
         )
         worker.finishedResolve.connect(
-            lambda resolved, video: self._on_resolved(resolved, video, quality_label, start_ms, title)
+            lambda resolved, video: self._on_resolved(
+                resolved, video, quality_label, start_ms, title
+            )
         )
         worker.failed.connect(self._on_resolve_failed)
         worker.finished.connect(self._on_resolve_finished)
         self._resolve_worker = worker
         worker.start()
 
-    def _on_resolved(self, resolved, video, quality_label: str, start_ms: int, title: str) -> None:  # noqa: ANN001
+    def _on_resolved(
+        self, resolved, video, quality_label: str, start_ms: int, title: str
+    ) -> None:  # noqa: ANN001
         if resolved is None or video is None:
             return
         if resolved.switched:
@@ -322,7 +349,9 @@ class VideoBoardPage(QWidget):
         self._session_source = resolved.source
         self._session_referer = resolved.referer
 
-        label = resolved.quality_label or (quality_label if quality_label else (video.quality or ""))
+        label = resolved.quality_label or (
+            quality_label if quality_label else (video.quality or "")
+        )
         # 记住"正在播的是哪一档"：stall 自愈要靠它才知道该往哪一档降
         self._session_quality_label = str(label or "")
         qualities = self._quality_labels_for(resolved.episode)
@@ -353,8 +382,11 @@ class VideoBoardPage(QWidget):
             self._player.set_qualities(qualities, label)
             self._player.set_episode_nav(has_prev=has_prev, has_next=has_next)
             self._player.switch_source(
-                resolved.url, is_hls=resolved.is_hls, referer=resolved.referer,
-                title=display_title, start_ms=start_ms or self._resume_position(video),
+                resolved.url,
+                is_hls=resolved.is_hls,
+                referer=resolved.referer,
+                title=display_title,
+                start_ms=start_ms or self._resume_position(video),
                 status=f"正在播放：{display_title}（{resolved.source}）",
             )
             self._player.show()
@@ -432,8 +464,12 @@ class VideoBoardPage(QWidget):
             # 源没给多地址：退化为换源解析（其他源可能真的提供该清晰度）
             self._toaster.info(f"当前线路没有独立的「{label}」地址，改为换源解析")
             self._resolve_and_play(
-                remote, episode, None, quality_label=label,
-                start_ms=position, title=self._play_title(remote, episode),
+                remote,
+                episode,
+                None,
+                quality_label=label,
+                start_ms=position,
+                title=self._play_title(remote, episode),
             )
             return
         if not looks_like_media_url(quality.url):
@@ -441,16 +477,22 @@ class VideoBoardPage(QWidget):
             # 否则播放器会把 HTML 当视频解，表现为「换了清晰度就播不了」
             self._toaster.info(f"正在解析「{label}」线路的真实播放地址…")
             self._resolve_and_play(
-                remote, episode, quality, quality_label=label,
-                start_ms=position, title=self._play_title(remote, episode),
+                remote,
+                episode,
+                quality,
+                quality_label=label,
+                start_ms=position,
+                title=self._play_title(remote, episode),
             )
             return
         self._session_quality_label = str(label or "")
         self._session_video_quality(label)
         if self._player is not None:
             self._player.switch_source(
-                quality.url, is_hls=is_hls_url(quality.url),
-                referer=self._session_referer, start_ms=position,
+                quality.url,
+                is_hls=is_hls_url(quality.url),
+                referer=self._session_referer,
+                start_ms=position,
                 status=f"已切换到 {label}",
             )
 
@@ -459,8 +501,8 @@ class VideoBoardPage(QWidget):
             self._session_video.quality = label
             try:
                 self._storage.upsert_video(self._session_video)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                swallow("board 中的可选步骤", error)
 
     def _on_episode_step(self, step: int) -> None:
         """播放器里点上一集/下一集。"""
@@ -477,7 +519,9 @@ class VideoBoardPage(QWidget):
             return
         target = remote.episodes[position]
         self._resolve_and_play(
-            remote, target, None,
+            remote,
+            target,
+            None,
             title=self._play_title(remote, target),
         )
 
@@ -485,7 +529,7 @@ class VideoBoardPage(QWidget):
         """接上播放器的自愈与诊断信号（V1-h）。"""
         for signal_name in ("stallDetected", "diagnosticsRequested"):
             if not hasattr(player, signal_name):
-                return            # 旧替身播放器没有这些信号，静默跳过
+                return  # 旧替身播放器没有这些信号，静默跳过
         self._downgrade_count = 0
         player.stallDetected.connect(self._on_stall_detected)
         player.diagnosticsRequested.connect(self._on_diagnostics_requested)
@@ -505,8 +549,13 @@ class VideoBoardPage(QWidget):
         if self._danmaku_worker is not None and self._danmaku_worker.isRunning():
             return
         number = _episode_number(episode)
-        worker = DanmakuWorker(remote.title, episode.name if episode else "",
-                               episode_number=number, year=remote.year or "", parent=self)
+        worker = DanmakuWorker(
+            remote.title,
+            episode.name if episode else "",
+            episode_number=number,
+            year=remote.year or "",
+            parent=self,
+        )
         worker.fetched.connect(self._on_danmaku_fetched)
         worker.finished.connect(self._on_danmaku_thread_finished)
         self._danmaku_worker = worker
@@ -532,7 +581,8 @@ class VideoBoardPage(QWidget):
         from modu_workbench.ui_kit.media.danmaku_bridge import import_danmaku_file
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择弹幕文件", "", "弹幕 XML (*.xml);;所有文件 (*)")
+            self, "选择弹幕文件", "", "弹幕 XML (*.xml);;所有文件 (*)"
+        )
         if not path:
             return
         result = import_danmaku_file(path)
@@ -582,7 +632,8 @@ class VideoBoardPage(QWidget):
                 self._downgrade_count += 1
                 self._task_bar.note(
                     f"网络偏慢，正在自动降低清晰度到 {target.label}"
-                    f"（第 {self._downgrade_count} 次）…")
+                    f"（第 {self._downgrade_count} 次）…"
+                )
                 self._on_quality_requested(target.label)
                 return
             # 没有"比当前更低"的档可降 → 直接换源
@@ -604,25 +655,37 @@ class VideoBoardPage(QWidget):
         if len(variants) < 2:
             return None
         labels = set()
-        for candidate in (self._session_quality_label,
-                          getattr(self._session_video, "quality", "") if self._session_video else "",
-                          getattr(self._session_episode, "quality_label", "") if self._session_episode else ""):
+        for candidate in (
+            self._session_quality_label,
+            getattr(self._session_video, "quality", "") if self._session_video else "",
+            getattr(self._session_episode, "quality_label", "") if self._session_episode else "",
+        ):
             if candidate:
                 labels.add(str(candidate))
-        current = next((item for item in variants
-                        if label_of(item) in labels or getattr(item, "label", "") in labels), None)
+        current = next(
+            (
+                item
+                for item in variants
+                if label_of(item) in labels or getattr(item, "label", "") in labels
+            ),
+            None,
+        )
         if current is None:
             return None
         return next_lower(variants, current)
 
-    def _swap_source_keeping_position(self, remote: RemoteVideo, episode: Episode,
-                                      position_ms: int) -> None:
+    def _swap_source_keeping_position(
+        self, remote: RemoteVideo, episode: Episode, position_ms: int
+    ) -> None:
         """换到其他源播同一集，并保留播放位置（`registry` 会排除已失败的源）。"""
         target = self._player
         if target is not None and hasattr(target, "set_status"):
             target.set_status("正在自动更换线路…")
         self._resolve_and_play(
-            remote, episode, None, start_ms=position_ms,
+            remote,
+            episode,
+            None,
+            start_ms=position_ms,
             title=self._play_title(remote, episode),
         )
 
@@ -650,8 +713,7 @@ class VideoBoardPage(QWidget):
         """
         from PySide6.QtCore import Qt
 
-        if (event.key() == Qt.Key.Key_D
-                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+        if event.key() == Qt.Key.Key_D and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self._export_danmaku()
             return
         super().keyPressEvent(event)
@@ -689,7 +751,9 @@ class VideoBoardPage(QWidget):
             if episode is not None and not episode.url:
                 episode = None
             self._resolve_and_play(
-                remote, episode, None,
+                remote,
+                episode,
+                None,
                 title=video.display(),
             )
             return
@@ -717,9 +781,14 @@ class VideoBoardPage(QWidget):
         start = self._resume_position(video)
         if self._player is None:
             self._player = VideoPlayerDialog(
-                self, title=title, url=url, is_hls=False, start_ms=start,
+                self,
+                title=title,
+                url=url,
+                is_hls=False,
+                start_ms=start,
                 qualities=[video.quality] if video.quality and video.quality != "本地" else [],
-                current_quality=video.quality, episode_label=video.episode_label,
+                current_quality=video.quality,
+                episode_label=video.episode_label,
             )
             self._player.qualityRequested.connect(self._on_quality_requested)
             self._player.episodeRequested.connect(self._on_episode_step)
@@ -739,7 +808,9 @@ class VideoBoardPage(QWidget):
 
     # ------------------------------------------------------------------ 下载
 
-    def _handle_download_request(self, remote: RemoteVideo, episodes, quality) -> None:  # noqa: ANN001
+    def _handle_download_request(
+        self, remote: RemoteVideo, episodes, quality
+    ) -> None:  # noqa: ANN001
         """搜索页的下载请求：参数可能是「整部（episodes=None）」或「指定若干集」。"""
         if remote is None:
             return
@@ -748,9 +819,13 @@ class VideoBoardPage(QWidget):
                 self._task_bar.report(f"正在获取剧集：{remote.title}…")
                 worker = DetailWorker(remote, self)
                 worker.finishedDetail.connect(
-                    lambda detailed, r=remote, q=quality: self._handle_download_request(detailed or r, None, q)
+                    lambda detailed, r=remote, q=quality: self._handle_download_request(
+                        detailed or r, None, q
+                    )
                 )
-                worker.failed.connect(lambda message: self._toaster.error(f"获取剧集失败：{message}"))
+                worker.failed.connect(
+                    lambda message: self._toaster.error(f"获取剧集失败：{message}")
+                )
                 worker.finished.connect(lambda w=worker: self._forget_detail_worker(w))
                 self._detail_workers.append(worker)
                 worker.start()
@@ -788,10 +863,13 @@ class VideoBoardPage(QWidget):
         Path(dest).mkdir(parents=True, exist_ok=True)
         tasks = [(remote, episode, quality) for episode in episodes]
 
-        self._download_tasks = tasks                     # 失败重试队列要用原始任务
+        self._download_tasks = tasks  # 失败重试队列要用原始任务
         self._failed_tasks = []
         self._download_worker = DownloadWorker(
-            tasks, dest, allow_cross_source=video_auto_switch_pref(), parent=self,
+            tasks,
+            dest,
+            allow_cross_source=video_auto_switch_pref(),
+            parent=self,
             library=self._library,
         )
         self._download_worker.progressed.connect(self._on_download_progress)
@@ -833,7 +911,10 @@ class VideoBoardPage(QWidget):
         Path(dest).mkdir(parents=True, exist_ok=True)
         self._failed_tasks = []
         self._download_worker = DownloadWorker(
-            failed, dest, allow_cross_source=video_auto_switch_pref(), parent=self,
+            failed,
+            dest,
+            allow_cross_source=video_auto_switch_pref(),
+            parent=self,
             library=self._library,
         )
         self._download_worker.progressed.connect(self._on_download_progress)
@@ -878,7 +959,8 @@ class VideoBoardPage(QWidget):
         # 记下失败项：即便用户手动取消，`.parts/` 也留着，重试即续传
         failed_keys = {item.episode_label for item in failed}
         self._failed_tasks = [
-            task for task in (getattr(self, "_download_tasks", []) or [])
+            task
+            for task in (getattr(self, "_download_tasks", []) or [])
             if (task[1].name if task[1] is not None else "") in failed_keys
         ]
         if failed:

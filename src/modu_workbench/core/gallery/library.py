@@ -5,6 +5,7 @@
 - `ImageLibrary` 负责"业务动作"（导入/收集/打标签/编辑/导出/AI），
   并且是唯一知道缩略图缓存与 AI 客户端的地方。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,6 +29,7 @@ from .models import (
 )
 from .storage import ImageStorage
 from .thumbs import THUMB_LARGE, THUMB_MEDIUM, THUMB_SMALL, ThumbnailCache, open_oriented
+from modu_workbench.core.platform.logging import swallow
 
 ProgressFn = Callable[[int, int, str], None]
 
@@ -73,8 +75,14 @@ class ImageLibrary:
 
     # ------------------------------------------------------------------ 导入
 
-    def build_item(self, path: str | Path, *, source: str = "local",
-                   with_hash: bool = True, with_thumb: bool = True) -> ImageItem:
+    def build_item(
+        self,
+        path: str | Path,
+        *,
+        source: str = "local",
+        with_hash: bool = True,
+        with_thumb: bool = True,
+    ) -> ImageItem:
         """读取一张图片的元数据（尺寸、EXIF、哈希、缩略图）。"""
         file_path = Path(path)
         stat = file_path.stat()
@@ -85,9 +93,8 @@ class ImageLibrary:
         try:
             with open_oriented(file_path) as image:
                 width, height = image.width, image.height
-        except Exception:  # noqa: BLE001  读不出尺寸也要入库（界面显示占位）
-            pass
-
+        except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+            swallow("library 中的可选步骤", error)
         thumb = ""
         if with_thumb:
             produced = self.thumbs.get(file_path, THUMB_MEDIUM)
@@ -113,11 +120,17 @@ class ImageLibrary:
         )
         return item
 
-    def import_paths(self, paths: Iterable[str | Path], *, source: str = "local",
-                     album_id: int | None = None, skip_duplicates: bool = True,
-                     on_progress: ProgressFn | None = None,
-                     cancel: threading.Event | None = None,
-                     copy_into_library: bool = False) -> ScanResult:
+    def import_paths(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        source: str = "local",
+        album_id: int | None = None,
+        skip_duplicates: bool = True,
+        on_progress: ProgressFn | None = None,
+        cancel: threading.Event | None = None,
+        copy_into_library: bool = False,
+    ) -> ScanResult:
         """批量导入（文件或文件夹），自动去重并统计结果。"""
         files = scan_image_files(paths)
         result = ScanResult()
@@ -128,9 +141,12 @@ class ImageLibrary:
             if on_progress:
                 on_progress(index - 1, total, f"导入中 {index}/{total}：{Path(file_path).name}")
             try:
-                item = self._import_one(file_path, source=source,
-                                        skip_duplicates=skip_duplicates,
-                                        copy_into_library=copy_into_library)
+                item = self._import_one(
+                    file_path,
+                    source=source,
+                    skip_duplicates=skip_duplicates,
+                    copy_into_library=copy_into_library,
+                )
             except Exception:  # noqa: BLE001  单张失败不影响其余
                 result.failed += 1
                 continue
@@ -145,8 +161,14 @@ class ImageLibrary:
             on_progress(len(files), total, result.summary())
         return result
 
-    def _import_one(self, path: str | Path, *, source: str, skip_duplicates: bool,
-                    copy_into_library: bool = False) -> ImageItem | None:
+    def _import_one(
+        self,
+        path: str | Path,
+        *,
+        source: str,
+        skip_duplicates: bool,
+        copy_into_library: bool = False,
+    ) -> ImageItem | None:
         file_path = Path(path)
         if not is_image_file(file_path):
             raise ValueError(f"不支持的图片格式：{file_path.suffix}")
@@ -188,13 +210,15 @@ class ImageLibrary:
             candidate = target.with_name(f"{target.stem} ({index}){target.suffix}")
             if not candidate.exists():
                 return candidate
-        return target.with_name(f"{target.stem}_{hashlib.sha1(str(target).encode()).hexdigest()[:6]}"
-                                f"{target.suffix}")
+        return target.with_name(
+            f"{target.stem}_{hashlib.sha1(str(target).encode()).hexdigest()[:6]}" f"{target.suffix}"
+        )
 
     # ------------------------------------------------------------------ 收集
 
-    def collect_from_url(self, url: str, *, timeout: float = 30.0,
-                         album_id: int | None = None) -> ImageItem:
+    def collect_from_url(
+        self, url: str, *, timeout: float = 30.0, album_id: int | None = None
+    ) -> ImageItem:
         """从网址收集图片：下载到图库目录后入库（来源标记 url）。"""
         import requests
 
@@ -203,7 +227,7 @@ class ImageLibrary:
             raise ValueError("请输入以 http(s):// 开头的图片地址")
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             "Referer": url,
         }
         response = requests.get(url, headers=headers, timeout=timeout)
@@ -282,7 +306,7 @@ class ImageLibrary:
             if base.id in used:
                 continue
             group = [base]
-            for other in items[index + 1:]:
+            for other in items[index + 1 :]:
                 if other.id in used:
                     continue
                 distance = hamming_distance(base.dhash, other.dhash)
@@ -335,9 +359,11 @@ class ImageLibrary:
         """
         import time
 
-        ids = list(image_ids) if image_ids is not None else [
-            item.id for item in self.storage.list_images(limit=50000)
-        ]
+        ids = (
+            list(image_ids)
+            if image_ids is not None
+            else [item.id for item in self.storage.list_images(limit=50000)]
+        )
         counts: dict[str, int] = {}
         for image_id in ids:
             item = self.storage.get_image(image_id)
@@ -393,9 +419,17 @@ class ImageLibrary:
             return edits_mod.render_edited(item.path, steps)
         return open_oriented(item.path)
 
-    def export_edited(self, item: ImageItem, target: str | Path, *, fmt: str = "jpg",
-                      steps: list[EditStep] | None = None, quality: int = 92,
-                      register: bool = True, source: str = "edit") -> Path:
+    def export_edited(
+        self,
+        item: ImageItem,
+        target: str | Path,
+        *,
+        fmt: str = "jpg",
+        steps: list[EditStep] | None = None,
+        quality: int = 92,
+        register: bool = True,
+        source: str = "edit",
+    ) -> Path:
         """导出编辑结果；默认另存为新图并入库（保留原图）。"""
         image = self.render(item, steps)
         try:
@@ -403,21 +437,28 @@ class ImageLibrary:
         finally:
             try:
                 image.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         if register:
             produced = self.build_item(path, source=source)
             produced.id = self.storage.upsert_image(produced)
         return path
 
-    def export_default_path(self, item: ImageItem, *, fmt: str = "jpg",
-                            tag: str = "edited") -> Path:
+    def export_default_path(
+        self, item: ImageItem, *, fmt: str = "jpg", tag: str = "edited"
+    ) -> Path:
         """生成一个不覆盖原图的默认输出路径。"""
         stem = safe_filename(Path(item.path).stem if item.path else item.title, "image")
         return self._unique_target(self.image_dir / f"{stem}_{tag}.{fmt}")
 
-    def overwrite_original(self, item: ImageItem, *, fmt: str = "", steps: list[EditStep] | None = None,
-                           quality: int = 95) -> Path:
+    def overwrite_original(
+        self,
+        item: ImageItem,
+        *,
+        fmt: str = "",
+        steps: list[EditStep] | None = None,
+        quality: int = 95,
+    ) -> Path:
         """覆盖原图（界面必须二次确认）。"""
         if not item.path:
             raise ValueError("在线条目没有本地文件，无法覆盖")
@@ -428,9 +469,9 @@ class ImageLibrary:
         finally:
             try:
                 image.close()
-            except Exception:  # noqa: BLE001
-                pass
-        self.thumbs.invalidate(target)                 # 原图变了，缩略图必须重算
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
+        self.thumbs.invalidate(target)  # 原图变了，缩略图必须重算
         refreshed = self.build_item(target, source=item.source or "edit", with_hash=False)
         refreshed.id = item.id
         refreshed.favorited = item.favorited
@@ -443,8 +484,15 @@ class ImageLibrary:
 
     # ------------------------------------------------------------------ AI 优化
 
-    def run_enhancement(self, item: ImageItem, kind: str, params: dict | None = None, *,
-                        target: str | Path | None = None, register: bool = True) -> Path:
+    def run_enhancement(
+        self,
+        item: ImageItem,
+        kind: str,
+        params: dict | None = None,
+        *,
+        target: str | Path | None = None,
+        register: bool = True,
+    ) -> Path:
         """对一张图执行本地增强并落盘入库（不覆盖原图）。"""
         if not item.path:
             raise ValueError("该条目没有本地文件")
@@ -454,24 +502,25 @@ class ImageLibrary:
         finally:
             try:
                 image.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         fmt = "png" if kind == "background_remove" and processed.mode == "RGBA" else "jpg"
-        out = Path(target) if target else self.export_default_path(item, fmt=fmt,
-                                                                   tag=f"ai_{kind}")
+        out = Path(target) if target else self.export_default_path(item, fmt=fmt, tag=f"ai_{kind}")
         try:
             edits_mod.export_image(processed, out, fmt=fmt, quality=94)
         finally:
             try:
                 processed.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         if register:
             produced = self.build_item(out, source="ai")
             produced.id = self.storage.upsert_image(produced)
         return out
 
-    def compare_metrics(self, item: ImageItem, kind: str, params: dict | None = None) -> tuple[dict, dict]:
+    def compare_metrics(
+        self, item: ImageItem, kind: str, params: dict | None = None
+    ) -> tuple[dict, dict]:
         """返回 (处理前, 处理后) 的画质指标，用于前后对比给客观依据。"""
         if not item.path:
             raise ValueError("该条目没有本地文件")
@@ -482,15 +531,15 @@ class ImageLibrary:
         finally:
             try:
                 image.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         try:
             after = enhance_mod.compute_quality_metrics(processed)
         finally:
             try:
                 processed.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, ValueError) as error:  # 关闭失败可忽略
+                swallow("释放资源", error)
         return before, after
 
     # ---------- AI 文本（大模型） ----------
@@ -507,22 +556,30 @@ class ImageLibrary:
 
         return app_context.llm_router()
 
-    def ai_analyze(self, item: ImageItem, *, use_vision: bool = True,
-                   config: ai_mod.AiConfig | None = None, prefer_vision: bool = True) -> dict:
+    def ai_analyze(
+        self,
+        item: ImageItem,
+        *,
+        use_vision: bool = True,
+        config: ai_mod.AiConfig | None = None,
+        prefer_vision: bool = True,
+    ) -> dict:
         """用大模型生成描述与标签，并写回库。
 
         调用顺序：**图片大模型**（看图，需允许上传且已配置）→ **文字大模型**（只用元数据）。
         同一类型内部按「设置 → 大模型」里的优先级依次尝试，失败自动降级。
         显式传入 `config` 时走单配置老路径（测试/自定义场景）。
         """
-        allow_upload = (config.allow_upload if config is not None
-                        else load_ai_config(self.storage).allow_upload)
+        allow_upload = (
+            config.allow_upload if config is not None else load_ai_config(self.storage).allow_upload
+        )
         result: dict
         if config is not None:
             result = self._analyze_one(item, config, use_vision=use_vision)
         else:
-            result = self._analyze_routed(item, use_vision=use_vision and prefer_vision,
-                                          allow_upload=allow_upload)
+            result = self._analyze_routed(
+                item, use_vision=use_vision and prefer_vision, allow_upload=allow_upload
+            )
 
         tags = [str(t) for t in (result.get("tags") or [])]
         for tag in tags:
@@ -534,19 +591,17 @@ class ImageLibrary:
         )
         return result
 
-    def _analyze_one(self, item: ImageItem, config: ai_mod.AiConfig, *,
-                     use_vision: bool) -> dict:
+    def _analyze_one(self, item: ImageItem, config: ai_mod.AiConfig, *, use_vision: bool) -> dict:
         """单配置分析：看清图是否可用，不可用退回元数据模式。"""
         client = ai_mod.DeepSeekClient(config)
         if use_vision and config.allow_upload and item.path:
             try:
                 return client.analyze_image(item.path)
-            except Exception:  # noqa: BLE001  退回文本模式
-                pass
+            except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                swallow("library 中的可选步骤", error)
         return client.analyze_by_metadata(item)
 
-    def _analyze_routed(self, item: ImageItem, *, use_vision: bool,
-                        allow_upload: bool) -> dict:
+    def _analyze_routed(self, item: ImageItem, *, use_vision: bool, allow_upload: bool) -> dict:
         """按「图片 → 文字」的顺序路由，同一类型内自动降级。"""
         from modu_workbench.core.llm import KIND_IMAGE, KIND_TEXT
 
@@ -574,20 +629,27 @@ class ImageLibrary:
                 return result
             problems.append(f"{kind}：没有解析出有效内容")
         raise ai_mod.AiRequestError(
-            "AI 分析失败：\n" + "\n".join(problems) if problems else "AI 分析失败")
+            "AI 分析失败：\n" + "\n".join(problems) if problems else "AI 分析失败"
+        )
 
     def ai_suggest_keywords(self, query: str) -> list[str]:
         """自然语言检索 → 关键词（文字大模型，多配置降级）。"""
         text, _profile = self._llm_router().run(
-            "text", lambda profile: ai_mod.DeepSeekClient(
-                ai_mod.config_from_profile(profile, kind="text")).suggest_search_keywords(query))
+            "text",
+            lambda profile: ai_mod.DeepSeekClient(
+                ai_mod.config_from_profile(profile, kind="text")
+            ).suggest_search_keywords(query),
+        )
         return list(text or [])
 
     def ai_suggest_edit_params(self, description: str) -> dict:
         """自然语言修图需求 → 本地可执行参数（文字大模型，多配置降级）。"""
         params, _profile = self._llm_router().run(
-            "text", lambda profile: ai_mod.DeepSeekClient(
-                ai_mod.config_from_profile(profile, kind="text")).suggest_edit_params(description))
+            "text",
+            lambda profile: ai_mod.DeepSeekClient(
+                ai_mod.config_from_profile(profile, kind="text")
+            ).suggest_edit_params(description),
+        )
         return dict(params or {})
 
     # ------------------------------------------------------------------ 维护
@@ -606,8 +668,11 @@ class ImageLibrary:
         return self.storage.delete_images(ids)
 
     def missing_files(self) -> List[ImageItem]:
-        return [item for item in self.storage.list_images(limit=50000)
-                if item.path and not Path(item.path).is_file()]
+        return [
+            item
+            for item in self.storage.list_images(limit=50000)
+            if item.path and not Path(item.path).is_file()
+        ]
 
     def disk_usage(self) -> int:
         total = 0
@@ -659,7 +724,9 @@ def save_ai_config(storage: ImageStorage, config: ai_mod.AiConfig) -> None:
     storage.set_setting(f"{ai_mod.SETTING_PREFIX}/timeout", str(config.timeout))
     storage.set_setting(f"{ai_mod.SETTING_PREFIX}/max_tokens", str(config.max_tokens))
     storage.set_setting(f"{ai_mod.SETTING_PREFIX}/temperature", str(config.temperature))
-    storage.set_setting(f"{ai_mod.SETTING_PREFIX}/allow_upload", "1" if config.allow_upload else "0")
+    storage.set_setting(
+        f"{ai_mod.SETTING_PREFIX}/allow_upload", "1" if config.allow_upload else "0"
+    )
 
 
 __all__ = [

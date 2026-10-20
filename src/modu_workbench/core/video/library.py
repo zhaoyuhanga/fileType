@@ -5,6 +5,7 @@
 - `VideoLibrary` 负责「业务动作」（导入 / 播放 / 下载 / 转换），
   并且是唯一知道 `VideoRegistry`（多源）的地方。
 """
+
 from __future__ import annotations
 
 import threading
@@ -30,6 +31,7 @@ from .models import (
 )
 from .sources import ResolvedPlay, SourceError, VideoRegistry, registry as default_registry
 from .storage import VideoStorage, remote_to_video
+from modu_workbench.core.platform.logging import swallow
 
 ProgressFn = Callable[[int, int, str], None]
 
@@ -44,11 +46,12 @@ def _quality_policy() -> str:
         from PySide6.QtCore import QSettings
 
         value = QSettings("ModuWorkbench", "modu-workbench").value(
-            "video/quality_policy", "auto", type=str)
+            "video/quality_policy", "auto", type=str
+        )
         if value:
             return str(value)
-    except Exception:  # noqa: BLE001
-        pass
+    except (ImportError, RuntimeError, TypeError, ValueError) as error:
+        swallow("读取设置", error)
     return "auto"
 
 
@@ -58,7 +61,7 @@ class HdCandidate:
 
     remote: RemoteVideo
     episode: Episode
-    variant: object            # core.video.hls.HlsVariant
+    variant: object  # core.video.hls.HlsVariant
     source_key: str
     source_label: str
 
@@ -112,7 +115,6 @@ def _same_episode(remote: RemoteVideo, name: str, index: int) -> Episode | None:
     return episodes[0]
 
 
-
 def is_video_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTENSIONS
 
@@ -142,8 +144,9 @@ def probe_duration_ms(path: str | Path) -> int:
 class VideoLibrary:
     """本地影视库（数据库位于应用数据目录 video.db）。"""
 
-    def __init__(self, storage: VideoStorage, video_dir: Path,
-                 registry: VideoRegistry | None = None):
+    def __init__(
+        self, storage: VideoStorage, video_dir: Path, registry: VideoRegistry | None = None
+    ):
         self.storage = storage
         self.video_dir = Path(video_dir)
         self.video_dir.mkdir(parents=True, exist_ok=True)
@@ -175,8 +178,13 @@ class VideoLibrary:
             quality="本地",
         )
 
-    def import_paths(self, paths: Iterable[str | Path], *, category: str = "",
-                     on_progress: ProgressFn | None = None) -> List[Video]:
+    def import_paths(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        category: str = "",
+        on_progress: ProgressFn | None = None,
+    ) -> List[Video]:
         """导入文件/文件夹到影视库，返回新增或更新的条目。"""
         files = scan_video_files(paths)
         videos: list[Video] = []
@@ -188,8 +196,13 @@ class VideoLibrary:
                 on_progress(index, len(files), f"已导入 {index}/{len(files)}：{video.display()}")
         return videos
 
-    def import_and_copy(self, paths: Iterable[str | Path], *, category: str = "",
-                        on_progress: ProgressFn | None = None) -> List[Video]:
+    def import_and_copy(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        category: str = "",
+        on_progress: ProgressFn | None = None,
+    ) -> List[Video]:
         """把外部文件复制进影视库目录后再入库（便于统一管理）。"""
         copied: list[Path] = []
         for file_path in scan_video_files(paths):
@@ -212,7 +225,9 @@ class VideoLibrary:
         分类都能正常引用，用户之后想下载也有稳定的 id 可用。
         """
         video = remote_to_video(remote, episode)
-        existing = self.storage.find_remote_video(video.source, video.remote_id, video.episode_index)
+        existing = self.storage.find_remote_video(
+            video.source, video.remote_id, video.episode_index
+        )
         if existing is not None:
             # 保留用户已有的分类/收藏/统计，仅刷新元数据
             video.id = existing.id
@@ -236,23 +251,33 @@ class VideoLibrary:
         except OSError:
             size = 0
         video = remote_to_video(
-            result.video, result.episode,
-            file_path=str(path), size_bytes=size,
+            result.video,
+            result.episode,
+            file_path=str(path),
+            size_bytes=size,
             duration_ms=result.duration_ms or probe_duration_ms(path),
             quality=result.quality_label or "原画",
         )
         video.format = path.suffix.lstrip(".").lower()
         video.source = result.source or video.source
         # 已下载的条目覆盖同源的在线行（保留收藏/分类）
-        existing = self.storage.find_remote_video(video.source, video.remote_id, video.episode_index)
+        existing = self.storage.find_remote_video(
+            video.source, video.remote_id, video.episode_index
+        )
         if existing is not None:
             video.id = existing.id
             video.favorited = existing.favorited
             video.category = existing.category or video.category
             video.play_count = existing.play_count
         video.id = self.storage.upsert_video(video)
-        self.storage.add_history(video.id, "download", episode_label=video.episode_label,
-                                 quality=video.quality, source=video.source, title=video.title)
+        self.storage.add_history(
+            video.id,
+            "download",
+            episode_label=video.episode_label,
+            quality=video.quality,
+            source=video.source,
+            title=video.title,
+        )
         return self.storage.get_video(video.id)
 
     def import_download_results(self, results: Iterable[DownloadResult]) -> List[Video]:
@@ -283,9 +308,9 @@ class VideoLibrary:
         解析成功后把直链记进 play_records，下次可直接续播。
         """
         target = episode or (remote.episodes[0] if remote.episodes else None)
-        resolved = self.registry.resolve(remote, target, quality,
-                                         allow_cross_source=allow_cross_source,
-                                         exclude=exclude)
+        resolved = self.registry.resolve(
+            remote, target, quality, allow_cross_source=allow_cross_source, exclude=exclude
+        )
         resolved = self._lock_best_variant(resolved)
         video = self.ensure_video(resolved.video, resolved.episode)
         # 解析结果的直链是「本次可用」的，重新解析过就不再沿用旧清晰度
@@ -296,8 +321,11 @@ class VideoLibrary:
             video.episode_label = resolved.episode.name
             video.episode_index = resolved.episode.index
         self.storage.save_play_record(
-            video.id, video.episode_label,
-            resolved.quality_label or video.quality, resolved.url, resolved.source,
+            video.id,
+            video.episode_label,
+            resolved.quality_label or video.quality,
+            resolved.url,
+            resolved.source,
         )
         return resolved, video
 
@@ -332,8 +360,11 @@ class VideoLibrary:
 
         policy = _quality_policy()
         episode = resolved.episode
-        declared = [item for item in ((episode.qualities if episode is not None else []) or [])
-                    if getattr(item, "url", "")]
+        declared = [
+            item
+            for item in ((episode.qualities if episode is not None else []) or [])
+            if getattr(item, "url", "")
+        ]
         if len(declared) >= 2:
             chosen = pick_variant(declared, policy=policy)
             if chosen is not None and getattr(chosen, "url", ""):
@@ -429,10 +460,10 @@ class VideoLibrary:
             top = max(variants, key=lambda item: item.rank)
             floor = max(current_height, best.height if best is not None else 0)
             if top.height and top.height > floor:
-                best = HdCandidate(remote=matched, episode=target, variant=top,
-                                   source_key=key, source_label=label)
+                best = HdCandidate(
+                    remote=matched, episode=target, variant=top, source_key=key, source_label=label
+                )
         return best
-
 
     def record_play(self, video: Video, *, quality: str = "", source: str = "") -> None:
         """记录一次播放：播放次数 + 历史 + 最后播放时间。"""
@@ -440,8 +471,11 @@ class VideoLibrary:
             return
         self.storage.mark_played(video.id)
         self.storage.add_history(
-            video.id, "play", episode_label=video.episode_label,
-            quality=quality or video.quality, source=source or video.source,
+            video.id,
+            "play",
+            episode_label=video.episode_label,
+            quality=quality or video.quality,
+            source=source or video.source,
             title=video.title,
         )
         if quality:
@@ -487,17 +521,29 @@ class VideoLibrary:
         target_dir = Path(dest_dir) if dest_dir else self.video_dir
         try:
             path, resolved = download_episode(
-                remote, episode, target_dir, quality=quality, on_progress=on_progress,
-                cancel=cancel, registry=self.registry, allow_cross_source=allow_cross_source,
+                remote,
+                episode,
+                target_dir,
+                quality=quality,
+                on_progress=on_progress,
+                cancel=cancel,
+                registry=self.registry,
+                allow_cross_source=allow_cross_source,
             )
         except Exception as error:  # noqa: BLE001
-            return DownloadResult(video=remote, episode=episode, quality=quality,
-                                  ok=False, message=str(error))
+            return DownloadResult(
+                video=remote, episode=episode, quality=quality, ok=False, message=str(error)
+            )
         size = path.stat().st_size if path.is_file() else 0
         result = DownloadResult(
-            video=resolved.video, episode=resolved.episode, quality=resolved.quality,
-            path=str(path), ok=True, source=resolved.source,
-            switched_from=resolved.switched_from, note=resolved.note,
+            video=resolved.video,
+            episode=resolved.episode,
+            quality=resolved.quality,
+            path=str(path),
+            ok=True,
+            source=resolved.source,
+            switched_from=resolved.switched_from,
+            note=resolved.note,
             size_bytes=size,
         )
         video = self.import_download_result(result)
@@ -524,19 +570,29 @@ class VideoLibrary:
         """
         target_dir = Path(dest_dir) if dest_dir else self.video_dir
         results = download_many(
-            tasks, target_dir, on_progress=on_progress, on_task_done=on_task_done,
-            cancel=cancel, registry=self.registry, allow_cross_source=allow_cross_source,
-            pause_event=pause_event, parallel=parallel,
+            tasks,
+            target_dir,
+            on_progress=on_progress,
+            on_task_done=on_task_done,
+            cancel=cancel,
+            registry=self.registry,
+            allow_cross_source=allow_cross_source,
+            pause_event=pause_event,
+            parallel=parallel,
         )
         self.import_download_results(results)
         return results
 
     # ---------- 转换 ----------
 
-    def convert(self, video_id: int, target_format: str,
-                output_dir: str | Path | None = None,
-                cancel: threading.Event | None = None,
-                on_progress: ProgressFn | None = None) -> Path:
+    def convert(
+        self,
+        video_id: int,
+        target_format: str,
+        output_dir: str | Path | None = None,
+        cancel: threading.Event | None = None,
+        on_progress: ProgressFn | None = None,
+    ) -> Path:
         """把本地视频转换为目标格式（含「提取音频」），返回输出路径。"""
         from modu_workbench.core.convert.media_io import convert_media
 
@@ -572,17 +628,19 @@ class VideoLibrary:
         if f".{target_format}" in VIDEO_EXTENSIONS:
             try:
                 self.import_paths([target], category=video.category)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  外部回调/第三方边界
+                swallow("library 中的可选步骤", error)
         return target
 
     # ---------- 维护 ----------
 
     def refresh_durations(self, video_ids: Iterable[int] | None = None) -> int:
         """为缺少时长的本地条目补齐 duration_ms。"""
-        ids = list(video_ids) if video_ids is not None else [
-            v.id for v in self.storage.list_videos(local_only=True)
-        ]
+        ids = (
+            list(video_ids)
+            if video_ids is not None
+            else [v.id for v in self.storage.list_videos(local_only=True)]
+        )
         updated = 0
         for video_id in ids:
             video = self.storage.get_video(video_id)

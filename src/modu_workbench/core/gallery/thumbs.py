@@ -7,6 +7,7 @@
 缓存键 = sha1(绝对路径 + 修改时间 + 文件大小 + 目标尺寸)：
 文件被改动后自动失效，不需要额外的失效逻辑。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,6 +15,7 @@ import threading
 from pathlib import Path
 
 from PIL import Image, ImageOps
+from modu_workbench.core.platform.logging import swallow
 
 # 常用缩略图尺寸（网格小图 / 网格大图 / 详情预览）
 THUMB_SMALL = 160
@@ -53,8 +55,8 @@ def open_oriented(path: str | Path) -> Image.Image:
     image.load()
     try:
         image = ImageOps.exif_transpose(image)
-    except Exception:  # noqa: BLE001  方向信息损坏时按原样处理
-        pass
+    except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+        swallow("thumbs 中的可选步骤", error)
     return _flatten(image)
 
 
@@ -70,8 +72,9 @@ def _flatten(image: Image.Image) -> Image.Image:
     return image
 
 
-def make_thumbnail(source: str | Path, cache_dir: str | Path, size: int = THUMB_MEDIUM,
-                   *, force: bool = False) -> Path | None:
+def make_thumbnail(
+    source: str | Path, cache_dir: str | Path, size: int = THUMB_MEDIUM, *, force: bool = False
+) -> Path | None:
     """生成（或复用）缩略图，返回缓存文件路径；失败返回 None。"""
     source_path = Path(source)
     if not source_path.is_file():
@@ -94,8 +97,8 @@ def make_thumbnail(source: str | Path, cache_dir: str | Path, size: int = THUMB_
     finally:
         try:
             image.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except (OSError, ValueError) as error:  # 关闭失败可忽略
+            swallow("释放资源", error)
     return target
 
 
@@ -161,7 +164,7 @@ class ThumbnailCache:
     def _evict(self) -> None:
         while len(self._order) > self._limit:
             oldest = self._order.pop(0)
-            self._known.pop(oldest, None)      # 只丢内存索引，磁盘缓存保留
+            self._known.pop(oldest, None)  # 只丢内存索引，磁盘缓存保留
 
     def stats(self) -> dict:
         with self._lock:

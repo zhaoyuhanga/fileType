@@ -6,6 +6,7 @@
 - 编辑是**非破坏性**的：所有操作记成步骤栈，可撤销/重做，原图不动；
 - 保存默认另存为新图并入库，也可（二次确认后）覆盖原图。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -47,6 +48,7 @@ from modu_workbench.core.gallery import (
     open_oriented,
 )
 from modu_workbench.ui_kit.toast import Toaster
+from modu_workbench.core.platform.logging import swallow
 
 # 预览用最长边（全尺寸只在保存时渲染，避免大图卡顿）
 PREVIEW_MAX = 1400
@@ -66,7 +68,7 @@ class CropRectItem(QGraphicsRectItem):
 class EditCanvas(QGraphicsView):
     """编辑画布：显示预览图，支持框选（裁剪/马赛克混合模式）。"""
 
-    regionSelected = Signal(QRectF)      # 场景坐标下的选区
+    regionSelected = Signal(QRectF)  # 场景坐标下的选区
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -115,8 +117,11 @@ class EditCanvas(QGraphicsView):
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._select_mode and self._origin is not None:
             current = self.mapToScene(event.position().toPoint())
-            self._rect.setRect(QRectF(self._origin, current).normalized()
-                               .intersected(QRectF(self._pixmap_item.pixmap().rect())))
+            self._rect.setRect(
+                QRectF(self._origin, current)
+                .normalized()
+                .intersected(QRectF(self._pixmap_item.pixmap().rect()))
+            )
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -139,7 +144,7 @@ class EditCanvas(QGraphicsView):
 class ImageEditorDialog(QDialog):
     """图片编辑对话框（非破坏性步骤栈 + 实时预览）。"""
 
-    saved = Signal(str)      # 保存后的文件路径
+    saved = Signal(str)  # 保存后的文件路径
 
     def __init__(self, library: ImageLibrary, item: ImageItem, parent: QWidget | None = None):
         super().__init__(parent)
@@ -240,10 +245,12 @@ class ImageEditorDialog(QDialog):
         layout = QVBoxLayout(page)
 
         row = QHBoxLayout()
-        for label, step in (("↺ 左转90°", ("rotate", {"angle": -90})),
-                            ("↻ 右转90°", ("rotate", {"angle": 90})),
-                            ("⇋ 水平翻转", ("flip", {"axis": "horizontal"})),
-                            ("⇅ 垂直翻转", ("flip", {"axis": "vertical"}))):
+        for label, step in (
+            ("↺ 左转90°", ("rotate", {"angle": -90})),
+            ("↻ 右转90°", ("rotate", {"angle": 90})),
+            ("⇋ 水平翻转", ("flip", {"axis": "horizontal"})),
+            ("⇅ 垂直翻转", ("flip", {"axis": "vertical"})),
+        ):
             button = QPushButton(label)
             button.clicked.connect(lambda _=False, s=step: self._push_step(s[0], s[1]))
             row.addWidget(button)
@@ -257,7 +264,8 @@ class ImageEditorDialog(QDialog):
         angle_row.addWidget(self._angle, 1)
         apply_angle = QPushButton("应用")
         apply_angle.clicked.connect(
-            lambda: self._push_step("rotate", {"angle": self._angle.value(), "expand": True}))
+            lambda: self._push_step("rotate", {"angle": self._angle.value(), "expand": True})
+        )
         angle_row.addWidget(apply_angle)
         layout.addLayout(angle_row)
 
@@ -283,8 +291,10 @@ class ImageEditorDialog(QDialog):
         border_row.addWidget(self._border_width)
         border_button = QPushButton("加边框")
         border_button.clicked.connect(
-            lambda: self._push_step("border", {"width": self._border_width.value(),
-                                               "color": [250, 250, 250]}))
+            lambda: self._push_step(
+                "border", {"width": self._border_width.value(), "color": [250, 250, 250]}
+            )
+        )
         border_row.addWidget(border_button)
         layout.addLayout(border_row)
 
@@ -311,8 +321,14 @@ class ImageEditorDialog(QDialog):
 
         apply_filter = QPushButton("应用滤镜")
         apply_filter.clicked.connect(
-            lambda: self._push_step("filter", {"name": self._filter_combo.currentData(),
-                                               "amount": self._filter_amount.value() / 100}))
+            lambda: self._push_step(
+                "filter",
+                {
+                    "name": self._filter_combo.currentData(),
+                    "amount": self._filter_amount.value() / 100,
+                },
+            )
+        )
         layout.addWidget(apply_filter)
 
         form = QFormLayout()
@@ -415,8 +431,8 @@ class ImageEditorDialog(QDialog):
         self._preview_scale = scale
         if scale < 1.0:
             self._preview = self._source.resize(
-                (max(1, int(width * scale)), max(1, int(height * scale))),
-                Image.Resampling.LANCZOS)
+                (max(1, int(width * scale)), max(1, int(height * scale))), Image.Resampling.LANCZOS
+            )
         else:
             self._preview = self._source.copy()
 
@@ -484,8 +500,10 @@ class ImageEditorDialog(QDialog):
         # 画布坐标 → 原图坐标（先把预览坐标还原到原图尺度）
         scale = self._preview_scale or 1.0
         box = [
-            int(rect.left() / scale), int(rect.top() / scale),
-            int(rect.width() / scale), int(rect.height() / scale),
+            int(rect.left() / scale),
+            int(rect.top() / scale),
+            int(rect.width() / scale),
+            int(rect.height() / scale),
         ]
         mode = getattr(self._canvas, "_select_mode", "")
         if mode == "crop":
@@ -496,23 +514,29 @@ class ImageEditorDialog(QDialog):
         elif mode == "mosaic":
             self._canvas.end_select()
             self._canvas.clear_rect()
-            self._push_step("mosaic", {
-                "box": box,
-                "block": self._mosaic_block.value(),
-                "mode": self._mosaic_mode.currentData(),
-            })
+            self._push_step(
+                "mosaic",
+                {
+                    "box": box,
+                    "block": self._mosaic_block.value(),
+                    "mode": self._mosaic_mode.currentData(),
+                },
+            )
             self._status.setText("已应用马赛克/模糊")
         elif mode == "draw":
             # 涂鸦：把选区当作一笔线段记录，保持涂鸦模式继续画
-            self._push_step("draw", {
-                "points": [
-                    [box[0], box[1]],
-                    [box[0] + max(1, box[2]), box[1] + max(1, box[3])],
-                ],
-                "color": [230, 60, 60],
-                "width": self._draw_width.value(),
-                "erase": self._draw_erase.isChecked(),
-            })
+            self._push_step(
+                "draw",
+                {
+                    "points": [
+                        [box[0], box[1]],
+                        [box[0] + max(1, box[2]), box[1] + max(1, box[3])],
+                    ],
+                    "color": [230, 60, 60],
+                    "width": self._draw_width.value(),
+                    "erase": self._draw_erase.isChecked(),
+                },
+            )
         else:
             self._canvas.clear_rect()
 
@@ -541,10 +565,17 @@ class ImageEditorDialog(QDialog):
         if not text:
             self._toaster.info("请输入文字内容")
             return
-        self._push_step("text", {
-            "text": text, "x": 16, "y": 16,
-            "size": self._text_size.value(), "color": list(self._text_color), "shadow": True,
-        })
+        self._push_step(
+            "text",
+            {
+                "text": text,
+                "x": 16,
+                "y": 16,
+                "size": self._text_size.value(),
+                "color": list(self._text_color),
+                "shadow": True,
+            },
+        )
         self._status.setText(f"已添加文字：{text}")
 
     def _on_adjust_changed(self) -> None:
@@ -566,8 +597,13 @@ class ImageEditorDialog(QDialog):
         }
 
     def _reset_adjust_sliders(self) -> None:
-        defaults = {"brightness": 100, "contrast": 100, "saturation": 100,
-                    "sharpness": 100, "temperature": 0}
+        defaults = {
+            "brightness": 100,
+            "contrast": 100,
+            "saturation": 100,
+            "sharpness": 100,
+            "temperature": 0,
+        }
         for key, slider in self._adjust_sliders.items():
             slider.blockSignals(True)
             slider.setValue(defaults[key])
@@ -592,13 +628,14 @@ class ImageEditorDialog(QDialog):
     def _save_as_new(self) -> None:
         fmt = self._format_combo.currentData() or "jpg"
         default = self._library.export_default_path(self._item, fmt=fmt, tag="edited")
-        target, _ = QFileDialog.getSaveFileName(self, "另存为新图", str(default),
-                                                f"{fmt.upper()} (*.{fmt})")
+        target, _ = QFileDialog.getSaveFileName(
+            self, "另存为新图", str(default), f"{fmt.upper()} (*.{fmt})"
+        )
         if not target:
             return
         try:
             path = self._library.export_edited(self._item, target, fmt=fmt, steps=self._steps)
-            self._library.save_steps(self._item.id, self._steps)   # 记住编辑栈，便于再改
+            self._library.save_steps(self._item.id, self._steps)  # 记住编辑栈，便于再改
         except Exception as error:  # noqa: BLE001
             self._toaster.error(f"保存失败：{error}")
             return
@@ -611,7 +648,8 @@ class ImageEditorDialog(QDialog):
             self._toaster.error("该条目没有本地文件")
             return
         answer = QMessageBox.question(
-            self, "覆盖原图",
+            self,
+            "覆盖原图",
             f"将直接修改原文件：\n{self._item.path}\n\n此操作不可撤销，确定继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -632,8 +670,8 @@ class ImageEditorDialog(QDialog):
             try:
                 if image is not None:
                     image.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                swallow("editor 中的可选步骤", error)
         super().closeEvent(event)
 
 
