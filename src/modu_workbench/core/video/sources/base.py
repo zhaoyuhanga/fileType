@@ -77,26 +77,6 @@ def resolution_score(height: int) -> float:
     return low_score + (high_score - low_score) * ratio
 
 
-def resolution_score_from_label(label: str) -> float:
-    """从源给的画质标签（"1080P" / "4K" / "原画"）估分辨率分。"""
-    text = (label or "").strip().upper()
-    if not text:
-        return 0.4
-    if "4K" in text or "2160" in text:
-        return 1.0
-    if "2K" in text or "1440" in text:
-        return 0.85
-    digits = ""
-    for char in text:
-        if char.isdigit():
-            digits += char
-        elif digits:
-            break
-    if digits:
-        return resolution_score(int(digits))
-    return 0.4
-
-
 @dataclass
 class SourceHealth:
     """视频源健康度：连续失败自动降级（熔断），成功即恢复。

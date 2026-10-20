@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from modu_workbench.services.media_server import media_url
+from modu_workbench.services.media_proxy import media_url
 
 
 def _status_or_none(url: str, *, headers: dict | None = None,
@@ -40,7 +40,7 @@ def _status_or_none(url: str, *, headers: dict | None = None,
     return None
 
 
-def test_media_server_full_and_range(tmp_path: Path) -> None:
+def test_media_proxy_full_and_range(tmp_path: Path) -> None:
     video = tmp_path / "clip.mp4"
     payload = b"0123456789abcdefghij"  # 20B 伪视频
     video.write_bytes(payload)
@@ -57,7 +57,7 @@ def test_media_server_full_and_range(tmp_path: Path) -> None:
         assert resp.read() == payload[2:10]
 
 
-def test_media_server_rejects_other_files(tmp_path: Path) -> None:
+def test_media_proxy_rejects_other_files(tmp_path: Path) -> None:
     """非媒体扩展名一律 404（不能拿它读任意本机文件）。"""
     secret = tmp_path / "secret.txt"
     secret.write_text("no", encoding="utf-8")
@@ -65,7 +65,7 @@ def test_media_server_rejects_other_files(tmp_path: Path) -> None:
     assert _status_or_none(url) == 404
 
 
-def test_media_server_rejects_path_outside_token(tmp_path: Path) -> None:
+def test_media_proxy_rejects_path_outside_token(tmp_path: Path) -> None:
     """没有令牌前缀的路径必须 404（防止同机进程枚举读取媒体文件）。"""
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"0123456789")
@@ -77,7 +77,7 @@ def test_media_server_rejects_path_outside_token(tmp_path: Path) -> None:
     assert _status_or_none(forged) == 404
 
 
-def test_media_server_requires_session_token(tmp_path: Path) -> None:
+def test_media_proxy_requires_session_token(tmp_path: Path) -> None:
     """回归：同一个文件在**带令牌**时能取到、**不带令牌**时 404。"""
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"0123456789")

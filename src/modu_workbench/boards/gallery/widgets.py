@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable
 
 from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMenu,
     QPushButton,
     QScrollArea,
     QStyle,
@@ -31,19 +30,11 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.gallery import (
-    VIEW_MODE_LABELS,
     ImageItem,
     ImageLibrary,
-    ImageStorage,
     THUMB_MEDIUM,
-    THUMB_SMALL,
-    EditStep,
-    apply_enhancement,
     enhance_labels,
-    open_oriented,
 )
-from . import context as app_context
-from modu_workbench.ui_kit.toast import Toaster
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
 FAVORITE_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -632,10 +623,6 @@ class ImageViewer(QScrollArea):
         super().resizeEvent(event)
         if self._mode == "fit":
             self._render()
-
-
-def pixmap_to_qimage(pixmap: QPixmap) -> QImage:
-    return pixmap.toImage()
 
 
 # --------------------------------------------------------------------------- 后台线程

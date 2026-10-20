@@ -22,7 +22,6 @@ from __future__ import annotations
 import os
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -41,7 +40,6 @@ from .config import (
 )
 from .playlist import (
     cached_playlist,
-    name_hint,
     hls_path,
     image_path,
     proxy_path,

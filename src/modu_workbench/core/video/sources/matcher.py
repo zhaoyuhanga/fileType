@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from ..models import RemoteVideo
 
@@ -83,10 +83,3 @@ def best_match(base: RemoteVideo, candidates: Sequence[RemoteVideo],
     return best
 
 
-def best_matches(base: RemoteVideo, candidates: Iterable[RemoteVideo],
-                 threshold: float = 0.62) -> list[tuple[RemoteVideo, float]]:
-    """按分数从高到低返回全部达标候选（用于「换源选择」界面）。"""
-    scored = [(item, match_score(base, item)) for item in candidates or ()]
-    scored = [(item, score) for item, score in scored if score >= threshold]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return scored

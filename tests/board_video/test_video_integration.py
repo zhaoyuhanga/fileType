@@ -35,12 +35,10 @@ VIDEO_MODULES = [
     "modu_workbench.boards.video.library_page",
     "modu_workbench.boards.video.history",
     "modu_workbench.boards.video.sources",
-    "modu_workbench.boards.video.player",
     "modu_workbench.boards.video.widgets",
     "modu_workbench.app.registry",
-    "modu_workbench.services.app_context",
     "modu_workbench.core.platform.paths",
-    "modu_workbench.services.media_server",
+    "modu_workbench.services.media_proxy",
 ]
 
 

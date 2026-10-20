@@ -7,10 +7,8 @@
 """
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional
 
 from modu_workbench.core.platform.db import SqliteStore
@@ -185,6 +183,3 @@ class Storage(SqliteStore):
         )
 
 
-def default_db_path(app_dir: str) -> str:
-    """默认 SQLite 文件路径。"""
-    return os.path.join(app_dir, "library.db")

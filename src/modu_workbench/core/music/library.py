@@ -7,9 +7,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Iterable, List
 
-from modu_workbench.core.convert.media_io import AUDIO_TARGETS
 from modu_workbench.core.platform.media import (
-    find_ffmpeg,
     find_ffprobe as _find_ffprobe,
     probe_duration_ms as _probe_duration_ms,
 )
@@ -236,5 +234,3 @@ class MusicLibrary:
         return target
 
 
-def audio_target_count() -> int:
-    return len([fmt for fmt in MUSIC_TARGETS if fmt in AUDIO_TARGETS])

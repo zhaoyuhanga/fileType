@@ -23,17 +23,15 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.convert import engine as convert_engine
 from modu_workbench.core.convert.capabilities import blocked_reason
-from modu_workbench.core.convert.formats import TARGET_EXTENSION, format_from_extension, format_label
 from modu_workbench.core.convert.registry import (
     ConverterAction,
-    common_actions,
-    get_action,
     union_actions,
 )
 from modu_workbench.ui_kit.components import EmptyState, PageHeader, TaskBar
 from modu_workbench.ui_kit.settings import app_settings
-from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SECTION_GAP, SPACE
+from modu_workbench.ui_kit.tokens import PAGE_MARGIN, SECTION_GAP, SPACE
 from modu_workbench.ui_kit.toast import Toaster
+from modu_workbench.core.convert.formats import format_from_extension, format_label
 
 VIEWABLE_DOC_EXTENSIONS = {".txt", ".md", ".json", ".mp4"}
 

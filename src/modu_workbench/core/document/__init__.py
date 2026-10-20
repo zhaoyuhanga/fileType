@@ -218,7 +218,6 @@ from .storage import DocumentRecord, DocumentStorage
 from .templates import (
     TemplateError,
     UserTemplate,
-    delete_template,
     export_template,
     import_template,
     list_user_templates,

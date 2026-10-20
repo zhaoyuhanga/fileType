@@ -21,7 +21,7 @@ from .downloader import (
     looks_like_video,
     unique_path,
 )
-from .hls import HlsPlaylist, HlsVariant, list_qualities, parse_m3u8, segment_iv
+from .hls import HlsPlaylist, HlsVariant, list_qualities, parse_m3u8
 from .library import VideoLibrary, is_video_file, probe_duration_ms, scan_video_files
 from .models import (
     FAVORITE_NAME,

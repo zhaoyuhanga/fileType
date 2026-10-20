@@ -1,7 +1,6 @@
 """书库管理:导入、解析、缓存。"""
 from __future__ import annotations
 
-import os
 from typing import List, Optional
 
 from modu_workbench.core.book.parser import parse_book, Book

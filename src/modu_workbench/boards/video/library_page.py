@@ -14,16 +14,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
-    QProgressBar,
     QPushButton,
     QTableWidget,
     QVBoxLayout,
     QWidget,
-    QStackedWidget,
 )
 
 from modu_workbench.core.video import VIDEO_TARGETS, VideoLibrary, VideoStorage

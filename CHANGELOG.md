@@ -3,6 +3,67 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v2.0.1 — 代码质量与启动性能优化（无行为变更）
+
+> 纯优化版本：不改用户可见功能，只让**启动更快、代码更少**。
+> 为什么不并进 v2.0.0：`v2.0.0` 已经打了 tag 并推送，同一个版本号出现两份不同二进制
+> 比"多一个小版本"更糟。
+
+### 启动性能
+
+**启动快了一个数量级**（只算我们的开销）：
+
+| 项目 | 优化前 | 优化后 |
+|---|---|---|
+| `import app.registry` | 364 ms | **5 ms** |
+| 主壳 `AppShell()` 构造 | 154 ms | **4 ms** |
+| 首次进某个板块 | 0（已预构造） | **11 ms** |
+
+做法：
+
+- **板块页按需构造**：主壳不再在 `__init__` 里把六个板块的页面全建出来（用户一次只看一个，
+  没进过的板块不该先付建表格/卡片/播放器的钱）；
+- **板块模块按需导入**：`BoardSpec.page` 从 `Type[QWidget]` 改成
+  `page_target="包.模块:类名"` + 懒解析属性。旧写法逼着 `app/registry.py` 在模块顶层
+  `import` 六个 `board` 模块及其整个 core 层，而用户此刻只想看到首页。
+  `spec.page` 仍是页面类，`isinstance(page, spec.page)` 不受影响。
+
+**删掉的多余代码**：
+
+| 项 | 说明 |
+|---|---|
+| `services/media_server.py`（122 行） | v1.1.0 起只是 `media_proxy` 的转发壳，同名函数在两处各一份。已删除，调用方直接 `from modu_workbench.services import media_proxy`；测试文件同步更名为 `test_media_proxy_urls.py` |
+| `boards/video/player.py`（39 行） | 播放器上移到 `ui_kit/media/` 后的转发壳（理由随动漫板块一并消失）。已删除 |
+| 9 个无人引用的公开函数 | `pixmap_to_qimage`、`all_track_ids`、`default_db_path`、`audio_target_count`、`reset_app_db`、`document_db_path`、`is_m3u8_url`、`resolution_score_from_label`、`best_matches` |
+| 43 处未使用的导入 | 逐个核对后删除（`Qt`/`QComboBox`/`field`/`chardet`/`os`/`Path`/`Tuple`/`Callable` 等） |
+| `chardet` 依赖 | 声明了但全仓库从未使用，已从 `pyproject.toml` 移除 |
+
+**两道新闸门（都是本轮踩出来才加的）**：
+
+- `test_module_contracts.py::test_dunder_all_resolves`：所有模块 `__all__` 里的名字必须真实存在
+  （`boards/document/__init__.py` 曾声明 `__all__ = ["board"]` 却没导入 `board`）；
+- `test_module_contracts.py::test_public_facades_still_export_their_names`：
+  门面模块（`ui_kit.theme` / `core.video` / `ui_kit.media` / `services.dandanplay` /
+  `core.platform.textutil`）必须仍能取到对外名字 —— 批量清理"未使用导入"时
+  `from PySide6.QtCore import Qt, Signal, QThread` 被整行删掉（只想删 `Qt`），
+  导入期立刻 `NameError`；这条闸门与 `__all__` 检查一起把这类破坏钉住；
+- `tests/smoke/test_shell_lazy_pages.py`：启动只构造首页、首次访问才建页、重复进入复用实例。
+
+**一个"看起来像死代码、其实是架构必需"的例子（已写进注释）**：
+`services/app_context.py` 优化时被删过一次，架构闸门立刻报
+`boards.convert -> modu_workbench.app.context` 违规 —— 转换板块要把产物导入书库，
+而板块之间不允许互相依赖，`services` 是唯一合规的中介。它已恢复并在模块注释里写明
+"别当死代码删"。
+
+### 验证
+
+- 全量 `pytest tests -q`：**全部通过**（新增 3 道闸门：`__all__` 可解析、门面再导出、
+  主壳懒构造）；
+- 源码自检 **17/17**、打包产物自检 **17/17**、exe 模块核验 **36 项全命中**；
+- 打包 v2.0.1：onedir **388.3 MB** / 安装包 **154.4 MB**（版本资源 2.0.1）；
+- 闭环：静默安装 → 已安装产物自检 17/17 → 静默卸载后目录/注册表/快捷方式全清，
+  用户数据保留。
+
 ## v2.0.0 — 定版：移除第七板块「墨软动漫」
 
 > **为什么不升 1.2 而是 2.0**：整块移除一个已发布的功能（板块入口、设置页、

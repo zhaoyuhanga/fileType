@@ -822,7 +822,7 @@ def _localize_playlist(url: str, headers: dict) -> Path:
     """
     import tempfile
 
-    from modu_workbench.services import media_server
+    from modu_workbench.services import media_proxy
 
     text = _fetch_text(url, headers, timeout=20.0)
     rewritten = _proxy_playlist(text, url, headers)
@@ -838,7 +838,7 @@ def _localize_playlist(url: str, headers: dict) -> Path:
 
 def _proxy_playlist(text: str, base_url: str, headers: dict) -> str:
     """把 m3u8 里的分片/子清单地址改写为本机代理地址（保留相对地址语义）。"""
-    from modu_workbench.services import media_server
+    from modu_workbench.services import media_proxy
     from urllib.parse import urljoin
 
     lines: list[str] = []
@@ -850,12 +850,12 @@ def _proxy_playlist(text: str, base_url: str, headers: dict) -> str:
                 head, _, tail = stripped.partition('URI="')
                 uri, _, rest = tail.partition('"')
                 absolute = urljoin(base_url, uri)
-                stripped = f"{head}URI=\"{media_server.stream_url(absolute, headers=headers)}\"{rest}"
+                stripped = f"{head}URI=\"{media_proxy.stream_url(absolute, headers=headers)}\"{rest}"
             lines.append(stripped)
             continue
         absolute = stripped if stripped.lower().startswith(("http://", "https://")) \
             else urljoin(base_url, stripped)
-        lines.append(media_server.stream_url(absolute, headers=headers))
+        lines.append(media_proxy.stream_url(absolute, headers=headers))
     return "\n".join(lines) + "\n"
 
 

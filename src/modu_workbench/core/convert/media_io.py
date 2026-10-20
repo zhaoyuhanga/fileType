@@ -62,9 +62,7 @@ AUDIO_ONLY_TARGETS = AUDIO_TARGETS | {"mp3"}
 # ffmpeg / ffprobe 定位已统一到 core/platform/media.py（板块无关能力），
 # 这里再导出一次，兼容既有 `from ...media_io import find_ffmpeg` 的调用方。
 from modu_workbench.core.platform.media import (  # noqa: E402
-    bundled_dir,
     find_ffmpeg,
-    find_ffprobe,
 )
 
 

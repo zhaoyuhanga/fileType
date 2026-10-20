@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -27,7 +26,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSpinBox,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )

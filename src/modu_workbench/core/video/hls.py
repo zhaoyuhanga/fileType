@@ -209,11 +209,6 @@ def parse_m3u8(text: str, base_url: str) -> HlsPlaylist:
     return playlist
 
 
-def is_m3u8_url(url: str) -> bool:
-    lowered = (url or "").lower().split("?", 1)[0]
-    return lowered.endswith(".m3u8")
-
-
 def segment_iv(playlist: HlsPlaylist, index: int) -> bytes:
     """分片解密用的 IV。
 

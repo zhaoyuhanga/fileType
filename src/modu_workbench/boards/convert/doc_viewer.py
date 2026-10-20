@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import html as html_mod
-import os
 import re
 from pathlib import Path
 

@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 import requests
 
 from .hls import HlsPlaylist, parse_m3u8, segment_iv
-from .models import Episode, Quality, RemoteVideo, safe_filename
+from .models import Episode, Quality, RemoteVideo
 from .sources import SourceError, describe_network_error
 
 #: 默认并发（取 LunaTV-EE 的 6 worker 与 Kazumi "分片并发 3" 之间的折中）

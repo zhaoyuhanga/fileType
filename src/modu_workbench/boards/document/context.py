@@ -22,7 +22,7 @@ from modu_workbench.core.document import (
 )
 from modu_workbench.core.document import security as document_security
 from modu_workbench.core.document.storage import MAX_VERSIONS_PER_DOCUMENT
-from modu_workbench.core.llm.context import llm_router, llm_storage  # noqa: F401  文档 AI 复用大模型配置
+from modu_workbench.core.llm.context import llm_router  # noqa: F401  文档 AI 复用大模型配置
 from modu_workbench.core.platform.paths import app_db_path, document_dir
 from modu_workbench.ui_kit.settings import app_settings
 

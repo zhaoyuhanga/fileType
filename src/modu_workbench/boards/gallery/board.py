@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -52,7 +52,6 @@ from modu_workbench.core.gallery import (
 from . import context as app_context
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.components import EmptyState, TaskBar
-from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
 from .nav_tree import CategoryNavTree
@@ -69,6 +68,7 @@ from .widgets import (
     UrlCollectWorker,
     ask_text,
 )
+from modu_workbench.ui_kit.tokens import SPACE
 
 BROWSE_KEY = "browse"
 VIEWER_KEY = "viewer"

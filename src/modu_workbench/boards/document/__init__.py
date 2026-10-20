@@ -5,4 +5,6 @@
 """
 from __future__ import annotations
 
+from . import board  # noqa: F401  `__all__` 声明了它，就必须真的导入（否则 import * 会缺名字）
+
 __all__ = ["board"]

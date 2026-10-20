@@ -198,7 +198,6 @@ $exeText = [System.Text.Encoding]::UTF8.GetString($exeBytes)
 $required = @(
     "modu_workbench.boards.video.board",
     "modu_workbench.boards.video.search",
-    "modu_workbench.boards.video.player",
     "modu_workbench.core.video.sources",
     "modu_workbench.core.video.sources.providers.cms_vod",
     "modu_workbench.core.video.downloader",

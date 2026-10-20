@@ -41,10 +41,9 @@ from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.tokens import PAGE_MARGIN, ROW_GAP, SPACE
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
-from .detail import VideoDetailDialog
 from .history import VideoHistoryPage
 from .library_page import VideoLibraryPage
-from .player import VideoPlayerDialog, local_file_url
+from modu_workbench.ui_kit.media.player import VideoPlayerDialog, local_file_url
 from .search import VideoSearchPage
 from .sources import VideoSourceDialog
 from .widgets import (

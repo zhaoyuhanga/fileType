@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.gallery import (
     ADJUST_LABELS,
-    DEFAULT_ADJUST,
     EXPORT_FORMATS,
     FILTER_LABELS,
     EditStep,

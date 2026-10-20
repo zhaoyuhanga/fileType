@@ -24,7 +24,6 @@ from modu_workbench.core.music import (
     format_duration,
 )
 from . import context as app_context
-from modu_workbench.core.platform.paths import music_download_dir
 from modu_workbench.ui_kit.components import EmptyState
 from modu_workbench.ui_kit.toast import Toaster
 

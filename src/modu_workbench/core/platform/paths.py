@@ -112,11 +112,6 @@ def gallery_import_dir() -> Path:
 
 # ---------- 墨软文档 ----------
 
-def document_db_path() -> str:
-    """兼容引用：文档板块不再是独立库，统一指向 modu.db。"""
-    return app_db_path()
-
-
 def document_dir() -> Path:
     """墨软文档默认存放目录（自动快照、拆分产物、导出兜底）。"""
     path = app_data_dir() / "document"

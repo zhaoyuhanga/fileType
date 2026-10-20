@@ -10,7 +10,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
-from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 from modu_workbench.core.book import Library
 from modu_workbench.core.book.online import NovelSource
 from modu_workbench.ui_kit.toast import Toaster
+from PySide6.QtCore import Signal, QThread
 
 DEFAULT_SOURCE_BASE = "https://www.00shu.la"
 _DOWN_PAGE_RE = re.compile(r"/txt/(\d+)/?", re.IGNORECASE)

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -50,6 +49,7 @@ from .widgets import (
     select_all,
     set_hide_preview_pref,
 )
+from PySide6.QtCore import QUrl, Signal
 
 
 class _PreviewResolver(SearchWorker):

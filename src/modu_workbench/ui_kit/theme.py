@@ -25,6 +25,14 @@ from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
     ensure_token,
 )
 
+#: 本模块是「主题 + 设计令牌」的统一入口（调用方常写 `from ui_kit.theme import DARK`）。
+#: 显式列出来：这些名字在本文件里可能不出现，但**是公开再导出**，
+#: 不登记就会被"未使用导入"的清理误删（审计脚本已按 `__all__` + 别处 import 兜住）。
+__all__ = [
+    "CARD_PADDING", "DARK", "FONT", "LIGHT", "PAGE_MARGIN", "SECTION_GAP", "SPACE",
+    "TOKENS", "ThemeTokens", "app_qss", "apply_theme", "ensure_token",
+]
+
 
 # ---------------------------------------------------------------- 运行时小图标
 #
@@ -33,7 +41,7 @@ from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
 # 这里用 QPainter 现画几个小 PNG 缓存到数据目录，颜色随主题变化，
 # 不引入二进制资源、也不用改打包配置。
 
-_ICON_DIR: "Path | None" = None
+_ICON_DIR: Path | None = None
 _ICON_CACHE: dict[str, str] = {}
 
 

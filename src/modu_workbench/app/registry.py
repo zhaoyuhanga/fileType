@@ -1,12 +1,11 @@
-"""板块注册表：墨软·工作台当前可用板块。"""
+"""板块注册表：墨软·工作台当前可用板块。
+
+板块页面**不在模块顶层导入**：`BoardSpec.page_target` 只存 `"包.模块:类名"`，
+首次访问 `spec.page` 时才真正 import（见 `boards/base.py` 的说明）。
+实测这能把 `import registry` 从 364ms 降到几乎为零 —— 用户打开软件只想先看到首页。
+"""
 from __future__ import annotations
 
-from ..boards.book import board as book_board
-from ..boards.convert import board as convert_board
-from ..boards.document import board as document_board
-from ..boards.gallery import board as gallery_board
-from ..boards.music import board as music_board
-from ..boards.video import board as video_board
 from ..boards.base import BoardSpec
 
 BOOK_BOARD = BoardSpec(
@@ -16,7 +15,7 @@ BOOK_BOARD = BoardSpec(
     description="导入 TXT / EPUB，自动章节解析、进度记忆、阅读主题与历史记录；内置在线书库下载（个人学习用途）。",
     icon="📚",
     phase="可用",
-    page=book_board.BookBoardPage,
+    page_target="modu_workbench.boards.book.board:BookBoardPage",
 )
 
 CONVERT_BOARD = BoardSpec(
@@ -31,7 +30,7 @@ CONVERT_BOARD = BoardSpec(
     ),
     icon="🔄",
     phase="可用",
-    page=convert_board.ConvertBoardPage,
+    page_target="modu_workbench.boards.convert.board:ConvertBoardPage",
 )
 
 DOCUMENT_BOARD = BoardSpec(
@@ -46,7 +45,7 @@ DOCUMENT_BOARD = BoardSpec(
     ),
     icon="📄",
     phase="可用",
-    page=document_board.DocumentBoardPage,
+    page_target="modu_workbench.boards.document.board:DocumentBoardPage",
 )
 
 MUSIC_BOARD = BoardSpec(
@@ -56,7 +55,7 @@ MUSIC_BOARD = BoardSpec(
     description="联网搜索并下载音乐、内置播放器（顺序/循环/随机）、歌单收藏与分类、播放历史与音频格式转换。",
     icon="🎧",
     phase="可用",
-    page=music_board.MusicBoardPage,
+    page_target="modu_workbench.boards.music.board:MusicBoardPage",
 )
 
 VIDEO_BOARD = BoardSpec(
@@ -69,7 +68,7 @@ VIDEO_BOARD = BoardSpec(
     ),
     icon="🎬",
     phase="可用",
-    page=video_board.VideoBoardPage,
+    page_target="modu_workbench.boards.video.board:VideoBoardPage",
 )
 
 GALLERY_BOARD = BoardSpec(
@@ -83,7 +82,7 @@ GALLERY_BOARD = BoardSpec(
     ),
     icon="🖼",
     phase="可用",
-    page=gallery_board.GalleryBoardPage,
+    page_target="modu_workbench.boards.gallery.board:GalleryBoardPage",
 )
 
 ANIME_BOARD_REMOVED_NOTE = (

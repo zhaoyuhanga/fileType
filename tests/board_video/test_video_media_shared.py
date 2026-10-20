@@ -315,9 +315,3 @@ def test_player_auto_next_emits_episode_request(qapp, monkeypatch) -> None:  # n
         dialog.close()
 
 
-def test_player_old_module_still_importable() -> None:
-    """`boards/video/player.py` 保留为转发壳：旧调用方与旧测试不受影响。"""
-    from modu_workbench.boards.video.player import VideoPlayerDialog as Legacy
-    from modu_workbench.ui_kit.media.player import VideoPlayerDialog as Shared
-
-    assert Legacy is Shared

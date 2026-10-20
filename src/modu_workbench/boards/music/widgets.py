@@ -209,16 +209,6 @@ def checked_track_ids(table: QTableWidget) -> List[int]:
     return ids
 
 
-def all_track_ids(table: QTableWidget) -> List[int]:
-    """当前表格内的全部曲目 id（用于“全部”类操作）。"""
-    ids: list[int] = []
-    for row in range(table.rowCount()):
-        item = table.item(row, 0)
-        if item is not None and item.data(TRACK_ID_ROLE) is not None:
-            ids.append(int(item.data(TRACK_ID_ROLE)))
-    return ids
-
-
 def row_track_id(table: QTableWidget, row: int) -> int | None:
     item = table.item(row, 0)
     if item is None or item.data(TRACK_ID_ROLE) is None:

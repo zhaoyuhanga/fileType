@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modu-workbench"
-version = "2.0.0"
+version = "2.0.1"
 description = "墨软·工作台：本地离线的一站式阅读、转换与媒体工作台（PySide6 单应用，六大板块）"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,6 @@ dependencies = [
     "ebooklib>=0.18",      # EPUB 解析（墨软书库）
     "beautifulsoup4>=4.12",
     "lxml>=4.9",
-    "chardet>=5.2",
     "requests>=2.31",      # 在线书源下载
     "Pillow>=10.0",        # 图片转换 + 墨软图库图像处理
     "numpy>=1.26",         # 墨软图库增强算法（去噪/锐化/超分/通道运算）

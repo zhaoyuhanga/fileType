@@ -1592,30 +1592,30 @@ def test_video_board_registered() -> None:
     assert [board.key for board in ACTIVE_BOARDS][:4] == ["book", "convert", "music", "video"]
 
 
-def test_media_server_proxy_helpers() -> None:
-    from modu_workbench.services import media_server
+def test_media_proxy_proxy_helpers() -> None:
+    from modu_workbench.services import media_proxy
 
     # 已经是本机地址时不再二次代理
-    local = media_server.media_url(str(Path("C:/tmp/a.mp4")))
-    assert media_server.is_local_url(local)
-    assert media_server.stream_url(local) == local
-    assert media_server.stream_url("") == ""
+    local = media_proxy.media_url(str(Path("C:/tmp/a.mp4")))
+    assert media_proxy.is_local_url(local)
+    assert media_proxy.stream_url(local) == local
+    assert media_proxy.stream_url("") == ""
     # 远程地址被包装成本机绝对地址（QMediaPlayer / <video> 都不接受相对路径）
-    wrapped = media_server.stream_url("https://cdn.example.com/a.mp4", referer="https://site/")
+    wrapped = media_proxy.stream_url("https://cdn.example.com/a.mp4", referer="https://site/")
     assert wrapped.startswith("http://127.0.0.1:")
     assert "proxy" in wrapped
     assert "cdn.example.com" in wrapped
     assert "r=https%3A%2F%2Fsite%2F" in wrapped
-    hls_wrapped = media_server.hls_url("https://cdn.example.com/a.m3u8", referer="https://site/")
+    hls_wrapped = media_proxy.hls_url("https://cdn.example.com/a.m3u8", referer="https://site/")
     assert hls_wrapped.startswith("http://127.0.0.1:")
     assert "hls" in hls_wrapped
 
 
-def test_media_server_rewrites_playlist_uris() -> None:
+def test_media_proxy_rewrites_playlist_uris() -> None:
     """HLS 代理必须把清单内的 URI 改写成继续走本机代理（否则分片拿不到请求头）。"""
-    from modu_workbench.services.media_server import _rewrite_playlist  # noqa: PLC2701
+    from modu_workbench.services.media_proxy import rewrite_playlist  # noqa: PLC2701
 
-    rewritten = _rewrite_playlist(
+    rewritten = rewrite_playlist(
         MEDIA_PLAYLIST, "https://cdn.example.com/hls/720/index.m3u8",
         "https://site/", "",
     )
@@ -1631,24 +1631,24 @@ def test_media_server_rewrites_playlist_uris() -> None:
     assert "%2Fseg-2.ts" in rewritten
 
 
-def test_media_server_proxy_url_keeps_file_extension() -> None:
+def test_media_proxy_proxy_url_keeps_file_extension() -> None:
     """代理地址必须以真实扩展名结尾。
 
     ffmpeg 的 HLS 解复用器按扩展名判断分片类型：形如 `/proxy/?u=...` 的地址
     会被判为不在 allowed_segment_extensions 而直接拒绝（实测报 Invalid data）。
     """
-    from modu_workbench.services.media_server import _hls_path, _proxy_path  # noqa: PLC2701
+    from modu_workbench.services.media_proxy import hls_path, proxy_path  # noqa: PLC2701
 
-    seg = _hls_path("https://cdn.example.com/a/b/seg-9.ts")
+    seg = hls_path("https://cdn.example.com/a/b/seg-9.ts")
     assert "/seg-9.ts?" in seg, seg
-    key = _proxy_path("https://cdn.example.com/keys/key.bin")
+    key = proxy_path("https://cdn.example.com/keys/key.bin")
     assert "/key.bin?" in key, key
     # 取不到扩展名时不应编造（退回没有文件名的形式）
-    plain = _hls_path("https://cdn.example.com/no-extension")
+    plain = hls_path("https://cdn.example.com/no-extension")
     assert plain.startswith("/") and "?" in plain
 
 
-def test_media_server_proxy_response_is_length_delimited(monkeypatch) -> None:  # noqa: ANN001
+def test_media_proxy_proxy_response_is_length_delimited(monkeypatch) -> None:  # noqa: ANN001
     """代理响应必须能界定长度 —— 这是「播放 fragLoadError / 下载卡 0 字节」的根因。
 
     真实源站常用 chunked 且不带 Content-Length；若本机代理原样转发（既无
@@ -1667,7 +1667,7 @@ def test_media_server_proxy_response_is_length_delimited(monkeypatch) -> None:  
     import urllib.request
 
     from modu_workbench.services import media_proxy
-    from modu_workbench.services import media_server
+    from modu_workbench.services import media_proxy
 
     monkeypatch.setenv("MODU_MEDIA_ALLOW_PRIVATE", "1")
     media_proxy.reset_client()
@@ -1692,7 +1692,7 @@ def test_media_server_proxy_response_is_length_delimited(monkeypatch) -> None:  
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     try:
         target = f"http://127.0.0.1:{port}/list.m3u8"
-        proxied = media_server.stream_url(target)
+        proxied = media_proxy.stream_url(target)
         req = urllib.request.Request(proxied, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=60) as resp:
             body = resp.read()
@@ -1710,17 +1710,17 @@ def test_media_server_proxy_response_is_length_delimited(monkeypatch) -> None:  
         upstream.server_close()
 
 
-def test_media_server_hls_playlist_rewritten_via_proxy() -> None:
+def test_media_proxy_hls_playlist_rewritten_via_proxy() -> None:
     """经 /proxy/ 取到的内容若是清单，也必须改写内部地址。
 
     真实源站的主清单常指向子清单；子清单经 /proxy/ 返回时若原样透传，
     相对路径会以「本机代理」为基准解析，最终 404（实测 ffmpeg 报
     `Failed to open segment 0`）。
     """
-    from modu_workbench.services.media_server import _rewrite_playlist  # noqa: PLC2701
+    from modu_workbench.services.media_proxy import rewrite_playlist  # noqa: PLC2701
 
     sub = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\n/20230718/abc/hls/a1.ts\n#EXT-X-ENDLIST\n"
-    rewritten = _rewrite_playlist(sub, "https://cdn.example.com/20230718/abc/hls/index.m3u8",
+    rewritten = rewrite_playlist(sub, "https://cdn.example.com/20230718/abc/hls/index.m3u8",
                                   "https://site/", "")
     seg_lines = [ln for ln in rewritten.splitlines()
                  if ln.strip() and not ln.startswith("#")]
@@ -1731,16 +1731,16 @@ def test_media_server_hls_playlist_rewritten_via_proxy() -> None:
     assert "#EXT-X-ENDLIST" in rewritten
 
 
-def test_media_server_rewrites_key_uri_for_aes128() -> None:
+def test_media_proxy_rewrites_key_uri_for_aes128() -> None:
     """AES-128 的密钥 URI 也要走本机代理，否则 hls.js 报 keyLoadError。"""
-    from modu_workbench.services.media_server import _rewrite_playlist  # noqa: PLC2701
+    from modu_workbench.services.media_proxy import rewrite_playlist  # noqa: PLC2701
 
     playlist = (
         "#EXTM3U\n"
         '#EXT-X-KEY:METHOD=AES-128,URI="key.bin",IV=0x00\n'
         "#EXTINF:9.0,\nseg-1.ts\n#EXT-X-ENDLIST\n"
     )
-    rewritten = _rewrite_playlist(playlist, "https://cdn.example.com/hls/index.m3u8",
+    rewritten = rewrite_playlist(playlist, "https://cdn.example.com/hls/index.m3u8",
                                   "https://site/", "")
     key_line = next(line for line in rewritten.splitlines() if line.startswith("#EXT-X-KEY"))
     assert 'METHOD=AES-128' in key_line

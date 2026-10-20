@@ -23,8 +23,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
-    QStackedWidget,
     QTableWidget,
     QWidget,
 )
@@ -44,7 +42,6 @@ from modu_workbench.ui_kit.components import (
     spacer,
 )
 from modu_workbench.ui_kit.toast import Toaster
-from modu_workbench.ui_kit.tokens import SPACE
 
 from .detail import VideoDetailDialog
 from .widgets import (

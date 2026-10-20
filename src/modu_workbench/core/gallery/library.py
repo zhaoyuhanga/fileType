@@ -19,7 +19,6 @@ from . import enhance as enhance_mod
 from .hashing import dhash_file, hamming_distance, sha256_file
 from .models import (
     IMAGE_EXTENSIONS,
-    AiTask,
     Album,
     EditStep,
     ImageItem,

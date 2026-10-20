@@ -38,7 +38,6 @@ from modu_workbench.core.video import (
     RemoteVideo,
     Video,
     VideoLibrary,
-    VideoRegistry,
     VideoStorage,
 )
 from modu_workbench.core.video import hls

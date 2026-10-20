@@ -11,7 +11,7 @@ from modu_workbench.boards.video.board import VideoBoardPage
 from modu_workbench.boards.video.detail import VideoDetailDialog
 from modu_workbench.boards.video.history import VideoHistoryPage
 from modu_workbench.boards.video.library_page import VideoLibraryPage
-from modu_workbench.boards.video.player import VideoPlayerDialog, format_time, player_available
+from modu_workbench.ui_kit.media.player import VideoPlayerDialog, format_time, player_available
 from modu_workbench.boards.video.search import VideoSearchPage
 from modu_workbench.boards.video.sources import VideoSourceDialog
 from modu_workbench.boards.video.widgets import (
@@ -484,7 +484,7 @@ def test_board_page_navigation(qapp: QApplication, library: VideoLibrary,
 def test_board_play_local_file(qapp: QApplication, library: VideoLibrary,
                                storage: VideoStorage, monkeypatch: pytest.MonkeyPatch) -> None:
     """本地条目播放：走本机流服务，不发起联网解析，并记入历史。"""
-    # 不依赖本机流服务能否起来：固定返回一个本机地址（真实链路由 media_server 测试覆盖）
+    # 不依赖本机流服务能否起来：固定返回一个本机地址（真实链路由 media_proxy 测试覆盖）
     monkeypatch.setattr(
         "modu_workbench.boards.video.board.local_file_url",
         lambda path: f"http://127.0.0.1:9/media/{Path(path).name}",

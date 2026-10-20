@@ -113,7 +113,6 @@ a = Analysis(
         "modu_workbench.boards.video.history",
         "modu_workbench.boards.video.detail",
         "modu_workbench.boards.video.sources",
-        "modu_workbench.boards.video.player",
         "modu_workbench.boards.video.widgets",
         "modu_workbench.core.video.models",
         "modu_workbench.core.video.storage",
@@ -131,7 +130,6 @@ a = Analysis(
         "modu_workbench.core.video.sources.providers.cms_vod",
         "modu_workbench.core.video.sources.providers.public",
         # v1.1.0 共享媒体层：本机代理 + 播放器/视频面/弹幕/字幕/硬解注入
-        "modu_workbench.services.media_server",
         "modu_workbench.services.media_proxy",
         "modu_workbench.services.media_proxy.server",
         "modu_workbench.services.media_proxy.upstream",

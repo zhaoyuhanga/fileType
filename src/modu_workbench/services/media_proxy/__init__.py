@@ -1,8 +1,8 @@
-"""本机媒体代理（v1.1.0 重写，替代 `services/media_server.py` 的实现）。
+"""本机媒体代理（v1.1.0 重写，v2.0.0 起是**唯一**实现）。
 
 设计目标：把代理从「瓶颈」变成「加速器」。
 
-旧实现（`media_server.py` v1.0.x）的三个致命点：
+v1.0.x 的旧实现（已删除）有三个致命点：
 1. 每个分片都 `requests.get(...)` —— **不复用连接**，境外源每片多付一个 TLS 握手；
 2. `body = upstream.content` —— **全量缓冲**才回第一个字节；
 3. 所有响应 `Cache-Control: no-store` —— seek / 换清晰度 / 重试都要重新出外网。
@@ -10,10 +10,11 @@
 本包把这三件事分别改成：**连接池**（`upstream.py`）、**流式转发**（`server.py`）、
 **磁盘 LRU 缓存**（`cache.py`）。
 
-对外 API 与旧模块**同名同签名**（`stream_url` / `hls_url` / `media_url` /
-`is_local_url` / `wrap_playlist` / `local_base_url` / `ensure_server`），
-因此 `boards/video/player.py`、`core/video/downloader.py` 无需改动即可获得收益；
-`services/media_server.py` 保留为转发壳，旧调用方与旧测试继续可用。
+对外 API：`stream_url` / `hls_url` / `media_url` / `image_url` / `is_local_url` /
+`wrap_playlist` / `local_base_url` / `ensure_server` / `shutdown_server` / `get_stats` /
+`get_cache`。**v2.0.0 起不再有 `services/media_server.py` 转发壳** —— 同名函数
+以前在新旧两个模块各存在一份，现在只保留这里一处，调用方直接
+`from modu_workbench.services import media_proxy`。
 
 模块划分：
 

@@ -7,17 +7,14 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
     QLabel,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    QStackedWidget,
 )
 
 from modu_workbench.core.video import VideoLibrary, VideoStorage
@@ -33,6 +30,7 @@ from modu_workbench.ui_kit.components import (
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import VIDEO_ID_ROLE, attach_context_menu, configure_table, select_all
+from PySide6.QtCore import Signal
 
 COLUMNS = ["片名", "集", "画质", "动作", "来源", "时间"]
 

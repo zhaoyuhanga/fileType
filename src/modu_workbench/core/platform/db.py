@@ -156,7 +156,3 @@ def app_db() -> SqliteStore:
     return _app_store
 
 
-def reset_app_db() -> None:
-    """仅供测试：丢弃应用级单例。"""
-    global _app_store
-    _app_store = None

@@ -1,7 +1,6 @@
 """应用主壳：顶栏导航 + 页面栈（首页 / 各板块）。"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -22,11 +21,21 @@ HOME_KEY = "home"
 
 
 class AppShell(QMainWindow):
+    """主壳：顶栏导航 + 页面栈。**板块页按需构造**。
+
+    为什么要按需：旧实现把 6 个板块的页面全部在 `__init__` 里构造完
+    （实测 offscreen 下 154ms，真机上还要给每个板块建表格/卡片/播放器，
+    更慢且更费内存）。而用户一次只会看一个板块 —— 没进过的板块不该先付这笔钱。
+    现在 `go_page()` 第一次进入某板块时才构造，后续复用同一个实例。
+    """
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} v{__version__}")   # 任务栏/标题栏显示墨软·工作台
         self._nav_buttons: dict[str, QPushButton] = {}
-        self._pages: dict[str, int] = {}
+        self._pages: dict[str, int] = {}          # key -> 栈索引（构造后才有）
+        self._factories: dict[str, object] = {}   # key -> 页面工厂（BoardSpec.page）
+        self._built: dict[str, QWidget] = {}      # key -> 已构造的页面
         self.current_key = HOME_KEY
 
         root = QWidget()
@@ -44,13 +53,30 @@ class AppShell(QMainWindow):
         self._home_page.open_board.connect(self.go_page)
         self._stack.addWidget(self._home_page)
         self._pages[HOME_KEY] = 0
-
-        for spec in ACTIVE_BOARDS:
-            page = spec.page()
-            self._stack.addWidget(page)
-            self._pages[spec.key] = self._stack.count() - 1
+        self._built[HOME_KEY] = self._home_page
+        self._factories = {spec.key: spec.page for spec in ACTIVE_BOARDS}
 
         self.go_page(HOME_KEY)
+
+    # ------------------------------------------------------------------ 页面构造
+
+    def _ensure_page(self, key: str) -> QWidget | None:
+        """按需构造板块页；key 不存在返回 None。失败时**不缓存半成品**。"""
+        existing = self._built.get(key)
+        if existing is not None:
+            return existing
+        factory = self._factories.get(key)
+        if factory is None:
+            return None
+        page = factory()                      # type: ignore[operator]  契约：BoardSpec.page 可调用
+        self._stack.addWidget(page)
+        self._pages[key] = self._stack.count() - 1
+        self._built[key] = page
+        return page
+
+    def is_page_built(self, key: str) -> bool:
+        """该板块页是否已经构造过（测试与诊断用）。"""
+        return key in self._built
 
     def _build_top_bar(self) -> QFrame:
         bar = QFrame()
@@ -103,9 +129,12 @@ class AppShell(QMainWindow):
         self._open_settings(key)
 
     def go_page(self, key: str) -> None:
+        """切换板块；**首次进入时才构造页面**。"""
         index = self._pages.get(key)
         if index is None:
-            return
+            if self._ensure_page(key) is None:
+                return
+            index = self._pages[key]
         self._stack.setCurrentIndex(index)
         self.current_key = key
         for nav_key, button in self._nav_buttons.items():
