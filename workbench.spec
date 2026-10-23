@@ -244,6 +244,18 @@ a.datas = [item for item in a.datas
            if not (item[0].replace("\\", "/").startswith("PySide6/qml")
                    or "virtualkeyboard" in item[0].lower())]
 
+# ---- v2.2.0：丢掉 Qt 自带翻译包（124 个 .qm，6.8 MB）-----------------------------
+# 依据：本仓库**没有任何 QTranslator**（全仓 grep 为 0），所有界面文案都是我们自己写的
+# 中文；Qt 内置控件文案走英文默认值即可。留着 6.8 MB 的多语言 .qm 纯属死重量。
+# 只保留 zh_*（万一日后接 QTranslator 也有中文可用）。
+def _keep_data(entry) -> bool:
+    name = entry[0].replace("\\", "/")
+    if name.startswith("PySide6/translations/"):
+        base = name.rsplit("/", 1)[-1]
+        return base.startswith("qtbase_zh") or base.startswith("qt_zh")
+    return True
+a.datas = [item for item in a.datas if _keep_data(item)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

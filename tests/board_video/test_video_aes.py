@@ -133,3 +133,30 @@ def test_aes128_decrypt_helper_matches_module() -> None:
 def test_segment_iv_explicit_wins() -> None:
     playlist = HlsPlaylist(key_iv=b"\x01" * 16)
     assert segment_iv(playlist, 7) == b"\x01" * 16
+
+
+def test_aes_throughput_is_not_pathological() -> None:
+    """AES-128 解密吞吐必须达到可用范围（防止退回"逐位 GF 乘法"）。
+
+    背景：旧实现每个分组做 16 次 `_mul`、每次 8 轮移位，实测只有 **37.7 KB/s**
+    —— 一个 2MB 的 HLS 分片要解密 54 秒，用户会以为软件卡死。
+    改用预计算乘法表后到 **0.74 MB/s**（约 20 倍）。
+
+    这里不卡绝对时间（机器差异大），只卡一个**下限**：0.2 MB/s。
+    再慢就说明有人把查表改回逐位移位了。
+    """
+    import time
+
+    from modu_workbench.core.video.aes import aes128_cbc_decrypt
+
+    key = bytes(range(16))
+    iv = bytes(16)
+    payload = b"\x47" * (256 * 1024)          # 256KB，接近真实分片量级
+    start = time.perf_counter()
+    aes128_cbc_decrypt(payload, key, iv, unpad=False)
+    elapsed = time.perf_counter() - start
+    throughput = len(payload) / elapsed / 1024 / 1024      # MB/s
+    assert throughput > 0.2, (
+        f"AES 解密只有 {throughput:.2f} MB/s（下限 0.2）。"
+        "检查 `_inv_mix_columns` 是否还在用逐位 `_mul`，而不是 `_MUL9/_MUL11/_MUL13/_MUL14` 查表。"
+    )

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from .. import APP_NAME, APP_SLOGAN, __version__
 from ..boards.home.page import HomePage
+from ..boards.base import BoardSpec
 from .registry import ACTIVE_BOARDS
 from ..ui_kit.widgets import make_nav_button, set_nav_active
 from modu_workbench.core.platform.logging import swallow
@@ -56,7 +57,12 @@ class AppShell(QMainWindow):
         self._stack.addWidget(self._home_page)
         self._pages[HOME_KEY] = 0
         self._built[HOME_KEY] = self._home_page
-        self._factories = {spec.key: spec.page for spec in ACTIVE_BOARDS}
+        # 只存 BoardSpec，**不要**在这里取 `spec.page`：
+        # `BoardSpec.page` 是懒解析属性，一取就会 import 该板块模块。
+        # 早先写成 `{spec.key: spec.page ...}`，等于构造主壳时把六个板块
+        # 全部导入 —— 懒加载彻底失效（实测：启动加载 181/205 个模块、
+        # 白付 `requests` 95ms）。现在只有真正 `go_page()` 时才解析一个。
+        self._factories: dict[str, BoardSpec] = {spec.key: spec for spec in ACTIVE_BOARDS}
 
         self.go_page(HOME_KEY)
 
@@ -67,10 +73,10 @@ class AppShell(QMainWindow):
         existing = self._built.get(key)
         if existing is not None:
             return existing
-        factory = self._factories.get(key)
-        if factory is None:
+        spec = self._factories.get(key)
+        if spec is None:
             return None
-        page = factory()  # type: ignore[operator]  契约：BoardSpec.page 可调用
+        page = spec.page()          # type: ignore[operator]  到这里才 import 该板块模块
         self._stack.addWidget(page)
         self._pages[key] = self._stack.count() - 1
         self._built[key] = page

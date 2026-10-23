@@ -36,3 +36,11 @@ tools/ffmpeg/
 
 # UI snapshot tool temp data dir (fallback)
 .ui-snapshot-data/
+
+# 另一套工具（workbuddy）在工作区里生成的产物 —— 不属于本项目代码，
+# 但会一直把 `git status` 弄脏。只忽略、不删除（文件可能是别人正在用的）。
+.workbuddy-ai/
+workbuddy-bridge/
+acl-reports/
+docs/workbuddy-auth.md
+tools/*.mjs

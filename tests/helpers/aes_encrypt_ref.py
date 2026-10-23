@@ -45,6 +45,13 @@ def _mul(a: int, b: int) -> int:
     return result & 0xFF
 
 
+#: MixColumns 的四个固定乘数表：把 `_mul` 的 8 轮移位换成一次查表。
+#: 这只是**测试辅助实现**，但慢起来会把整个套件拖住（实测加密 200KB 要 6.4 秒，
+#: 比被测的产品实现还慢）。表由 `_mul` 生成，与参考算法逐位一致。
+_MUL2 = tuple(_mul(value, 2) for value in range(256))
+_MUL3 = tuple(_mul(value, 3) for value in range(256))
+
+
 def _round_keys(key: bytes) -> list[list[int]]:
     words = [list(key[i * 4:i * 4 + 4]) for i in range(4)]
     for index in range(4, 44):
@@ -69,11 +76,13 @@ def _mix_columns(state: list[int]) -> list[int]:
     out = [0] * 16
     for column in range(4):
         offset = column * 4
-        a0, a1, a2, a3 = state[offset:offset + 4]
-        out[offset + 0] = _mul(a0, 2) ^ _mul(a1, 3) ^ a2 ^ a3
-        out[offset + 1] = a0 ^ _mul(a1, 2) ^ _mul(a2, 3) ^ a3
-        out[offset + 2] = a0 ^ a1 ^ _mul(a2, 2) ^ _mul(a3, 3)
-        out[offset + 3] = _mul(a0, 3) ^ a1 ^ a2 ^ _mul(a3, 2)
+        a0, a1, a2, a3 = state[offset], state[offset + 1], state[offset + 2], state[offset + 3]
+        m2 = _MUL2
+        m3 = _MUL3
+        out[offset + 0] = m2[a0] ^ m3[a1] ^ a2 ^ a3
+        out[offset + 1] = a0 ^ m2[a1] ^ m3[a2] ^ a3
+        out[offset + 2] = a0 ^ a1 ^ m2[a2] ^ m3[a3]
+        out[offset + 3] = m3[a0] ^ a1 ^ a2 ^ m2[a3]
     return out
 
 

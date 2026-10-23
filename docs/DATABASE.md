@@ -165,3 +165,27 @@ store = SqliteStore(app_db_path())          # 自动 migrate 到最新版本
 - 去重键写进约束（`UNIQUE`/复合主键），不要只靠代码判断。
 - 结构变更走迁移文件，**已发布的迁移模块不得修改**。
 - 备份 = 复制 `modu.db`（WAL 模式下同时复制 `-wal`/`-shm`，或先关闭应用）。
+
+## 索引（v2.2.0 补齐）
+
+下表只列**为热查询专门加的**索引；`UNIQUE` 列（`book_books.path` 等）由 SQLite 自动建索引。
+
+| 索引 | 表 | 支撑的查询 | 说明 |
+|---|---|---|---|
+| `idx_video_remote` | `video_videos` | `source=? AND remote_id=? AND episode_index=?` | 增量入库去重，实测 21.296 ms → **0.003 ms**（20 万行） |
+| `idx_video_title_ep` | `video_videos` | `title=? AND episode_index=?` | 换源/匹配去重 |
+| `idx_gallery_images_url` | `gallery_images` | `url=?` | 图库按来源链接反查 |
+
+**注意：不要改成部分索引。** 试过 `... WHERE remote_id <> ''`（更小更省），
+但调用方传的是参数化 `remote_id = ?`，SQLite 无法静态蕴含该条件，
+`EXPLAIN QUERY PLAN` 依然是 `SCAN` —— 已改回普通索引，并由
+`tests/platform/test_db_indexes.py` 用查询计划钉住。
+
+## 迁移版本号有空洞：v3 从未存在
+
+`MIGRATIONS` 是 v1 / v2 / **v4**。v3 是当年动漫板块用掉又撤掉的号，
+**故意不复用**：从 v1.1.0 升级的库 `schema_migrations` 里已有 `version=3`
+（对应 7 张 `anime_*` 表），新迁移若也叫 3 会被"已应用就跳过"，索引永远建不上。
+
+迁移不假设前序迁移建好了表：`v4_indexes` 只给**存在的表**建索引，
+裁剪库/老库缺表时跳过，不会因 `no such table` 让启动失败。

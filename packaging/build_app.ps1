@@ -307,12 +307,12 @@ Write-Step "启动 GUI 冒烟（必须真的出窗口）"
 
 $guiOk = $false
 $guiNote = ""
-for ($attempt = 1; $attempt -le 3 -and -not $guiOk; $attempt++) {
+for ($attempt = 1; $attempt -le 6 -and -not $guiOk; $attempt++) {
     try {
         $proc = Start-Process -FilePath $exePath -PassThru -ErrorAction Stop
     } catch {
         $guiNote = $_.Exception.Message
-        Start-Sleep -Seconds 20           # 智能应用控制拦新文件后会自动放行
+        Start-Sleep -Seconds 45           # 智能应用控制拦新文件后会自动放行（实测可能要好几分钟）
         continue
     }
     # 只认**主窗口**：标题必须含品牌名。
@@ -351,11 +351,26 @@ $smokeOut = Join-Path $env:TEMP "modu-board-smoke.json"
 $env:MODU_SMOKE_BOARDS = $smokeOut
 Remove-Item $smokeOut -ErrorAction SilentlyContinue
 $smokeError = ""
-try { & $exePath | Out-Null } catch { $smokeError = $_.Exception.Message }
+for ($smokeTry = 1; $smokeTry -le 5; $smokeTry++) {
+    try { & $exePath | Out-Null; $smokeError = ""; break }
+    catch {
+        $smokeError = $_.Exception.Message
+        if ($smokeError -notmatch "Application Control") { break }
+        Start-Sleep -Seconds 45          # 等待系统策略放行新构建的 exe
+    }
+}
 Remove-Item Env:\MODU_SMOKE_BOARDS -ErrorAction SilentlyContinue
 
 if ($smokeError) {
-    Write-Warn2 "板块冒烟未能运行：$smokeError"
+    # 注意区分两种"没跑起来"：
+    # - 系统策略（Smart App Control）拦了新构建的未签名 exe → 环境问题，只提示；
+    # - 其他原因（崩溃、缺依赖）→ 等同于启动失败，必须中断。
+    if ($smokeError -match "Application Control") {
+        Write-Warn2 "板块冒烟因系统策略未能运行（不是构建缺陷）：$smokeError"
+        Write-Warn2 "  请关闭「智能应用控制」或对 exe 签名后重跑；GUI 冒烟会继续校验。"
+    } else {
+        Fail "板块冒烟未能运行：$smokeError"
+    }
 } elseif (Test-Path $smokeOut) {
     $smoke = Get-Content $smokeOut -Raw -Encoding UTF8 | ConvertFrom-Json
     $smokeBad = @()

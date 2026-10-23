@@ -2,7 +2,7 @@
 
 > 本地离线的一站式阅读、转换、音乐、影视、图库与文档工作台 —— 板块化设计，能力可扩展。
 
-**当前版本：v2.1.0** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：`dist\ModuWorkbench\ModuWorkbench.exe`（PyInstaller onedir）与 `dist\墨软工作台-Setup-2.1.0.exe`（NSIS 安装包）。
+**当前版本：v2.2.0** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：`dist\ModuWorkbench\ModuWorkbench.exe`（PyInstaller onedir）与 `dist\墨软工作台-Setup-2.2.0.exe`（NSIS 安装包）。
 
 > **v2.0.0 是一个"减法"定版**：整体移除了 v1.1.0 引入的第七板块「墨软动漫」。
 > 原因写在 [CHANGELOG.md](CHANGELOG.md) 的 v2.0.0 小节：那套「规则驱动采集」依赖第三方站点规则，

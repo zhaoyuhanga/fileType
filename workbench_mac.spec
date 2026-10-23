@@ -226,6 +226,16 @@ a = Analysis(
     excludes=EXCLUDES,
     noarchive=False,
 )
+
+# ---- v2.2.0：丢掉 Qt 自带翻译包（与 workbench.spec 保持一致）--------------------
+# 本仓库没有任何 QTranslator，界面文案全是我们自己写的中文，多语言 .qm 是死重量。
+def _keep_data(entry) -> bool:
+    name = entry[0].replace("\\", "/")
+    if name.startswith("PySide6/translations/"):
+        base = name.rsplit("/", 1)[-1]
+        return base.startswith("qtbase_zh") or base.startswith("qt_zh")
+    return True
+a.datas = [item for item in a.datas if _keep_data(item)]
 pyz = PYZ(a.pure)
 
 exe = EXE(

@@ -19,15 +19,22 @@ v2.0.0 移除板块时**没有删掉这张"已发布迁移"的痕迹，也没有
 
 因为 `apply_migrations` 按"已应用就跳过"工作，`schema_version()` 高于
 `LATEST_VERSION` 是**合法状态**（老库），不会被当成损坏。
+
+## 版本号有空洞：v3 从未存在
+
+`MIGRATIONS` 现在是 v1 / v2 / **v4**。v3 是当年动漫板块用掉又撤掉的号，
+这里**故意不复用** —— 从 v1.1.0 升级上来的库 `schema_migrations` 里已经有 `version=3`
+（对应那 7 张 `anime_*` 表），如果新迁移也叫 v3，会被"已应用就跳过"逻辑直接跳过，
+索引就永远建不上。所以新加索引用 **v4**，不要为了"好看"把号改小。
 """
 from __future__ import annotations
 
 import sqlite3
 import time
 
-from . import v1_initial, v2_document
+from . import v1_initial, v2_document, v4_indexes
 
-MIGRATIONS: tuple = (v1_initial, v2_document)
+MIGRATIONS: tuple = (v1_initial, v2_document, v4_indexes)
 
 LATEST_VERSION = max(module.VERSION for module in MIGRATIONS)
 

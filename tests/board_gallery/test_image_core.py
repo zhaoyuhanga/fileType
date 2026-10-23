@@ -511,15 +511,40 @@ def test_ai_parses_edit_params_json() -> None:
     assert _parse_json_object("不是 JSON") == {}
 
 
-def test_ai_analyze_by_metadata_needs_no_upload(library: ImageLibrary, tmp_path: Path) -> None:
-    """纯文本模式（只发元数据）在未授权上传时也应可用 —— 这里只验证它会去调网络并报错。"""
+def test_ai_analyze_by_metadata_needs_no_upload(library: ImageLibrary, tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """纯文本模式（只发元数据，**不上传图片**）应当把元数据组装进 prompt 再调用模型。
+
+    ## 为什么要 patch 掉 `chat`
+
+    原实现是"真的发一次请求等它失败"，于是这条用例把整个套件拖住 **16 秒**
+    （等超时+重试），而它想验证的其实只有一件确定性的事：
+    **未授权上传时走的是"只发元数据"这条路，且元数据真的进了 prompt。**
+
+    现在把 `chat` 换成记录器，直接断言 prompt 内容 —— 更快，也比"等它超时"更精确
+    （原来的写法即使上传逻辑被改坏、只要网络错误照样会通过）。
+    """
     path = make_image(tmp_path / "m.jpg", color=(9, 9, 9))
     item = library.import_paths([str(path)]).images[0]
     item.camera = "TestCam"
+
     client = DeepSeekClient(AiConfig(api_key="dummy", allow_upload=False))
-    # 没有真实网络/密钥 → 应当抛出请求错误，而不是配置错误
-    with pytest.raises(Exception):
-        client.analyze_by_metadata(item)
+    captured: list[list[dict]] = []
+
+    def fake_chat(messages, **_kwargs):  # noqa: ANN001
+        captured.append(messages)
+        return '["测试", "灰阶"]'
+
+    monkeypatch.setattr(client, "chat", fake_chat)
+
+    result = client.analyze_by_metadata(item)
+
+    assert len(captured) == 1, "应当只调用一次模型"
+    prompt = captured[0][0]["content"]
+    assert "文件名" in prompt and "m.jpg" in prompt
+    assert "TestCam" in prompt, "相机信息应当进 prompt"
+    assert "不可上传" not in prompt and "图片数据" not in prompt, "纯文本模式不该夹带图片"
+    assert result["tags"] == ["测试", "灰阶"]
 
 
 __all__ = ["ADJUST_LABELS", "_dhash"]

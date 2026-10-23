@@ -1222,6 +1222,10 @@ def test_download_hls_segments_without_ffmpeg(monkeypatch: pytest.MonkeyPatch, t
     segment = b"\x47" + b"\x00" * 90_000      # 90001 字节/片
 
     monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
+    # 关掉下载限速：`_download_speed_limit_bps()` 读的是**真实 QSettings 注册表**，
+    # 本机若设过限速，这个用例就要按限速慢慢"等"，实测从 0.2s 变 10.5s。
+    # 测试不该依赖开发者的个人设置，这里显式钉死为不限速。
+    monkeypatch.setattr(downloader_module, "_download_speed_limit_bps", lambda: 0.0)
     monkeypatch.setattr(downloader_module, "_fetch_text", lambda url, headers, timeout: playlist)
     monkeypatch.setattr(SegmentDownloader, "_get_text", lambda self, url: playlist)
     monkeypatch.setattr(SegmentDownloader, "_fetch_part", lambda self, item: segment)
@@ -1242,6 +1246,10 @@ def test_download_hls_legacy_serial_segments_still_work(
     playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:9.0,\nseg-1.ts\n#EXT-X-ENDLIST\n"
     segment = b"\x47" + b"\x00" * 90_000
     monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
+    # 关掉下载限速：`_download_speed_limit_bps()` 读的是**真实 QSettings 注册表**，
+    # 本机若设过限速，这个用例就要按限速慢慢"等"，实测从 0.2s 变 10.5s。
+    # 测试不该依赖开发者的个人设置，这里显式钉死为不限速。
+    monkeypatch.setattr(downloader_module, "_download_speed_limit_bps", lambda: 0.0)
     monkeypatch.setattr(downloader_module, "_concurrent_segments_enabled", lambda: False)
     monkeypatch.setattr(
         downloader_module.requests, "get",
@@ -1406,8 +1414,21 @@ def test_best_variant_url_locks_the_sharpest_child_playlist() -> None:
             return master
 
     assert best_variant_url("https://cdn/index.m3u8", http=_Http()) == "https://cdn/1080/index.m3u8"
-    # 单清晰度/探测不可用时原样返回，不能让"锦上添花"影响播放
-    assert best_variant_url("https://cdn/a.mp4") == "https://cdn/a.mp4"
+
+    # 不是主清单 / 探测不到时原样返回，避免"探测失败"影响播放。
+    #
+    # **这里必须传 http 替身**：`http=None` 会让 list_qualities 真的 new 一个
+    # HttpClient 去请求 cdn/a.mp4，于是这条断言要等超时+重试 —— 整个用例实测 9.9 秒，
+    # 其中约 9.5 秒纯粹是在等网络。测试里不该有任何真实外网等待。
+    class _Plain:
+        """非 m3u8 内容：解析不出变体 → best_variant_url 原样返回。"""
+
+        def get_text(self, url, **_kwargs):  # noqa: ANN001
+            return "not a playlist"
+
+    assert best_variant_url("https://cdn/a.mp4", http=_Plain()) == "https://cdn/a.mp4"
+    # 空地址不碰网络，直接返回空串
+    assert best_variant_url("", http=_Plain()) == ""
 
 
 def test_resolve_playback_upgrades_master_playlist_to_best_variant(
@@ -1465,6 +1486,10 @@ def test_download_hls_rejects_unsupported_encryption(monkeypatch: pytest.MonkeyP
                 "#EXTINF:9.0,\nseg-1.ts\n#EXT-X-ENDLIST\n")
 
     monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
+    # 关掉下载限速：`_download_speed_limit_bps()` 读的是**真实 QSettings 注册表**，
+    # 本机若设过限速，这个用例就要按限速慢慢"等"，实测从 0.2s 变 10.5s。
+    # 测试不该依赖开发者的个人设置，这里显式钉死为不限速。
+    monkeypatch.setattr(downloader_module, "_download_speed_limit_bps", lambda: 0.0)
     monkeypatch.setattr(
         downloader_module.requests, "get",
         lambda url, **k: _FakeStream([playlist.encode()], url=url,
@@ -1515,6 +1540,10 @@ def test_download_hls_decrypts_aes128_without_ffmpeg(monkeypatch: pytest.MonkeyP
         return _FakeStream([cipher], url=url, content_type="video/mp2t")
 
     monkeypatch.setattr(downloader_module, "find_ffmpeg", lambda: None)
+    # 关掉下载限速：`_download_speed_limit_bps()` 读的是**真实 QSettings 注册表**，
+    # 本机若设过限速，这个用例就要按限速慢慢"等"，实测从 0.2s 变 10.5s。
+    # 测试不该依赖开发者的个人设置，这里显式钉死为不限速。
+    monkeypatch.setattr(downloader_module, "_download_speed_limit_bps", lambda: 0.0)
     monkeypatch.setattr(downloader_module.requests, "get", fake_get)
     monkeypatch.setattr(downloader_module, "_fetch_text", lambda url, headers, timeout: playlist)
     monkeypatch.setattr(SegmentDownloader, "_get_text", lambda self, url: playlist)

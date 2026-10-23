@@ -3,6 +3,119 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## v2.2.0 — 性能与体积优化（启动 · 数据库 · 解密 · 包体）
+
+> 这一版**没有新功能**，全是实测出来的性能问题。每一条都有改动前后的数字。
+
+### 1. 启动：181 → 24 个模块（找到 v2.0.1 懒加载失效的真因）
+
+v2.0.1 号称"板块页按需构造"，但 `AppShell.__init__` 里写了：
+
+```python
+self._factories = {spec.key: spec.page for spec in ACTIVE_BOARDS}   # ← 这里就把六个板块全导入了
+```
+
+`BoardSpec.page` 是**懒解析属性**，一取就 `importlib.import_module(...)`。
+所以"按需构造"只做到了"按需实例化"，**导入**在构造主壳时就全发生了：
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| 启动加载的本项目模块 | **181 / 205** | **24** |
+| `requests` 是否在启动时加载 | 是（白付 95 ms） | **否** |
+| 首次进入某个板块 | 0（已预载） | 230 ms（一次性，用户主动点击时） |
+
+改法：只保存 `BoardSpec` 本身，`go_page()` 时才取 `.page`。
+另把 `core/platform/__init__.py` 的 `http` 成员改成 PEP 562 懒转发
+（`requests` 自己的导入成本就有 95 ms：urllib3 63 ms + ssl 5 ms）。
+
+**新增闸门** `tests/architecture/test_startup_budget.py`：主壳构造完成时，
+加载模块数必须 ≤ 60、不得导入任何板块模块/板块内核、不得导入 `requests`。
+
+### 2. 数据库：补三个索引，大库热查询 **6343×**
+
+`v1_initial` 只给"列表页排序"建了索引，**按标识反查**的热路径没建。
+20 万行 `video_videos` 实测：
+
+| | 耗时 | 计划 |
+|---|---|---|
+| 改前 | 21.296 ms/次 | `SCAN`（全表） |
+| 改后 | **0.003 ms/次** | `SEARCH ... USING COVERING INDEX` |
+
+新增迁移 `v4_indexes`：
+
+- `idx_video_remote(source, remote_id, episode_index)` —— 增量入库去重（每集都查）
+- `idx_video_title_ep(title, episode_index)` —— 换源/匹配
+- `idx_gallery_images_url(url)` —— 图库按链接反查
+
+两个连带修正：
+
+- **版本号用 4 不用 3**：v3 是撤掉的动漫迁移的号，从 v1.1.0 升级的库里
+  `schema_migrations` 已有 `version=3`，新迁移若叫 3 会被"已应用就跳过"，
+  索引永远建不上（有专门用例守住）；
+- **索引只建在存在的表上**：迁移不假设前序迁移一定建好了表，缺表就跳过 ——
+  否则裁剪库/老库会因 `no such table` 启动失败（这个坑是测试用例当场抓出来的）。
+
+另外一个被证伪的"优化"：第一版写的是**部分索引**（`WHERE remote_id <> ''`），
+看着更小更省，但实测查询计划**依然是 SCAN** —— 部分索引只有在查询条件能静态
+蕴含索引条件时才会被使用，而调用方写的是 `WHERE remote_id = ?`。已改回普通索引。
+
+**新增闸门** `tests/platform/test_db_indexes.py`：用 `EXPLAIN QUERY PLAN` 钉住
+"必须走索引"，并覆盖 v1.1.0 老库升级与缺表容错。
+
+### 3. AES 解密：37.7 KB/s → **0.74 MB/s**（约 20 倍）
+
+排查慢测试时发现的**真实产品缺陷**（不只是测试慢）。`core/video/aes.py` 是纯 Python
+实现（零依赖，这个设计是对的），但 `InvMixColumns` 每个分组调 16 次 `_mul`、
+每次 8 轮移位：
+
+```
+cProfile：720 万次 _mul 调用，AES 解密 200KB 用 9.5 秒
+→ 折算 37.7 KB/s：一个 2MB 的 HLS 分片要解密 54 秒，用户会以为软件卡死
+```
+
+改法：GF(2⁸) 的乘数在这条路径上只有 9/11/13/14 四个固定值，预先算成 256 项查表
+（表由 `_mul` 生成，所以与参考实现永远一致，不存在手抄表抄错）。结果：
+**37.7 KB/s → 0.74 MB/s**，FIPS-197 / NIST SP 800-38A 向量与逐字节对照全通过。
+
+**新增闸门**：`test_video_aes.py::test_aes_throughput_is_not_pathological`
+（下限 0.2 MB/s，防止有人改回逐位移位）。
+
+### 4. 包体：388.4 → **381.8 MB**（−6.6 MB）
+
+丢掉 Qt 自带的多语言翻译包（124 个 `.qm`）。依据：全仓 grep **没有任何 QTranslator**，
+所有界面文案都是我们自己写的中文，留着多语言包纯属死重量。
+
+同时核实并**否掉**了一个"可疑重复"：`libcrypto-3-x64.dll`（6.8 MB）与
+`libcrypto-3.dll`（5.0 MB）看似重复，查导入表后确认前者被 `libssl-3-x64.dll`（Qt 网络栈）
+使用、后者被 `_ssl.pyd`/`_hashlib.pyd`（Python 标准库）使用 —— **两个都在用，不能删**。
+
+### 5. 测试套件：2.3 → **1.8 分钟**
+
+三个用例原来在"等网络/等解密"，全部改为确定性断言：
+
+| 用例 | 改前 | 改后 | 原因 |
+|---|---|---|---|
+| `test_best_variant_url_locks_the_sharpest_child_playlist` | 9.94 s | <0.01 s | 断言里 `http=None` 会真的 new 一个 HttpClient 去请求 `cdn/a.mp4`，等超时+重试 |
+| `test_download_hls_decrypts_aes128_without_ffmpeg` | 14.00 s | 2.81 s | 纯 Python AES + 测试辅助加密实现（后者也改查表） |
+| `test_ai_analyze_by_metadata_needs_no_upload` | 16.24 s | <0.01 s | 故意发真请求等失败；改为 patch `chat` 并**断言 prompt 里真的有元数据**（比原来更严格） |
+
+顺带修掉一个测试隔离问题：`_download_speed_limit_bps()` 读的是**真实 QSettings 注册表**，
+本机设过限速就会让下载用例按限速慢慢"等"（0.2 s → 10.5 s），测试现在显式钉死为不限速。
+
+### 6. 杂项
+
+- `.gitignore` 收掉工作区里另一套工具（workbuddy）的产物，`git status` 不再长期脏着
+  （只忽略、不删文件）；
+- 打包脚本的 GUI 冒烟把"系统策略拦截"与"真实崩溃"分开处理：前者只警告
+  （等策略放行后重试 5 次 × 45 秒），后者直接 `Fail`。
+
+### 验证
+
+- 全量 `pytest tests -q`：**通过**，耗时 **1.8 分钟**（此前 2.3）；新增 3 个闸门文件；
+- 打包 v2.2.0：onedir **381.8 MB** / 安装包 **152.6 MB**（此前 388.3 / 154.5）；
+- 装完真跑（干净目录覆盖安装）：板块冒烟八个键**全部 true**、能力自检 **17/17**、
+  真实启动标题含 `v2.2.0`、首页 **6 张板块卡**。
+
 ## v2.1.1 — 修复「安装后启动失败」
 
 > **v2.1.0 的安装包是坏的**：装完点图标弹
