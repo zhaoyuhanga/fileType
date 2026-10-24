@@ -20,8 +20,14 @@ v1.1.0 按 `docs/VIDEO_PLAN.md` 逐条改掉：
 | 起播卡死 | 等 20s 只打印一句提示 | 三段自愈 3s 降档 / 8s 换源 / 20s 建议先下后播（`stallDetected` 信号） |
 | 下载慢 | `download_many` 串行、分片串行 + 每片新连接、无续传 | `core/video/segment_downloader.py`：并发 6 + 保序落盘 + `.parts` 断点续传 + 坏片重试 + 限速；集间并发 2 |
 
-**兼容性**：`services/media_server.py`、`boards/video/player.py` 都保留为**转发壳**
-（同名同签名），旧调用方与旧测试不需要改动。
+**代理与播放器的位置（v2.0.1 / v2.1.0 已收敛）**：
+
+- 媒体代理只有一份实现：`services/media_proxy/`
+  （`server` 起停与 URL / `handler` HTTP 路由 / `fetch` 取流缓存 / `playlist` 清单 / `cache` 分片缓存）。
+  原来的 `services/media_server.py` 转发壳已删除，调用方直接
+  `from modu_workbench.services import media_proxy`；
+- 播放器只有一份实现：`ui_kit/media/player.py`（含弹幕/字幕/诊断/自愈信号）。
+  原来的 `boards/video/player.py` 转发壳也已删除，`board.py` 直接引用共享层。
 
 ### 0.1 三个必知的边界
 

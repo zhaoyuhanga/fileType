@@ -12,7 +12,7 @@
   文档预览用 `QTextBrowser`（Markdown/JSON/HTML/TXT 由 `QTextDocument` 渲染），
   播放用 `QtMultimedia`（FFmpeg 后端）。内嵌 React 前端、`services/web_bridge.py`、
   `webfront/` 产物与 QtWebEngine 依赖**已全部移除**（安装包体积减少约 340MB）。
-  自检项 `single_qt_stack` 会用 AST 扫描确保没有任何模块再 import QtWebEngine。
+  自检项 `single_qt_stack`（`app/selfcheck.py`）会用 AST 扫描确保没有任何模块再 import QtWebEngine。
 
 ## 顶层结构
 
@@ -119,8 +119,12 @@ except sqlite3.Error as error:                 # 只吞得起的类型
 - **数据模型**：`video.db` 存 `videos` / `playlists` / `playlist_items` / `history` / `play_records` / `settings`；
   `videos.file_path` 为空表示「只入库未下载」（可直接在线播放），因此收藏/分类/历史对在线与本地条目统一可用；
   `history.title_snapshot` 让条目删除后历史仍可读。
-- **播放内核**：优先 QtMultimedia（原生进度/音量/倍速），m3u8 或原生不支持的地址自动切到
-  QtWebEngine + hls.js；远程地址统一经 `services/media_server.py` 的本机代理（服务端补 Referer/UA，
+- **播放内核**：**只用 QtMultimedia**（原生进度/音量/倍速），渲染面是
+  `QGraphicsView + QGraphicsVideoItem`（这样才能叠加字幕/弹幕/诊断浮层）。
+  m3u8 不需要浏览器内核：清单由 `core/video/hls.py` 解析、分片由本机代理转发，
+  交给 FFmpeg 后端直接解。**本项目不内置 QtWebEngine/hls.js**（v1.0.0 起单栈，
+  自检项 `single_qt_stack`（`app/selfcheck.py`）会用 AST 扫描确保没人再 import）。远程地址统一经
+  `services/media_proxy/` 的本机代理（服务端补 Referer/UA、分片磁盘缓存，
   HLS 清单内的分片地址被重写为继续走代理）。
 - **下载**：HLS 优先用 ffmpeg `-c copy` 合流为 MP4（AAC 的 `aac_adtstoasc` 失败时自动去掉重试），
   无 ffmpeg 时退化为分片拼接为 `.ts`；直链走流式下载；两者都做容器嗅探（`looks_like_video`）。

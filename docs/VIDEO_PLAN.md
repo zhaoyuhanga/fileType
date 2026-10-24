@@ -17,7 +17,7 @@
 
 ## 0. TL;DR（先看这 8 条）
 
-1. **播放卡、帧率低的主因不是"源不好"，而是我们自己的链路**：远程地址一律经 Python 写的本地 HTTP 代理（`services/media_server.py`），而该代理**每个分片都新开一次 TLS（无 `requests.Session`）、把整个响应体读进内存后才转发、所有响应 `Cache-Control: no-store`、失败还带 3 次 0.6s 退避**。1080p/2s 分片意味着每分钟约 30 次握手 + 30 次 Python 全量缓冲，抖动直接体现为卡顿。
+1. **播放卡、帧率低的主因不是"源不好"，而是我们自己的链路**：远程地址一律经 Python 写的本地 HTTP 代理（当时叫 `services/media_server.py`，v1.1.0 起是 `services/media_proxy/`，旧模块已在 v2.0.1 删除），而**当时的代理**每个分片都新开一次 TLS（无 `requests.Session`）、把整个响应体读进内存后才转发、所有响应 `Cache-Control: no-store`、失败还带 3 次 0.6s 退避**。1080p/2s 分片意味着每分钟约 30 次握手 + 30 次 Python 全量缓冲，抖动直接体现为卡顿。
 2. **第二个主因是解码**：`QMediaPlayer` 用默认后端，代码里**没有任何**硬解/后端选择；PySide6 6.11 同包了 `ffmpegmediaplugin.dll` 与 `windowsmediaplugin.dll`，而 Qt 官方文档明确给了 `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=d3d11va,d3d12va,dxva2`、`QT_DISABLE_HW_TEXTURES_CONVERSION`、`QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH` 等开关——我们现在一个都没用，1080p H.264 基本靠软解，CPU 打满就是"帧率低"。
 3. **第三个主因是选路策略**：`library._lock_best_variant()` 永远锁定**最高码率**变体（`max(rank)`），没有带宽探测、没有卡顿降档。慢网下"锁最高"＝持续 stall。
 4. **首帧慢/卡死无自愈**：`player._check_native_started()` 等 20s 只打印一句提示，不会自动降清晰度、换源或"先下后播"。
@@ -81,6 +81,9 @@ download_many()：for 任务（**逐条串行**，一季 12 集就是 12 次串�
 
 | # | 根因 | 证据（文件:行） | 影响 |
 |---|---|---|---|
+
+> **以下表格是 2024 年改造前的诊断记录**：`文件:行` 指向的是**当时的** `media_server.py`（该文件已在 v2.0.1 删除）。保留它是因为这些数字解释了"为什么要重写代理"，但**不要把行号当成现在的代码**。
+
 | A1 | 代理**不复用连接**：每个分片/new Range 都是新的 TCP+TLS | `services/media_server.py:79`（`requests.get`），无 `Session` | 境外源 RTT 200–400ms 时，每片多付 1 个 RTT 的握手；并发分片时更明显 |
 | A2 | 代理**全量缓冲**才转发：`body = upstream.content` | `media_server.py:322`、`330`（清单重写也走全量） | 分片延迟 = 完整下载时间；直链 MP4 更糟（整文件进内存才回第一字节，Range 语义也失真） |
 | A3 | 代理**禁用缓存**：`Cache-Control: no-store` | `media_server.py:345`、`383`、`276` | 拖动进度条、清晰度来回切、Qt 重试都要重新走外网；seek 卡顿的常见来源 |
@@ -224,7 +227,7 @@ Qt 官方可用的开关（本轮改造直接采用，出处见附录 C）：
 
 ### 3.1 阶段 V1（P0）：播放流畅度
 
-#### 3.1.1 重写本机媒体代理（`services/media_server.py` → `services/media_proxy/`）
+#### 3.1.1 重写本机媒体代理（`services/media_server.py` → `services/media_proxy/`）【已完成：旧模块已在 v2.0.1 删除】
 
 目标：把代理从"瓶颈"变成"加速器"。
 
@@ -536,7 +539,7 @@ CREATE INDEX IF NOT EXISTS idx_video_play_events_time ON video_play_events(creat
 
 | 文件 | 变更 | 兼容 |
 |---|---|---|
-| `services/media_server.py` | 保留为转发壳，实现移入 `services/media_proxy/` | 同名同签名 |
+| `services/media_server.py` | 实现移入 `services/media_proxy/`；**该壳已在 v2.0.1 删除**，调用方直接 `from modu_workbench.services import media_proxy` | — |
 | `services/media_proxy/{server,upstream,cache,playlist,session}.py` | 新增 | — |
 | `core/video/abr.py` | 新增（带宽估算 + 档位选择） | — |
 | `core/video/segment_downloader.py` | 新增（并发分片下载 + 续传） | — |
@@ -616,7 +619,7 @@ CREATE INDEX IF NOT EXISTS idx_video_play_events_time ON video_play_events(creat
 > V1-d 的独立 `PlaybackSession` 对象未做（预热/预取已内建在代理里）、V3-c 的弹幕取数走
 > 弹弹play 官方接口（只读），V3-g/V3-h 的测试与自检 `video_playback` 已完成并全绿。
 
-- [x] **V1-a** 媒体代理：`services/media_proxy/{server,upstream,cache,playlist}.py` + `media_server.py` 兼容壳
+- [x] **V1-a** 媒体代理：`services/media_proxy/{server,upstream,cache,playlist}.py`（+ v2.1.0 拆出的 `fetch.py`/`handler.py`；兼容壳已在 v2.0.1 删除）
 - [x] **V1-b** 分片磁盘缓存（LRU + 配额 + Range 索引）+ 设置页「缓存」组
 - [x] **V1-c** 连接池/流式转发/分层超时与重试/并发上限
 - [~] **V1-d** `PlaybackSession`（warmup + 预取 + stall 看门狗）：**预热与预取已做**（清单改写时后台预热前 N 片 + 缓存身份键）；独立会话对象未做（播放器有 `_on_prefetch_tick` 挂点）

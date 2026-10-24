@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 
 打包脚本内置三道自检，任一处 `Fail` 都会直接中断：
 1. 源码自检（`MODU_CHECK_DEPS`）；
-2. exe 字节流里检索关键模块名（七个板块/平台层/共享媒体层，共 48 项）；
+2. exe 字节流里检索关键模块名（六个板块/平台层/共享媒体层，共 **40 项**）；
 3. 运行打包产物做能力自检（17 项）。
 
 ## 3. 体积基线与精简记录

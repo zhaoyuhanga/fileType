@@ -299,7 +299,7 @@ EXIF、重复识别、图片美化（非破坏性可撤销）与本地增强优�
 
 - 媒体：ffmpeg 子进程（`MODU_FFMPEG` 指定路径）；LibreOffice 可选（`MODU_SOFFICE`）；
 
-远程 mp4/HLS 统一经本地流服务（`services/media_server.py`，支持 Range 并在服务端补 Referer/UA）喂给原生播放器
+远程 mp4/HLS 统一经本机代理（`services/media_proxy/`，支持 Range 并在服务端补 Referer/UA、带分片磁盘缓存）喂给原生播放器
 
 - 音乐播放：QtMultimedia（QMediaPlayer + QAudioOutput）；在线音源用 requests 抓取公开接口
 
@@ -398,10 +398,11 @@ src/modu_workbench/
 ├── app/                       # ★ 应用骨架
 │   ├── bootstrap.py           # 启动：建库 + 迁移 + 旧分库导入
 │   ├── context.py             # 应用级上下文（按名字懒加载各板块单例）
-│   ├── main.py                # 入口 + 依赖自检（MODU_CHECK_DEPS）
-│   ├── registry.py            # 板块注册表（新增板块注册一条即可）
-│   └── shell.py               # 主壳：顶栏（首页/板块/设置）+ 页面栈
-├── boards/                    # ★ 五大板块各一个包，板块之间互不引用
+│   ├── main.py                # 入口：起 Qt + 开主壳（59 行）
+│   ├── selfcheck.py           # 打包自检 17 项 + 启动级冒烟（MODU_CHECK_DEPS / MODU_SMOKE_BOARDS）
+│   ├── registry.py            # 板块注册表（新增板块注册一条即可；page_target 延迟导入）
+│   └── shell.py               # 主壳：顶栏（首页/板块/设置）+ 页面栈（板块页按需构造）
+├── boards/                    # ★ 六个板块各一个包，板块之间互不引用
 │   ├── base.py                # BoardSpec / BoardPage 基类
 │   ├── home/page.py           # 首页：介绍 + 板块入口
 │   ├── book/                  # 墨软书库
@@ -514,13 +515,24 @@ src/modu_workbench/
 │       ├── library.py         # 业务编排（界面唯一入口）
 │       └── ocr.py             # 可选 OCR（tesseract / PyMuPDF）
 ├── services/                  # 跨板块的本地服务
-│   ├── app_context.py         # 懒转发兼容层（单例回到各板块 context）
+│   ├── app_context.py         # 跨板块单例的**合法中介**（板块之间不许互相依赖，见 ARCHITECTURE）
 │   ├── assets.py              # 图标/安装包图形定位（窗口与任务栏图标）
-│   └── media_server.py        # 本地媒体流（Range）+ 远程直链/HLS 清单代理（补 Referer/UA）
+│   ├── dandanplay.py          # 弹弹play 只读客户端（影视板块的弹幕）
+│   └── media_proxy/           # 本机媒体代理（唯一实现，v2.0.1 起无转发壳）
+│       ├── server.py          #   服务生命周期 + 对外 URL API（起停、拼地址）
+│       ├── handler.py         #   HTTP 处理器：路由/Range/流式转发/并发闸门/SSRF 收口
+│       ├── fetch.py           #   上游取流 + 落缓存（预热/Range 补齐共用）
+│       ├── playlist.py        #   m3u8 清单重写 + 短缓存 + 前 N 片预热
+│       ├── cache.py           #   分片磁盘 LRU 缓存（配额 + Range 语义）
+│       ├── upstream.py        #   每主机连接池 + 分层超时/重试 + 请求头注入
+│       ├── config.py / stats.py / state.py
 ├── ui_kit/                    # 统一设计规范
-│   ├── theme.py / tokens.py   # 主题与设计令牌（间距/字号/圆角）
+│   ├── tokens.py              # 设计令牌（间距/字号/圆角/色板）—— 唯一来源
+│   ├── theme.py               # 由令牌组装 QSS
+│   ├── theme_icons.py         # QSS 需要的箭头/勾选 PNG（QPainter 现画，随主题换色）
 │   ├── toast.py / widgets.py  # 轻提示与通用控件
 │   ├── components/            # 组件库（页面骨架/卡片/空状态/任务条）
+│   ├── media/                 # 跨板块复用的播放器/视频面/弹幕/字幕/硬解注入
 │   └── settings/              # 分板块设置页（通用/大模型/书库/转换/文档/乐库/影视/图库）
 └── assets/                    # 应用图标与安装包图形（随包分发）
 tests/                         # pytest（architecture / platform / board_<板块> / smoke / helpers）
@@ -534,16 +546,22 @@ docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / 
 
 ## 文档索引
 
-| 文档 | 内容 |
+**先看哪份，取决于你是谁：**
+
+| 我想… | 看这份 |
 | --- | --- |
-| `docs/ARCHITECTURE.md` | 顶层结构、依赖规则、各板块设计要点 |
-| `docs/DATABASE.md` | 单库表结构、迁移与备份约定 |
-| `docs/UI_GUIDE.md` | 设计令牌、组件库、页面模板、截图验收 |
-| `docs/TESTING.md` | 测试分层、写测试约定、每板块冒烟清单 |
-| `docs/RELEASE.md` | 发版检查、打包与自检、环境限制 |
-| `docs/VIDEO_PLAN.md` | 影视板块设计记录（代理/选路/下载/弹幕的依据与"诚实边界"） |
-| `docs/research/README.md` | 调研材料的取舍标准（只保留仍在生效的那一份） |
-| `docs/BOARDS/<板块>.md` | 各板块的目录、数据表、界面约定与变更须知 |
+| 装上就能用 | 本文件「快速开始」 |
+| 出问题了 | **`docs/TROUBLESHOOTING.md`**（按症状查，都是真实发生过的） |
+| 改代码 | **`docs/CONTRIBUTING.md`**（环境、五个环境变量、加板块的 8 步、三条最容易踩的坑） |
+| 搞懂结构 | **`docs/ARCHITECTURE.md`**（依赖规则 + 三个"看起来像死代码但必须存在"的例外） |
+| 改数据库 | `docs/DATABASE.md`（28 张表、迁移规则、**v3 版本号为什么是空洞**） |
+| 调界面 | `docs/UI_GUIDE.md`（令牌唯一来源、组件、截图验收） |
+| 写/跑测试 | `docs/TESTING.md` + `tests/README.md`（**每个闸门守的是哪次事故**） |
+| 发版/打包 | `docs/RELEASE.md`（三级冒烟、体积基线、环境限制） |
+| 改影视板块 | `docs/VIDEO_PLAN.md`（设计记录与"诚实边界"）+ `docs/BOARDS/video.md` |
+| 看某板块细节 | `docs/BOARDS/<板块>.md` |
+| 看调研依据 | `docs/research/README.md`（只保留仍在生效的那一份） |
+| 看改了什么 | `CHANGELOG.md`（**每条都带改动前后的数字**） |
 
 ## 里程碑
 
