@@ -102,11 +102,22 @@ class BookBoardPage(QWidget):
             return
 
         reader.back_requested.connect(self._close_reader)
+        # 正文载入失败时：留在书架并告诉用户**具体原因**（而不是打开一个空白阅读页）
+        reader.load_failed.connect(self._on_reader_load_failed)
         self._reader = reader
         self._mode_bar.hide()
         self._stack.addWidget(reader)
         self._stack.setCurrentWidget(reader)
         reader.setFocus()
+
+    def _on_reader_load_failed(self, reason: str) -> None:
+        """阅读器报"载入失败"：退回书架并显示原因。
+
+        为什么退回书架而不是留在空白阅读页：空白页对用户等于"卡住了"，
+        他既不知道发生了什么，也不知道该做什么。
+        """
+        self._toaster.error(reason)
+        self._close_reader()
 
     def _close_reader(self) -> None:
         reader = self._reader

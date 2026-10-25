@@ -117,3 +117,48 @@ def test_online_page_compliance_gate(qapp: QApplication, library: Library) -> No
         assert not page._start_button.isEnabled()  # noqa: SLF001
     finally:
         page.close()
+
+
+def test_reader_reports_load_failure_instead_of_showing_blank(qapp, tmp_path: Path) -> None:  # noqa: ANN001
+    """原文件丢失时，阅读器必须**报出原因**，而不是打开一个空白页。
+
+    ## 这条守的是什么
+
+    `ReaderView._load_book` 曾经是：
+
+        try:
+            _, parsed = self._library.load_for_reading(...)
+        except Exception:
+            parsed = None          # ← 静默吞掉
+
+    后果：书被删/改名/权限不足时，用户点开只看到一片空白 ——
+    既不知道书没了，也不知道该做什么。外层 `_open_reader` 的
+    `except` 也抓不到（异常已经在内层被吃掉）。
+
+    现在改成发 `load_failed` 信号，携带**可执行的原因**
+    （文件找不到 → 提示放回原位置或重新导入）。
+    """
+    from modu_workbench.boards.book.reader import ReaderView
+    from modu_workbench.core.book import Library, Storage
+
+    library = Library(Storage(str(tmp_path / "library.db")))
+    missing = tmp_path / "不存在的书.txt"
+    book_id = library.storage.upsert_book(str(missing), "已丢失的书", "作者", "txt")
+    record = library.get_book(book_id)
+    assert record is not None
+
+    view = ReaderView(library, record)
+    reasons: list[str] = []
+    view.load_failed.connect(reasons.append)
+
+    # 构造时已跑过一次 _load_book，但因为信号是在构造后连的，
+    # 这里显式再触发一次以捕获原因。
+    view._load_book(record)  # noqa: SLF001
+
+    assert reasons, "载入失败必须发 load_failed，不能静默"
+    message = reasons[-1]
+    assert "找不到" in message or "文件" in message, f"原因不可读：{message}"
+    assert str(missing.name) in message, "提示里应带出文件路径，方便用户定位"
+
+    view.deleteLater()
+    library.storage.close()

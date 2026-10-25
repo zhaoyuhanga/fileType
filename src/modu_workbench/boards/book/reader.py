@@ -31,10 +31,43 @@ READ_THEMES: list[tuple[str, str, str]] = [
 FONT_MIN, FONT_MAX, FONT_STEP = 12, 30, 2
 
 
+def _describe_load_error(error: BaseException, path: str) -> str:
+    """把载入异常翻译成用户看得懂、且能照着做的原因。
+
+    为什么要翻译而不是直接 `str(error)`：底层抛的是
+    `FileNotFoundError(2, 'No such file or directory')` 这类东西，
+    对用户没有行动价值。这里按最常见的几类给出**下一步该做什么**。
+    """
+    from pathlib import Path as _Path
+
+    if isinstance(error, KeyError):
+        return "这本书的记录已不存在（可能刚被删除），请刷新书架。"
+    if isinstance(error, FileNotFoundError):
+        return f"原文件找不到了：{path}\n请把文件放回原位置，或重新导入这本书。"
+    if isinstance(error, PermissionError):
+        return f"没有权限读取：{path}\n请检查文件是否被其它程序占用，或换个位置。"
+    if isinstance(error, UnicodeDecodeError):
+        return ("这本书的文字编码无法识别（可能不是 UTF-8/GBK）。\n"
+                "可以先用「墨软转换」把它转成 UTF-8 的 TXT 再导入。")
+    if isinstance(error, ValueError):
+        # `Library.load_for_reading` 对"解析不出正文"抛 ValueError，消息本身可读
+        detail = str(error).strip() or "解析失败"
+        return f"{detail}\n文件：{path}"
+    if isinstance(error, OSError):
+        return f"读取文件出错：{error}\n文件：{path}"
+    return f"{type(error).__name__}: {error}\n文件：{path}"
+
+
+
 class ReaderView(QWidget):
     """电子书阅读页：返回书架时自动保存阅读位置。"""
 
     back_requested = Signal()
+    #: 载入失败时发出（参数是可直接展示给用户的原因）。
+    #: 为什么不直接抛：阅读页已经在构造流程里，抛异常会让板块只看到一个
+    #: "无法打开这本书"的笼统错误；发信号能让板块显示**真实原因**
+    #: （文件被删了 / 权限不足 / 解析不出正文）。
+    load_failed = Signal(str)
 
     def __init__(self, library: Library, record: BookRecord, parent: QWidget | None = None):
         super().__init__(parent)
@@ -131,14 +164,19 @@ class ReaderView(QWidget):
     # ---------- 加载与渲染 ----------
 
     def _load_book(self, record: BookRecord) -> None:
+        """解析并载入正文。失败时**必须让用户知道**，不能安静地显示空白。"""
         try:
             _, parsed = self._library.load_for_reading(self._record_id)
-        except Exception:  # noqa: BLE001
-            parsed = None
+        except Exception as error:  # noqa: BLE001  解析可能因任意原因失败（文件、编码、格式）
+            # 以前的写法是 `parsed = None` 静默吞掉：用户看到的是一个空阅读页，
+            # 既不知道书没了、也不知道该做什么。这里把原因发出去。
+            swallow("载入书籍正文", error)
+            self._parsed = None
+            self._chapters = []
+            self.load_failed.emit(_describe_load_error(error, record.path))
+            return
         self._parsed = parsed
         self._chapters = list(parsed.chapters) if parsed and parsed.chapters else []
-        if not self._chapters:
-            self._chapters = []
         self._index = min(self._index, max(0, len(self._chapters) - 1))
 
     def _chapter_html(self, index: int) -> str:

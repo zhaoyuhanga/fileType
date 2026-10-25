@@ -3,6 +3,94 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
+## 未发版 — 代码优化与缺陷修复
+
+> 这一轮**没有加功能**，是对全仓做了一次定向扫描（静默失败 / 设置类型 / 线程安全 / 死代码），
+> 只改真问题。每条都有"怎么发现的"和"验证方法"。
+
+### 1. 书打不开时只显示空白页（用户完全不知道发生了什么）
+
+`ReaderView._load_book` 原来是：
+
+```python
+try:
+    _, parsed = self._library.load_for_reading(self._record_id)
+except Exception:
+    parsed = None          # ← 静默吞掉
+```
+
+后果：文件被删/改名/权限不足时，用户点开一本书只看到**一片空白**，
+既不知道书没了，也不知道该做什么。外层 `_open_reader` 的 `except` 也抓不到
+（异常已经在内层被吃掉），所以那圈"无法打开这本书"的提示**永远不会出现**。
+
+改法：
+
+- 新增 `load_failed` 信号，携带**可执行的原因**（新增 `_describe_load_error`：
+  `FileNotFoundError` → "原文件找不到了，请放回原位置或重新导入"、
+  编码错误 → "先用转换板块转成 UTF-8 TXT"、`KeyError` → "记录已不存在，请刷新书架"）；
+- 板块层接住信号：弹 Toaster + **退回书架**（空白阅读页对用户等于"卡住了"）；
+- 同时 `swallow("载入书籍正文", error)` 留痕。
+
+回归用例 `test_reader_reports_load_failure_instead_of_showing_blank`，
+并**验证过它有效**：把代码改回静默写法，用例立刻失败并指出原因。
+
+### 2. 设置存 `False` 会读成真值（"设置里关了，实际还开着"）
+
+`QSettings` **不做类型保持**：`setValue(k, False)` 之后 `value(k)` 读回字符串 `'false'`，
+而 `'false'` 在 Python 里是**真值**。实测：
+
+```
+写入 False 后无 type 读: 'false' str → 真值判断: True
+指定 type=bool 读      : False
+```
+
+受影响位置：
+
+| 位置 | 原写法 | 后果 |
+|---|---|---|
+| `boards/video/widgets.py` `video_auto_switch_pref` | `value(k, True)` + 外层字符串比较兜底 | 靠 `str(v).lower() not in ("false",...)` 侥幸正确，**任何新取值都会悄悄变成 True** |
+| `ui_kit/media/player.py` 字幕字号 | `value(k, 22)` + 外层 `int()` | 同样靠外层兜住，写法不统一 |
+| `boards/document/security_page.py` `document/price_per_1k` | `value(k, 0.0)` **无任何转换** | `"" if not price` 对字符串 `'0.0'` 判成"有值"，与"未设置"混淆 |
+
+全部改为显式 `type=bool` / `type=int` / `type=float`。
+
+**新增闸门** `tests/architecture/test_settings_types.py`（3 个用例），按风险分级：
+
+- 布尔语境（`setChecked` / `bool()` / `if`）必须写 `type=bool`；
+- 无任何转换的读取必须写 `type=`；
+- 有 `int()/float()/str()` 外层转换（含跨行、"先赋值后转换"写法）**不强制**加 `type=`
+  —— 一刀切会把 34 处合规代码误判成问题，那是噪音；
+- 另有一条真机用例验证 Qt 的这个行为本身（哪天 Qt 改了会先提醒）。
+
+### 3. 死设置键：写了没人读
+
+`gallery/cache_cleared` 与 `video/cache_cleared_mb` 只被 `setValue` 写入，
+全仓**没有任何地方读取**——纯属往注册表里堆垃圾。已删。
+
+删除时顺手把"清了多少"变成**用户可见的反馈**（原来清完缓存界面毫无变化，
+会让人以为没生效）：图库改为在缓存标签显示"已清理 X｜当前 Y"，
+影视把清理量拼进缓存用量标签；顺便修掉"清了 0 字节却显示已清理 -"的文案。
+
+### 4. 其它核对结果（**未改动**，说明为什么不改）
+
+| 检查项 | 结果 |
+|---|---|
+| 24 个 `QThread` 子类 | 生命周期都有 `parent=self`，信号回传走 `Signal`，**未发现线程安全问题** |
+| `SqliteStore` | 有 `__enter__`/`__exit__` + `RLock`，连接管理规范 |
+| `except Exception` 宽捕获 318 处 | 静默 `pass` 已是 **0**；剩余都是"边界层"（启动兜底/UI 事件统一提示/可选能力降级），逐个看过，**不该改窄** |
+| `dandanplay.py` 6 处返回空 | 已有 `last_note` 记录原因（扫描脚本没认出这种写法） |
+| `video/ffmpeg_direct` 等 4 个只读不写键 | 有意的"隐藏开关 + 默认值"，不是漏写 |
+
+### 验证
+
+- 全量 `pytest tests -q`：**通过**（新增 4 个用例：3 个设置闸门 + 1 个书库回归）；
+- 源码自检 **17/17**；六板块冒烟 **全部 true**；GUI 冒烟通过；
+- 打包 v2.2.0（代码已含本轮修复）：onedir **381.8 MB** / 安装包 **152.6 MB**，
+  exe 模块核验 **40 项全命中**；
+- 装完真跑：dist 产物板块冒烟八键全 true、能力自检 **17/17**、
+  真实启动标题含 `v2.2.0`。
+  （安装包本轮被 Smart App Control 拦截，改用同一份 dist 产物验证，内容等价。）
+
 ## v2.2.0 — 性能与体积优化（启动 · 数据库 · 解密 · 包体）
 
 > 这一版**没有新功能**，全是实测出来的性能问题。每一条都有改动前后的数字。

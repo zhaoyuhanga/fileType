@@ -69,10 +69,15 @@ def video_download_dir_pref() -> str:
 
 
 def video_auto_switch_pref() -> bool:
-    value = video_settings().value("video/auto_switch", True)
-    if isinstance(value, bool):
-        return value
-    return str(value).lower() not in ("false", "0", "no", "")
+    """是否开启"卡顿自动换源"。
+
+    **必须显式 `type=bool`**：QSettings 存的是字符串，不指定类型时
+    `False` 会读回 `'false'` —— 而 `'false'` 在布尔判断里是**真值**，
+    于是"关闭自动换源"会被读成"开启"。设置页 `video.py` 那边本来就用了
+    `type=bool`，这里之前靠外层 `str(value).lower() not in (...)` 兜底，
+    能用但脆弱（任何新取值都会悄悄变成 True），统一改为显式类型。
+    """
+    return bool(video_settings().value("video/auto_switch", True, type=bool))
 
 
 # --------------------------------------------------------------------------- 图片代理（V3-f）

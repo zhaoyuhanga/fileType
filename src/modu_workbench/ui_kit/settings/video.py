@@ -332,7 +332,12 @@ class VideoSettingsPage(SettingsPage):
 
         removed = media_proxy.get_cache().clear()
         self._refresh_cache_usage()
-        self._settings.setValue("video/cache_cleared_mb", removed // 1048576)
+        # `setValue("video/cache_cleared_mb", ...)` 已删除：全仓无人读取（死键）。
+        # 改成把"这次清了多少"写进缓存用量标签 —— 清完没有反馈会让人以为没生效。
+        if removed > 0:
+            self._cache_usage.setText(
+                f"已清理 {removed / 1048576:.0f} MB｜" + self._cache_usage.text()
+            )
 
     def _refresh_cache_usage(self) -> None:
         from modu_workbench.services import media_proxy

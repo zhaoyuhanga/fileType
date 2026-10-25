@@ -724,10 +724,10 @@ class VideoPlayerDialog(QDialog):
         try:
             from PySide6.QtCore import QSettings
 
-            return int(
-                QSettings("ModuWorkbench", "modu-workbench").value("video/subtitle_font_size", 22)
-                or 22
-            )
+            # 显式 type=int：不指定时 QSettings 会把 int 读回字符串，
+            # 现在靠外层 int() 兜住了，但统一成显式类型更稳（也更快）。
+            return QSettings("ModuWorkbench", "modu-workbench").value(
+                "video/subtitle_font_size", 22, type=int) or 22
         except Exception:  # noqa: BLE001
             return 22
 

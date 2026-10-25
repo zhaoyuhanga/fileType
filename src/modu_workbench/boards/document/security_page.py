@@ -398,7 +398,9 @@ class SecurityPanel(QWidget):
             bool(settings.value("document/mask_before_upload", True, type=bool)))
         self._max_chars.setValue(int(settings.value("document/max_chars", 20000) or 20000))
         self._allowed_models.setText(str(settings.value("document/allowed_models", "") or ""))
-        price = settings.value("document/price_per_1k", 0.0)
+        # 显式 type=float：不指定时 QSettings 返回字符串，
+        # `"" if not price` 对 '0.0' 会判成"有值"从而显示 0.0，与"未设置"混淆。
+        price = settings.value("document/price_per_1k", 0.0, type=float) or 0.0
         self._price.setText("" if not price else str(price))
         self._watermark_text.setText(str(settings.value("document/watermark_text", "") or ""))
         self._watermark_footer.setText(str(settings.value("document/watermark_footer", "") or ""))

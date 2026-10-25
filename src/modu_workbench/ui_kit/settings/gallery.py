@@ -152,7 +152,14 @@ class GallerySettingsPage(SettingsPage):
     def _clear_cache(self) -> None:
         removed = self._library.thumbs.clear_disk()
         self._refresh_cache_label()
-        self._settings.setValue("gallery/cache_cleared", removed)
+        # 原来这里还有一句 `setValue("gallery/cache_cleared", removed)`：
+        # 全仓没有任何地方读它（死键，只会在注册表里堆垃圾），已删。
+        # 用户真正需要的是"清掉了多少"的反馈；0 字节时不要显示"已清理 -"。
+        used = format_size(self._library.thumbs.disk_usage())
+        if removed > 0:
+            self._cache_label.setText(f"已清理 {format_size(removed)}｜当前 {used}")
+        else:
+            self._cache_label.setText(f"{used}（本来就没有缓存可清）")
 
     def _refresh_cache_label(self) -> None:
         used = self._library.thumbs.disk_usage()
