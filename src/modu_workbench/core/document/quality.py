@@ -29,10 +29,16 @@ _REPEATED_PUNCT = re.compile(r"[，。！？；：]{2,}")
 _SPACES_AROUND_CN = re.compile(r"[\u4e00-\u9fff]\s+[\u4e00-\u9fff]")
 _SENTENCE_SPLIT = re.compile(r"[。！？!?；;\n]+")
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*%?")
-_GOAL_STOPWORDS = {
-    "把", "的", "了", "和", "与", "并", "为", "成", "这份", "文档", "内容", "进行", "一下",
-    "请", "让", "文档", "优化", "美化", "统一", "生成", "整理", "一下", "更加", "更",
-}
+#: 目标描述里的虚词/指令词：提取实词时把它们当分隔符切掉。
+#: 中文没有空格，不做切分会退化成"整句当一个词"（见 goal_keywords 注释）。
+_GOAL_STOPWORDS: frozenset[str] = frozenset({
+    "一下", "一些", "一点", "与", "为", "了", "优化", "内容",
+    "可以", "和", "尽量", "希望", "帮忙", "帮我", "并", "应该",
+    "成", "把", "把它", "整理", "文档", "更", "更加", "比较",
+    "特别", "生成", "的", "程度", "统一", "美化", "能否", "要求",
+    "让", "请", "这些", "这份", "这段", "这里", "进行", "那些",
+    "那篇", "那里", "部分", "需要", "非常",
+})
 
 
 def _text_blocks(ir: DocumentIR) -> list[str]:
@@ -163,16 +169,39 @@ def analyze_document(ir: DocumentIR) -> dict:
 
 
 def goal_keywords(goal: str) -> list[str]:
-    """目标里的关键词（去掉"美化/优化"这类指令词后的实词）。"""
-    tokens = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{3,}", goal or "")
+    """从目标描述里提取实词（用于"目标匹配度"打分）。
+
+    ## 为什么要按停用词切分，而不是直接抓连续中文
+
+    中文没有空格，`re.findall(r"[\u4e00-\u9fff]{2,}")` 会把**整句**贪婪地
+    匹配成一个 token：
+
+        goal_keywords("请帮我优化一下这段文字的正式程度")
+        → ['请帮我优化一下这段文字的正式程度']        # 一个词都没切
+
+    这样"目标匹配"就退化成拿整句去正文里找子串，几乎永远匹配不上，
+    分数恒低、毫无参考价值（这也是用户觉得"目标匹配度没用"的原因）。
+
+    现在改用**停用词当分隔符**：把"请/帮我/一下/这段/的/程度"这类虚词
+    从原句里切掉，剩下的连续中文片段才是实词。零依赖，且对短目标效果好。
+    """
+    text = goal or ""
+    if not text.strip():
+        return []
+
+    # 1) 用停用词（长的优先，避免"帮我"被"我"先切坏）作为分隔符
+    stopwords = sorted(_GOAL_STOPWORDS, key=len, reverse=True)
+    pattern = "|".join(re.escape(word) for word in stopwords) if stopwords else None
+    segmented = re.sub(pattern, "\n", text) if pattern else text
+
+    # 2) 从剩下的片段里取连续的实词段
     keywords: list[str] = []
-    for token in tokens:
-        if token in _GOAL_STOPWORDS:
-            continue
-        if token not in keywords:
+    for chunk in segmented.splitlines():
+        for token in re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{3,}", chunk):
+            if token in _GOAL_STOPWORDS or token in keywords:
+                continue
             keywords.append(token)
     return keywords
-
 
 def heuristic_score(ir: DocumentIR, goal: str = "", *,
                     before: Optional[DocumentIR] = None) -> QualityScore:

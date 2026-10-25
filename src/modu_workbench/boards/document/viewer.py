@@ -1088,30 +1088,86 @@ class DocViewer(QWidget):
     # ---------------------------------------------------------------- 体检与版本
 
     def _show_health(self) -> None:
+        """文档体检：结构 / 语言 / 五维质量 + 可选的目标匹配。
+
+        **为什么要问目标**：`heuristic_score` 的目标匹配度依赖 goal，
+        不传时这一维恒为满分 —— 用户看到"目标匹配度 100"会以为文档完全
+        符合要求，其实根本没评估过。目标输入原来只在「循环美化」页有，
+        而体检是更常用的入口，所以这里也问一句（可留空）。
+        """
         ir = self.current_ir()
         if ir is None:
             return
+
+        goal = self._ask_health_goal()
+        if goal is None:            # 用户取消
+            return
+
         analysis = analyze_document(ir)
-        score = heuristic_score(ir)
+        score = heuristic_score(ir, goal)
         lines = [
             f"结构：{analysis['blocks']} 块 / 标题 {analysis['headings']} / "
             f"表格 {analysis['tables']} / 段落 {analysis['paragraphs']}",
             f"语言：{analysis['language']}；平均句长 {analysis['avg_sentence_length']} 字；"
             f"超长句 {analysis['long_sentences']} 个",
-            f"质量：{score.summary()}",
-            "",
-            "问题清单：",
         ]
+        if goal:
+            lines.append(f"目标：{goal}")
+        lines.append(f"质量：{self._score_line(score, goal)}")
+        lines.append("")
+        lines.append("问题清单：")
         lines.extend(f"· {item}" for item in analysis["issues"] or ["（没有发现明显问题）"])
         if score.notes:
             lines.append("")
             lines.append("评分说明：")
             lines.extend(f"· {note}" for note in score.notes)
+        if not goal:
+            lines.append("")
+            lines.append("提示：未填写目标，所以没有评估「目标匹配度」。"
+                         "再点一次体检并填写目标（例如「统一为正式公文风格」）即可评估。")
+
         dialog = QMessageBox(self)
         dialog.setWindowTitle("文档体检")
         dialog.setText("\n".join(lines))
         dialog.exec()
-        W.note(self._task, f"文档体检：{score.summary()}")
+        W.note(self._task, f"文档体检：{self._score_line(score, goal)}")
+
+    @staticmethod
+    def _score_line(score, goal: str) -> str:  # noqa: ANN001
+        """汇总一行评分；没给目标时把"目标匹配度"换成"未评估"。
+
+        `score.summary()` 会把五个维度都写出来，不填目标时那一维是 100，
+        容易误导，所以这里自己拼。
+        """
+        if goal:
+            return score.summary()
+        percents = (
+            f"格式一致性 {score.format_consistency * 100:.0f} · "
+            f"语言质量 {score.language_quality * 100:.0f} · "
+            f"可读性 {score.readability * 100:.0f} · "
+            f"事实一致性 {score.factual_consistency * 100:.0f} · "
+            f"目标匹配度 未评估"
+        )
+        total = (
+            score.format_consistency + score.language_quality + score.readability
+            + score.factual_consistency
+        ) / 4 * 100
+        return f"总分 {total:.0f}（{percents}）"
+
+    def _ask_health_goal(self) -> Optional[str]:
+        """问一句体检目标。返回 `None` 表示用户取消，空串表示"不设目标"。"""
+        from PySide6.QtWidgets import QInputDialog
+
+        goal, accepted = QInputDialog.getText(
+            self,
+            "文档体检",
+            "这次体检有具体目标吗？（可留空）\n"
+            "填了会额外评估「目标匹配度」，并列出未覆盖的关键词。",
+            text="",
+        )
+        if not accepted:
+            return None
+        return (goal or "").strip()
 
     def _show_versions(self) -> None:
         ir = self.current_ir()

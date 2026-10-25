@@ -12,7 +12,7 @@ tests/
 ```
 
 运行：`python -m pytest tests -q`（详见 `docs/TESTING.md`）。
-当前规模：**72 个文件 / 980 个用例 / 约 1.8 分钟**。
+当前规模：**77 个文件 / 1057 个用例 / 约 2 分钟**。
 
 ## architecture/ —— 这些闸门在守什么
 
