@@ -134,13 +134,19 @@ class Storage(SqliteStore):
             return cur.lastrowid
 
     def list_history(self, book_id: Optional[int] = None, limit: int = 200) -> List[HistoryEntry]:
+        """历史记录，最近打开的在前。
+
+        `opened_at` 是**秒级**时间戳：同一秒内打开两本书时，单靠它排序结果不确定
+        （SQLite 不保证稳定顺序），用户快速切换书籍会看到历史乱序。
+        所以补一个 `id DESC` 作为次级排序键 —— 自增 id 天然反映插入顺序。
+        """
         with self._lock:
             if book_id is None:
                 rows = self._conn.execute(
                     """SELECT h.id, h.book_id, b.title AS book_title,
                               h.chapter_index, h.chapter_title, h.opened_at, h.action
                        FROM book_history h JOIN book_books b ON b.id = h.book_id
-                       ORDER BY h.opened_at DESC LIMIT ?""",
+                       ORDER BY h.opened_at DESC, h.id DESC LIMIT ?""",
                     (limit,),
                 ).fetchall()
             else:
@@ -149,7 +155,7 @@ class Storage(SqliteStore):
                               h.chapter_index, h.chapter_title, h.opened_at, h.action
                        FROM book_history h JOIN book_books b ON b.id = h.book_id
                        WHERE h.book_id = ?
-                       ORDER BY h.opened_at DESC LIMIT ?""",
+                       ORDER BY h.opened_at DESC, h.id DESC LIMIT ?""",
                     (book_id, limit),
                 ).fetchall()
         return [

@@ -45,6 +45,9 @@ $env:MODU_CHECK_DEPS="$env:TEMP\check.json"; .venv\Scripts\python.exe -m modu_wo
 
 ## 5. 每板块冒烟清单（发版前手动过一遍）
 
+> 书库板块的自动化覆盖在 v2.2.0 补齐：`test_online_source.py`（在线源解析 20 例）与
+> `test_book_storage_edges.py`（存储边界 21 例），补测时发现并修掉了历史排序不稳定。
+
 > v2.0.0 已移除第七板块「墨软动漫」：本清单同步删除对应条目。
 > 动漫类内容请走「墨软影视」的类型筛选（电影/电视剧/动漫/综艺）。
 >

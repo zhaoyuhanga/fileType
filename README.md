@@ -551,6 +551,7 @@ docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / 
 | 我想… | 看这份 |
 | --- | --- |
 | 装上就能用 | 本文件「快速开始」 |
+| **学会怎么用**（读书/转换/听歌/看片/管照片/处理文档） | **`docs/USER_GUIDE.md`**（按"我想做 X"组织，含每个板块的诚实边界） |
 | 出问题了 | **`docs/TROUBLESHOOTING.md`**（按症状查，都是真实发生过的） |
 | 改代码 | **`docs/CONTRIBUTING.md`**（环境、五个环境变量、加板块的 8 步、三条最容易踩的坑） |
 | 搞懂结构 | **`docs/ARCHITECTURE.md`**（依赖规则 + 三个"看起来像死代码但必须存在"的例外） |
