@@ -27,7 +27,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from . import enhance as enhance_mod
 from .models import EditStep
-from modu_workbench.core.platform.logging import swallow
+from modu_workbench.core.platform.logging import debug, swallow
 
 # 滤镜预设：名称 → (显示名, 处理函数)
 FILTERS: dict[str, tuple[str, object]] = {}
@@ -328,6 +328,11 @@ def apply_step(image: Image.Image, step: EditStep) -> Image.Image:
             return image
         return enhance_mod.apply_enhancement(ai_kind, image, params.get("params") or {})
 
+    # 未识别的步骤：**不能抛异常**（一抛整个编辑栈就崩、用户的其它改动全丢），
+    # 但也必须留痕 —— 否则"点了没反应"根本无从排查。
+    # 典型来源：撤销栈里存了旧版本写下的步骤名（版本不兼容）。
+    if kind:
+        debug(f"未识别的编辑步骤（已跳过）: {kind!r}")
     return image
 
 

@@ -14,7 +14,9 @@ _NOISE = re.compile(
     re.IGNORECASE,
 )
 _BRACKETS = re.compile(r"[（(\[【].*?[)）\]】]")
-_NON_WORD = re.compile(r"[\s\-_·、,，.。'\"!！?？:：/\\|+&]+")
+#: 标点（含中文书名号《》〈〉与引号「」『』）。
+#: 歌名里常写成「《稻香》」，不剥掉就永远和「稻香」匹配不上 —— 实测发现。
+_NON_WORD = re.compile(r"[\s\-_·、,，.。'\"!！?？:：/\\|+&《》〈〉「」『』]+")
 _ARTIST_SPLIT = re.compile(r"[、,，/&;；]|feat\.?|ft\.?", re.IGNORECASE)
 
 
@@ -85,10 +87,15 @@ def match_score(original: RemoteTrack, candidate: RemoteTrack) -> float:
 
 def best_match(original: RemoteTrack, candidates: list[RemoteTrack],
                threshold: float = 0.62) -> RemoteTrack | None:
-    """在候选里挑最像 original 的一首；低于阈值视为没找到。"""
+    """在候选里挑最像 original 的一首；低于阈值视为没找到。
+
+    `candidates` 允许传 `None`：换源时"没有可用候选源"是正常情况
+    （全部源都被禁用 / 都在降级），此时应返回 `None` 让调用方走"没换到"的分支，
+    而不是抛 `TypeError` 把整个换源流程打断。
+    """
     best: RemoteTrack | None = None
     best_score = 0.0
-    for candidate in candidates:
+    for candidate in candidates or ():
         score = match_score(original, candidate)
         if score > best_score:
             best, best_score = candidate, score
