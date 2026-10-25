@@ -160,9 +160,12 @@ class LlmSettingsPage(SettingsPage):
         self._form.addRow("API Key", self._api_key)
 
         self._model = QLineEdit()
+        # 模型名是最容易填错的一栏（各家叫法完全不同），给两个真实例子
+        self._model.setPlaceholderText("如 deepseek-chat / gpt-4o-mini / qwen-plus")
         self._form.addRow("模型名", self._model)
 
         self._vision_model = QLineEdit()
+        self._vision_model.setPlaceholderText("留空表示不启用图片能力")
         self._vision_model.setToolTip("图片类型用它调用；文本类型留空即可")
         self._form.addRow("多模态模型名", self._vision_model)
 

@@ -204,6 +204,7 @@ class DocumentSettingsPage(SettingsPage):
 
         self._plugin_dir_field = QLineEdit()
         self._plugin_dir_field.setReadOnly(True)
+        self._plugin_dir_field.setPlaceholderText("未启用插件目录")
         plugin_row = QHBoxLayout()
         plugin_row.addWidget(self._plugin_dir_field, 1)
         open_plugin_dir = QPushButton("打开插件目录")

@@ -253,6 +253,32 @@ except sqlite3.Error as error:                 # 只吞得起的类型
 设置项多的页面（图库/大模型）在 560px 高的窗口里会把内容撑高，
 不套滚动区就会把按钮顶出可视区域 —— 用户根本点不到保存。
 
+### 设置改了之后怎么让板块立刻生效
+
+`SettingsPage.save()` 只负责"把控件值写回存储"。**它不会通知任何人** ——
+所以历史上存在"在设置里换了目录/开关，已经打开的板块仍用旧值，要重启才生效"
+的问题（用户的感受是"改了没用"）。
+
+现在 `ui_kit/settings/base.py` 提供一个**模块级广播**：
+
+```python
+from modu_workbench.ui_kit.settings.base import subscribe_settings_changed
+
+subscribe_settings_changed(self._on_settings_changed, owner=self)   # owner 销毁时自动退订
+```
+
+- 设置对话框保存完成后，对**每个 `save()` 返回 True 的页**发一次
+  `notify_settings_changed(page_key)`；
+- 订阅方拿到的是**页 key**（`"video"` / `"book"` / `"general"`…），自己决定要不响应；
+- 一张页没改动就不会广播（避免无谓刷新）。
+
+两个实现细节值得记住（都是写测试时当场暴露的）：
+
+1. **退订身份要用"持有人"而不是 bound method**：`obj.method is obj.method`
+   为 `False`，只存 callback 会让退订永远失效。实现里用 `__self__` 取持有人；
+2. **订阅方抛异常不能中断广播**：一个板块的 bug 不能让"设置存不进去"。
+   广播循环里逐个 `swallow()` 兜住。
+
 ## 行为对齐清单（fileType → Python）
 
 - 批量任务队列：实时进度 / 取消 / 状态本地化 / Toast 统一提示；

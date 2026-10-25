@@ -84,6 +84,7 @@ class VideoSettingsPage(SettingsPage):
         form.setSpacing(10)
 
         self._download_dir = QLineEdit()
+        self._download_dir.setPlaceholderText("留空则用默认下载目录")
         pick = QPushButton("选择…")
         pick.clicked.connect(self._pick_dir)
         row = QHBoxLayout()

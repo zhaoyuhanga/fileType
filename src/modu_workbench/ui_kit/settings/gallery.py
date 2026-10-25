@@ -45,6 +45,7 @@ class GallerySettingsPage(SettingsPage):
 
         # ---- 目录 ----
         self._import_dir = QLineEdit()
+        self._import_dir.setPlaceholderText("留空则在导入时每次询问")
         import_row = QHBoxLayout()
         import_row.addWidget(self._import_dir, 1)
         pick = QPushButton("选择…")

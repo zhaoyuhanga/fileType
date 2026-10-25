@@ -169,12 +169,23 @@ class SettingsDialog(QDialog):
 
     def _save(self) -> None:
         changed = False
-        for page in self._pages.values():
+        saved_keys: list[str] = []
+        for key, page in self._pages.items():
             try:
-                changed = page.save() or changed
+                if page.save():
+                    changed = True
+                    saved_keys.append(key)
             except Exception as error:  # noqa: BLE001  单页保存失败不影响其它页
                 self._hint.setText(f"部分设置保存失败：{error}")
         self._settings.sync()
+
+        # 广播"哪些页真的改了"，让已经打开的板块立刻生效
+        # （原来是写进 QSettings 就结束，板块要重启才读到新值）
+        from .base import notify_settings_changed
+
+        for key in saved_keys:
+            notify_settings_changed(key)
+
         self.accept()
 
 

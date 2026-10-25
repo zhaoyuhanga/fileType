@@ -86,6 +86,18 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer
 - **新增依赖要极其克制**：目前 18 个运行时依赖，都是"不做就得自己写 500 行"的那种
   （例如 AES 解密刻意用纯 Python 实现，就是为了不给用户增加依赖）。
 
+## 5.5 新设置项改完要能立刻生效
+
+设置页 `save()` 只是写存储。要让已经打开的板块立刻反映，用广播：
+
+```python
+from modu_workbench.ui_kit.settings.base import subscribe_settings_changed
+
+subscribe_settings_changed(self._on_settings_changed, owner=self)   # 记得传 owner
+```
+
+不传 `owner` 的话，控件销毁后回调还在，会打到已删除对象上（崩溃）。
+
 ## 6. 三条最容易踩的坑
 
 1. **写了 `except Exception: pass`** → 静默失败，用户和你都看不到。用 `swallow()`。
