@@ -86,7 +86,7 @@ class ImageStorage(SqliteStore):
                     ),
                 )
                 image_id = int(cur.lastrowid)
-            self._conn.commit()
+            self._commit()
         return image_id
 
     def get_image(self, image_id: int) -> Optional[ImageItem]:
@@ -238,7 +238,7 @@ class ImageStorage(SqliteStore):
                     "DELETE FROM gallery_album_items WHERE album_id = ? AND image_id = ?",
                     [(fav_id, i) for i in ids],
                 )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def toggle_favorite(self, image_id: int) -> bool:
@@ -258,7 +258,7 @@ class ImageStorage(SqliteStore):
             self._conn.executemany(
                 "UPDATE gallery_images SET rating = ? WHERE id = ?", [(rating, i) for i in ids]
             )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def update_ai_fields(self, image_id: int, *, tags: str = "", caption: str = "") -> None:
@@ -267,14 +267,14 @@ class ImageStorage(SqliteStore):
                 "UPDATE gallery_images SET ai_tags = ?, ai_caption = ? WHERE id = ?",
                 (tags, caption, int(image_id)),
             )
-            self._conn.commit()
+            self._commit()
 
     def mark_opened(self, image_id: int) -> None:
         with self._lock:
             self._conn.execute(
                 "UPDATE gallery_images SET last_opened_at = ? WHERE id = ?", (int(time.time()), image_id)
             )
-            self._conn.commit()
+            self._commit()
 
     def delete_images(self, image_ids: Iterable[int]) -> int:
         ids = list(image_ids)
@@ -282,7 +282,7 @@ class ImageStorage(SqliteStore):
             return 0
         with self._lock:
             self._conn.executemany("DELETE FROM gallery_images WHERE id = ?", [(i,) for i in ids])
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     # ---------- 相册 ----------
@@ -298,7 +298,7 @@ class ImageStorage(SqliteStore):
                 "INSERT INTO gallery_albums (name, kind, created_at) VALUES (?,?,?)",
                 (FAVORITE_ALBUM_NAME, "favorite", int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     @property
@@ -317,7 +317,7 @@ class ImageStorage(SqliteStore):
                 "INSERT INTO gallery_albums (name, kind, created_at) VALUES (?,?,?)",
                 (name, kind, int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def list_albums(self, include_favorite: bool = True) -> List[Album]:
@@ -361,7 +361,7 @@ class ImageStorage(SqliteStore):
         with self._lock:
             try:
                 self._conn.execute("UPDATE gallery_albums SET name = ? WHERE id = ?", (new_name, album_id))
-                self._conn.commit()
+                self._commit()
             except sqlite3.IntegrityError:
                 return False
         return True
@@ -373,7 +373,7 @@ class ImageStorage(SqliteStore):
             return False
         with self._lock:
             self._conn.execute("DELETE FROM gallery_albums WHERE id = ?", (album_id,))
-            self._conn.commit()
+            self._commit()
         return True
 
     def add_to_album(self, album_id: int, image_ids: Iterable[int]) -> int:
@@ -397,7 +397,7 @@ class ImageStorage(SqliteStore):
                 if cur.rowcount:
                     position += 1
                     added += 1
-            self._conn.commit()
+            self._commit()
         return added
 
     def remove_from_album(self, album_id: int, image_ids: Iterable[int]) -> int:
@@ -414,7 +414,7 @@ class ImageStorage(SqliteStore):
                 self._conn.executemany(
                     "UPDATE gallery_images SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
                 )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def list_album_images(self, album_id: int) -> List[ImageItem]:
@@ -429,7 +429,7 @@ class ImageStorage(SqliteStore):
     def set_album_cover(self, album_id: int, path: str) -> None:
         with self._lock:
             self._conn.execute("UPDATE gallery_albums SET cover_path = ? WHERE id = ?", (path, album_id))
-            self._conn.commit()
+            self._commit()
 
     # ---------- 标签 ----------
 
@@ -445,7 +445,7 @@ class ImageStorage(SqliteStore):
                 "INSERT INTO gallery_tags (name, color, source, use_count) VALUES (?,?,?,0)",
                 (name, color, source),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def list_tags(self, source: str = "") -> List[Tag]:
@@ -477,7 +477,7 @@ class ImageStorage(SqliteStore):
                 )
                 added += cur.rowcount or 0
             self._refresh_tag_counts()
-            self._conn.commit()
+            self._commit()
         return added
 
     def untag_images(self, image_ids: Iterable[int], tag_name: str) -> int:
@@ -494,7 +494,7 @@ class ImageStorage(SqliteStore):
                 [(i, tag_id) for i in ids],
             )
             self._refresh_tag_counts()
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def rename_tag(self, tag_id: int, new_name: str) -> bool:
@@ -504,7 +504,7 @@ class ImageStorage(SqliteStore):
         with self._lock:
             try:
                 self._conn.execute("UPDATE gallery_tags SET name = ? WHERE id = ?", (new_name, tag_id))
-                self._conn.commit()
+                self._commit()
             except sqlite3.IntegrityError:
                 return False
         return True
@@ -523,14 +523,14 @@ class ImageStorage(SqliteStore):
             )
             self._conn.execute("DELETE FROM gallery_tags WHERE id = ?", (source_id,))
             self._refresh_tag_counts()
-            self._conn.commit()
+            self._commit()
         return True
 
     def delete_tag(self, tag_id: int) -> bool:
         with self._lock:
             self._conn.execute("DELETE FROM gallery_tags WHERE id = ?", (tag_id,))
             self._refresh_tag_counts()
-            self._conn.commit()
+            self._commit()
         return True
 
     def image_tags(self, image_id: int) -> List[str]:
@@ -559,7 +559,7 @@ class ImageStorage(SqliteStore):
                        steps_json = excluded.steps_json, updated_at = excluded.updated_at""",
                 (int(image_id), payload, int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
 
     def load_edit_steps(self, image_id: int) -> List[EditStep]:
         with self._lock:
@@ -577,7 +577,7 @@ class ImageStorage(SqliteStore):
     def clear_edit_steps(self, image_id: int) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM gallery_edits WHERE image_id = ?", (int(image_id),))
-            self._conn.commit()
+            self._commit()
 
     # ---------- AI 任务 ----------
 
@@ -588,7 +588,7 @@ class ImageStorage(SqliteStore):
                    VALUES (?,?,?,?,?)""",
                 (int(image_id), kind, "pending", 0, int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def update_task(self, task_id: int, *, state: str = "", progress: int = -1,
@@ -615,7 +615,7 @@ class ImageStorage(SqliteStore):
         args.append(int(task_id))
         with self._lock:
             self._conn.execute(f"UPDATE gallery_ai_tasks SET {', '.join(sets)} WHERE id = ?", args)
-            self._conn.commit()
+            self._commit()
 
     def list_tasks(self, limit: int = 100) -> List[AiTask]:
         with self._lock:
@@ -632,7 +632,7 @@ class ImageStorage(SqliteStore):
     def clear_tasks(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM gallery_ai_tasks")
-            self._conn.commit()
+            self._commit()
 
 
     # ---------- helpers ----------

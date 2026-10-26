@@ -93,7 +93,7 @@ class VideoStorage(SqliteStore):
                     ),
                 )
                 video_id = int(cur.lastrowid)
-            self._conn.commit()
+            self._commit()
         return video_id
 
     def get_video(self, video_id: int) -> Optional[Video]:
@@ -188,7 +188,7 @@ class VideoStorage(SqliteStore):
             self._conn.executemany(
                 "UPDATE video_videos SET category = ? WHERE id = ?", [(category, i) for i in ids]
             )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def set_favorite(self, video_ids: Iterable[int], favorited: bool = True) -> int:
@@ -207,7 +207,7 @@ class VideoStorage(SqliteStore):
                        VALUES (?,?,?,?)""",
                     [(fav_id, i, 0, now) for i in ids],
                 )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def toggle_favorite(self, video_id: int) -> bool:
@@ -223,7 +223,7 @@ class VideoStorage(SqliteStore):
                     "DELETE FROM video_playlist_items WHERE playlist_id = ? AND video_id = ?",
                     (fav_id, video_id),
                 )
-                self._conn.commit()
+                self._commit()
         return target
 
     def delete_videos(self, video_ids: Iterable[int]) -> int:
@@ -233,7 +233,7 @@ class VideoStorage(SqliteStore):
         with self._lock:
             self._conn.executemany("DELETE FROM video_videos WHERE id = ?", [(i,) for i in ids])
             self._conn.executemany("DELETE FROM video_play_records WHERE video_id = ?", [(i,) for i in ids])
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def mark_played(self, video_id: int) -> None:
@@ -243,7 +243,7 @@ class VideoStorage(SqliteStore):
                 "UPDATE video_videos SET play_count = play_count + 1, last_played_at = ? WHERE id = ?",
                 (now, video_id),
             )
-            self._conn.commit()
+            self._commit()
 
     def update_duration(self, video_id: int, duration_ms: int) -> bool:
         if duration_ms <= 0:
@@ -268,7 +268,7 @@ class VideoStorage(SqliteStore):
                 "INSERT INTO video_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (FAVORITE_NAME, "favorite", int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     @property
@@ -287,7 +287,7 @@ class VideoStorage(SqliteStore):
                 "INSERT INTO video_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (name, kind, int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def list_playlists(self, include_favorite: bool = True) -> List[Playlist]:
@@ -329,7 +329,7 @@ class VideoStorage(SqliteStore):
         with self._lock:
             try:
                 self._conn.execute("UPDATE video_playlists SET name = ? WHERE id = ?", (new_name, playlist_id))
-                self._conn.commit()
+                self._commit()
             except sqlite3.IntegrityError:
                 return False
         return True
@@ -340,7 +340,7 @@ class VideoStorage(SqliteStore):
             return False
         with self._lock:
             self._conn.execute("DELETE FROM video_playlists WHERE id = ?", (playlist_id,))
-            self._conn.commit()
+            self._commit()
         return True
 
     def add_to_playlist(self, playlist_id: int, video_ids: Iterable[int]) -> int:
@@ -364,7 +364,7 @@ class VideoStorage(SqliteStore):
                 if cur.rowcount:
                     position += 1
                     added += 1
-            self._conn.commit()
+            self._commit()
         return added
 
     def remove_from_playlist(self, playlist_id: int, video_ids: Iterable[int]) -> int:
@@ -381,7 +381,7 @@ class VideoStorage(SqliteStore):
                 self._conn.executemany(
                     "UPDATE video_videos SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
                 )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def list_playlist_videos(self, playlist_id: int) -> List[Video]:
@@ -419,7 +419,7 @@ class VideoStorage(SqliteStore):
                 (int(video_id), action, int(time.time()), episode_label,
                  quality, source, title),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def list_history(self, limit: int = 300, action: str = "") -> List[HistoryEntry]:
@@ -449,7 +449,7 @@ class VideoStorage(SqliteStore):
     def clear_history(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM video_history")
-            self._conn.commit()
+            self._commit()
 
     # ---------- 在线播放记录 ----------
 
@@ -466,7 +466,7 @@ class VideoStorage(SqliteStore):
                        source = excluded.source, updated_at = excluded.updated_at""",
                 (int(video_id), episode_label or "", quality or "", url, source or "", int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
 
     def get_play_record(self, video_id: int, episode_label: str = "") -> Optional[PlayRecord]:
         with self._lock:

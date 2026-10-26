@@ -62,7 +62,7 @@ class MusicStorage(SqliteStore):
                     ),
                 )
                 track_id = int(cur.lastrowid)
-            self._conn.commit()
+            self._commit()
         return track_id
 
     def get_track(self, track_id: int) -> Optional[Track]:
@@ -134,7 +134,7 @@ class MusicStorage(SqliteStore):
             self._conn.executemany(
                 "UPDATE music_tracks SET category = ? WHERE id = ?", [(category, i) for i in ids]
             )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def set_favorite(self, track_ids: Iterable[int], favorited: bool = True) -> int:
@@ -153,7 +153,7 @@ class MusicStorage(SqliteStore):
                        VALUES (?,?,?,?)""",
                     [(fav_id, i, 0, now) for i in ids],
                 )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def toggle_favorite(self, track_id: int) -> bool:
@@ -169,7 +169,7 @@ class MusicStorage(SqliteStore):
                     "DELETE FROM music_playlist_items WHERE playlist_id = ? AND track_id = ?",
                     (fav_id, track_id),
                 )
-                self._conn.commit()
+                self._commit()
         return target
 
     def delete_tracks(self, track_ids: Iterable[int]) -> int:
@@ -178,7 +178,7 @@ class MusicStorage(SqliteStore):
             return 0
         with self._lock:
             self._conn.executemany("DELETE FROM music_tracks WHERE id = ?", [(i,) for i in ids])
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def mark_played(self, track_id: int) -> None:
@@ -188,7 +188,7 @@ class MusicStorage(SqliteStore):
                 "UPDATE music_tracks SET play_count = play_count + 1, last_played_at = ? WHERE id = ?",
                 (now, track_id),
             )
-            self._conn.commit()
+            self._commit()
 
     # ---------- 歌单 ----------
 
@@ -203,7 +203,7 @@ class MusicStorage(SqliteStore):
                 "INSERT INTO music_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (FAVORITE_NAME, "favorite", int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     @property
@@ -222,7 +222,7 @@ class MusicStorage(SqliteStore):
                 "INSERT INTO music_playlists (name, kind, created_at) VALUES (?,?,?)",
                 (name, kind, int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def list_playlists(self, include_favorite: bool = True) -> List[Playlist]:
@@ -267,7 +267,7 @@ class MusicStorage(SqliteStore):
         with self._lock:
             try:
                 self._conn.execute("UPDATE music_playlists SET name = ? WHERE id = ?", (new_name, playlist_id))
-                self._conn.commit()
+                self._commit()
             except sqlite3.IntegrityError:
                 return False
         return True
@@ -278,7 +278,7 @@ class MusicStorage(SqliteStore):
             return False
         with self._lock:
             self._conn.execute("DELETE FROM music_playlists WHERE id = ?", (playlist_id,))
-            self._conn.commit()
+            self._commit()
         return True
 
     def add_to_playlist(self, playlist_id: int, track_ids: Iterable[int]) -> int:
@@ -302,7 +302,7 @@ class MusicStorage(SqliteStore):
                 if cur.rowcount:
                     position += 1
                     added += 1
-            self._conn.commit()
+            self._commit()
         return added
 
     def remove_from_playlist(self, playlist_id: int, track_ids: Iterable[int]) -> int:
@@ -320,7 +320,7 @@ class MusicStorage(SqliteStore):
                 self._conn.executemany(
                     "UPDATE music_tracks SET favorited = 0 WHERE id = ?", [(i,) for i in ids]
                 )
-            self._conn.commit()
+            self._commit()
         return len(ids)
 
     def list_playlist_tracks(self, playlist_id: int) -> List[Track]:
@@ -355,7 +355,7 @@ class MusicStorage(SqliteStore):
                      remote.category, now),
                 )
                 added += cur.rowcount or 0
-            self._conn.commit()
+            self._commit()
         return added
 
     def list_playlist_remotes(self, playlist_id: int) -> List[RemoteTrack]:
@@ -384,7 +384,7 @@ class MusicStorage(SqliteStore):
                 "DELETE FROM music_playlist_remotes WHERE playlist_id = ? AND remote_key = ?",
                 [(playlist_id, key) for key in keys],
             )
-            self._conn.commit()
+            self._commit()
         return len(keys)
 
     # ---------- 历史 ----------
@@ -395,7 +395,7 @@ class MusicStorage(SqliteStore):
                 "INSERT INTO music_history (track_id, action, played_at) VALUES (?,?,?)",
                 (track_id, action, int(time.time())),
             )
-            self._conn.commit()
+            self._commit()
             return int(cur.lastrowid)
 
     def list_history(self, limit: int = 300) -> List[HistoryEntry]:
@@ -419,7 +419,7 @@ class MusicStorage(SqliteStore):
     def clear_history(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM music_history")
-            self._conn.commit()
+            self._commit()
 
 
     # ---------- helpers ----------

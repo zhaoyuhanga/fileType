@@ -69,7 +69,7 @@ class Storage(SqliteStore):
                     (path, title, author, fmt, now),
                 )
                 book_id = cur.lastrowid
-            self._conn.commit()
+            self._commit()
             return book_id
 
     def list_books(self) -> List[BookRecord]:
@@ -100,7 +100,7 @@ class Storage(SqliteStore):
     def delete_book(self, book_id: int) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM book_books WHERE id = ?", (book_id,))
-            self._conn.commit()
+            self._commit()
 
     # ---------- reading position ----------
 
@@ -117,7 +117,7 @@ class Storage(SqliteStore):
                    WHERE id = ?""",
                 (now, chapter_index, offset_in_chapter, progress, book_id),
             )
-            self._conn.commit()
+            self._commit()
 
     # ---------- history ----------
 
@@ -130,7 +130,7 @@ class Storage(SqliteStore):
                    VALUES (?,?,?,?,?)""",
                 (book_id, chapter_index, chapter_title, now, action),
             )
-            self._conn.commit()
+            self._commit()
             return cur.lastrowid
 
     def list_history(self, book_id: Optional[int] = None, limit: int = 200) -> List[HistoryEntry]:
@@ -173,7 +173,7 @@ class Storage(SqliteStore):
                 self._conn.execute("DELETE FROM book_history")
             else:
                 self._conn.execute("DELETE FROM book_history WHERE book_id = ?", (book_id,))
-            self._conn.commit()
+            self._commit()
 
     # ---------- helpers ----------
 
