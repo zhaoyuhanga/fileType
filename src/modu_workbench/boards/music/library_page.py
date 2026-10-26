@@ -32,6 +32,7 @@ from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (
     ConvertWorker,
+    ImportWorker,
     PlaylistPicker,
     action_ids,
     ask_text,
@@ -121,6 +122,8 @@ class MusicLibraryPage(QWidget):
         self._library = library
         self._storage = storage
         self._task = task_bar
+        #: 后台导入线程（必须持引用：局部变量会被回收，线程还在跑 → 崩溃）
+        self._import_worker: ImportWorker | None = None
         self._fallback_status = QLabel("就绪。")
         self._player = player
         self._toaster = toaster
@@ -324,15 +327,41 @@ class MusicLibraryPage(QWidget):
         self._import([folder])
 
     def _import(self, paths: list[str]) -> None:
+        """批量导入曲目。
+
+        **必须放后台线程**：导入 1000 首要 5~15 秒（每首都要读元数据、算时长、写库），
+        原来在 UI 线程同步执行，这段时间整个窗口不响应 ——
+        用户会以为卡死，往往再点一次，于是导入两遍。
+        """
         files = scan_audio_files(paths)
         if not files:
             self._toaster.info("未找到可导入的音频文件")
             return
-        tracks = self._library.import_paths(files)
+        if self._import_worker is not None and self._import_worker.isRunning():
+            self._toaster.info("正在导入中，请等这一批完成")
+            return
+
+        worker = ImportWorker(self._library, files, parent=self)
+        self._import_worker = worker
+        worker.progressed.connect(
+            lambda done, total, message: self._report(message, done, total)
+        )
+        worker.finishedImport.connect(self._on_import_finished)
+        worker.failed.connect(self._on_import_failed)
+        worker.finished.connect(lambda: setattr(self, "_import_worker", None))
+        self._busy(f"正在导入 {len(files)} 个文件…")
+        worker.start()
+
+    def _on_import_finished(self, tracks: list) -> None:  # noqa: ANN001
+        """导入完成（在主线程执行，可以安全刷界面）。"""
         self.reload()
         self.libraryChanged.emit()
         self._toaster.success(f"已导入 {len(tracks)} 首")
-        self._report(f"已导入 {len(tracks)} 首（共扫描 {len(files)} 个文件）")
+        self._report(f"已导入 {len(tracks)} 首")
+
+    def _on_import_failed(self, reason: str) -> None:
+        self._idle("")
+        self._toaster.error(f"导入失败：{reason}")
 
     def _toggle_favorite(self) -> None:
         ids = action_ids(self._table)

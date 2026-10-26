@@ -31,6 +31,7 @@ from .models import (
 )
 from .sources import ResolvedPlay, SourceError, VideoRegistry, registry as default_registry
 from .storage import VideoStorage, remote_to_video
+from modu_workbench.core.platform.db import BATCH_SIZE
 from modu_workbench.core.platform.logging import swallow
 
 ProgressFn = Callable[[int, int, str], None]
@@ -188,15 +189,19 @@ class VideoLibrary:
         """导入文件/文件夹到影视库，返回新增或更新的条目。"""
         files = scan_video_files(paths)
         videos: list[Video] = []
-        # 一个事务批量写入：逐条提交会让每条 fsync 一次，
-        # 实测 3000 条从 4.3 秒降到 0.14 秒（31 倍）
-        with self.storage.transaction():
-            for index, file_path in enumerate(files, start=1):
-                video = self.build_video(file_path, category=category)
-                video.id = self.storage.upsert_video(video)
-                videos.append(video)
-                if on_progress:
-                    on_progress(index, len(files), f"已导入 {index}/{len(files)}：{video.display()}")
+        # 分批提交（见 `BATCH_SIZE` 的注释）：逐条 fsync 太慢，
+        # 一个大事务又会长时间持锁让界面查询卡住。
+        total = len(files)
+        for batch_start in range(0, total, BATCH_SIZE):
+            with self.storage.transaction():
+                for index in range(batch_start + 1, min(batch_start + BATCH_SIZE, total) + 1):
+                    video = self.build_video(files[index - 1], category=category)
+                    video.id = self.storage.upsert_video(video)
+                    videos.append(video)
+                    if on_progress:
+                        on_progress(
+                            index, total, f"已导入 {index}/{total}：{video.display()}"
+                        )
         return videos
 
     def import_and_copy(

@@ -15,6 +15,7 @@ from modu_workbench.core.platform.media import (
 
 from .models import AUDIO_EXTENSIONS, MUSIC_TARGETS, RemoteTrack, Track, parse_track_name
 from .storage import MusicStorage
+from modu_workbench.core.platform.db import BATCH_SIZE
 from modu_workbench.core.platform.logging import swallow
 
 ProgressFn = Callable[[int, int, str], None]
@@ -86,15 +87,18 @@ class MusicLibrary:
         """导入文件/文件夹到曲库，返回新增或更新的曲目。"""
         files = scan_audio_files(paths)
         tracks: list[Track] = []
-        # 一个事务批量写入：逐条提交会让每条 fsync 一次（实测 31 倍差距）
-        with self.storage.transaction():
-            for index, file_path in enumerate(files, start=1):
-                track = self.build_track(file_path, category=category)
-                track_id = self.storage.upsert_track(track)
-                track.id = track_id
-                tracks.append(track)
-                if on_progress:
-                    on_progress(index, len(files), f"已导入 {index}/{len(files)}：{track.display()}")
+        # 分批提交（见 `BATCH_SIZE` 的注释）：兼顾写入速度与界面响应
+        total = len(files)
+        for batch_start in range(0, total, BATCH_SIZE):
+            with self.storage.transaction():
+                for index in range(batch_start + 1, min(batch_start + BATCH_SIZE, total) + 1):
+                    track = self.build_track(files[index - 1], category=category)
+                    track.id = self.storage.upsert_track(track)
+                    tracks.append(track)
+                    if on_progress:
+                        on_progress(
+                            index, total, f"已导入 {index}/{total}：{track.display()}"
+                        )
         return tracks
 
     def import_and_copy(
