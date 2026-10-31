@@ -4,7 +4,9 @@
 > 现象与诊断见 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) 同名小节。
 
 > **现状**：CI 已就绪（`.github/workflows/build.yml`），仓库已确认公开，
-> 资质类条件全部满足。**下一步只剩「写 Code signing policy + 提交申请」**。
+> 资质类条件全部满足，Code signing policy 已写进 README。
+> **下一步只剩「开 MFA + 提交申请」**，材料见
+> [`SIGNPATH_APPLICATION.md`](SIGNPATH_APPLICATION.md)。
 
 ## 为什么必须签名
 
@@ -80,9 +82,12 @@ SignPath 不是 CA，也不会给你个人发证书。做法是：**证书签发
 2. ~~**补 CI**~~ ✅ **已完成**：`.github/workflows/build.yml` 会在 `windows-latest` 上
    跑「架构闸门 + 全量测试 → 下载 ffmpeg → PyInstaller 打包 → 无界面自检（17 项）
    → 压缩 → SHA256」并上传产物。这就是 SignPath 认可的可验证构建来源；
-3. **在 README 加 Code signing policy 段**（模板见下）；
-4. **开启 GitHub 与 SignPath 账号的 MFA**；
-5. **提交申请**：<https://signpath.org/apply>；
+3. ~~**在 README 加 Code signing policy 段**~~ ✅ **已完成**：
+   `README.md` 的 `## Code signing policy` 已包含 SignPath 要求的措辞、
+   团队角色与隐私政策；
+4. **开启 GitHub 与 SignPath 账号的 MFA**（需你本人操作，步骤见申请包「三」）；
+5. **提交申请**：<https://signpath.org/apply> —— 表单答案已备好，
+   见 [`SIGNPATH_APPLICATION.md`](SIGNPATH_APPLICATION.md)（可直接粘贴）；
 6. 通过后按 SignPath 文档建 Project、配置 artifact configuration
    （要求限制 `ProductName` / `ProductVersion`），并把签名步骤接进 CI；
 7. 每个发布版本在 SignPath 里**人工批准**一次。

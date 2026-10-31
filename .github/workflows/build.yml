@@ -241,6 +241,7 @@ jobs:
 
       # 失败也把日志传上来，便于排查（CI 上最常见的是 ffmpeg 下载失败）
       - name: 上传产物
+        id: upload          # 签名作业要读 steps.upload.outputs.artifact-id
         uses: actions/upload-artifact@v4
         if: always()
         with:

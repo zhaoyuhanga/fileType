@@ -4,6 +4,53 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 30. 备齐 SignPath 申请材料（先走通申请，再一起发版）
+
+#### README 加 `## Code signing policy`
+
+SignPath 的硬性条件之一是**项目首页必须有 Code signing policy 段**，且包含
+指定措辞 "Free code signing provided by SignPath.io, certificate by SignPath
+Foundation"，以及三个角色与隐私政策。已按要求写入。
+
+隐私声明是**核实过才写的**：
+
+- 全仓 grep `telemetry|analytics|sentry|crash_report|上报|埋点` → 无遥测
+  （两处"上报"是 UI 进度上报，无关）；
+- 联网端点全部是用户自行配置的可选服务（在线书源 / 影视 CMS / 音乐源 /
+  弹弹play / 大模型 API），默认完全离线；
+- 用户数据只存本机。
+
+两处措辞刻意做成**时效性正确**：
+
+| 位置 | 没写什么 | 为什么 |
+|---|---|---|
+| 签名状态 | 不写"申请已提交" | 还没提交；写成"正在申请…签名生效前发布物仍未签名" |
+| MFA | 不写"已启用" | 我无法核实账号状态；写成"承诺启用并保持" |
+
+#### 新增 `docs/SIGNPATH_APPLICATION.md`
+
+可直接照抄提交的申请包：10 项自检表、表单答案（含英文简介）、
+必须本人完成的两步（开 MFA、填表）、获批后的接入步骤
+（项目命名、artifact configuration 骨架含 metadata restrictions、
+secrets 名称、取消注释签名作业、验证命令）、发版流程、被拒后的四个备选。
+
+#### 修一个潜在 bug
+
+工作流里注释掉的 `sign` 作业引用了 `steps.upload.outputs.artifact-id`，
+但上传步骤**没有 `id: upload`** —— 一旦取消注释就会失败。已补上。
+
+#### 新增闸门 `tests/architecture/test_signing_docs.py`（7 条）
+
+SignPath 要求的这些内容**被删掉时不会有任何报错**，所以钉住：policy 段存在、
+含指定措辞、含三个角色、含隐私声明；以及一条**诚实性检查** ——
+签名未生效时不得断言"发布物已签名 / 签名已生效 / 已通过审核"。
+
+### 验证
+
+- `ruff check src tests`：All checks passed；
+- 全量 pytest：**通过**，**1201 个用例**（此前 1195）、90 文件。
+
+
 ### 28. CI 唯一失败用例的真因：预览渲染依赖真实 QSettings
 
 上一节修了退出崩溃，CI 仍红。靠临时加的"失败日志推分支"机制终于拿到真实报错：

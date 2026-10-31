@@ -595,6 +595,7 @@ docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / 
 | 调界面 | `docs/UI_GUIDE.md`（令牌唯一来源、组件、截图验收） |
 | 写/跑测试 | `docs/TESTING.md` + `tests/README.md`（**每个闸门守的是哪次事故**） |
 | 发版/打包 | `docs/RELEASE.md`（三级冒烟、体积基线、环境限制） |
+| **给发布物签名** | `docs/SIGNING.md`（三条路径对比）+ `docs/SIGNPATH_APPLICATION.md`（免费签名申请包，可直接粘贴） |
 | 改影视板块 | `docs/VIDEO_PLAN.md`（设计记录与"诚实边界"）+ `docs/BOARDS/video.md` |
 | 看某板块细节 | `docs/BOARDS/<板块>.md` |
 | 看调研依据 | `docs/research/README.md`（只保留仍在生效的那一份） |
@@ -614,6 +615,51 @@ docs/                          # ARCHITECTURE / DATABASE / UI_GUIDE / TESTING / 
 | M7 | 墨软影视板块（多源搜索下载 / 多清晰度播放器 / 分类收藏 / 播放历史 / 视频格式转换） | ✅ |
 | M8 | 墨软图库板块（本地相册 / 分类标签收藏 / 导入去重 / 美化编辑 / 本地增强）+ 设置按板块分区 | ✅ |
 | M9 | 墨软文档板块（查看编辑 / 格式美化 / 填充计算 / AI 模型与工具调用 / 两个文档合并 / AI 循环美化 / 权限脱敏审计） | ✅ |
+
+## Code signing policy
+
+本项目**申报了开源项目的免费代码签名**（[SignPath Foundation](https://signpath.org)）。
+签名能解决的问题见 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) 的
+「智能应用控制已阻止可能不安全的应用」，申请细节见
+[`docs/SIGNPATH_APPLICATION.md`](docs/SIGNPATH_APPLICATION.md)。
+
+> **状态**：正在申请 [SignPath Foundation](https://signpath.org) 的免费签名。
+> **签名生效之前，发布物仍为未签名**，用户侧处理见上面的故障排查文档。
+> 获批后此处会改为「已签名」，并把签名者信息写在这里。
+
+Free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org).
+
+### 团队角色
+
+单人维护项目，三个角色均由仓库所有者承担：
+
+| 角色 | 职责 | 成员 |
+|---|---|---|
+| Authors | 可直接改动源码 | [@zhaoyuhanga](https://github.com/zhaoyuhanga) |
+| Reviewers | 审阅外部贡献（PR） | [@zhaoyuhanga](https://github.com/zhaoyuhanga) |
+| Approvers | 决定某个发布版本是否可签名 | [@zhaoyuhanga](https://github.com/zhaoyuhanga) |
+
+所有参与签名流程的账号**承诺启用并保持多因素认证**（GitHub 与 SignPath 两侧）。
+
+### 隐私政策
+
+**本程序不会向其它联网系统传输任何信息，除非用户明确请求或由其配置。**
+
+具体地：
+
+- **默认完全离线**：阅读本地书籍、格式转换、图片处理、文档编辑等全部本地完成，
+  不发起任何网络请求；
+- **联网能力需用户显式启用并自行配置**，且只与用户配置的服务通信：
+  在线书源（用户填写的站点）、影视数据源（用户启用的 CMS 接口）、
+  在线音乐源（如 Audius / Jamendo / Internet Archive）、
+  弹幕（弹弹play，需用户自备 AppId）、
+  大模型（用户自填 API Key 与 Base URL，如 DeepSeek / OpenAI / Moonshot / SiliconFlow）；
+- **不含遥测、埋点、崩溃上报**：没有任何自动收集或回传用户数据的行为；
+- **用户数据只存在本机**：书库/乐库/影视/图库/文档的数据库与配置都在用户自己的
+  数据目录下，程序不向作者或第三方上传。
+
+第三方服务的隐私政策由各自提供方负责，用户启用对应功能时受其约束。
 
 ## 协议
 
