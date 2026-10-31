@@ -67,7 +67,7 @@ def test_new_profile_goes_to_the_end(storage: LlmStorage) -> None:
 
 
 def test_move_profile_changes_priority(storage: LlmStorage) -> None:
-    first = add(storage, name="A")
+    add(storage, name="A")
     second = add(storage, name="B")
     third = add(storage, name="C")
 

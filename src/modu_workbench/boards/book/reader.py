@@ -38,7 +38,6 @@ def _describe_load_error(error: BaseException, path: str) -> str:
     `FileNotFoundError(2, 'No such file or directory')` 这类东西，
     对用户没有行动价值。这里按最常见的几类给出**下一步该做什么**。
     """
-    from pathlib import Path as _Path
 
     if isinstance(error, KeyError):
         return "这本书的记录已不存在（可能刚被删除），请刷新书架。"

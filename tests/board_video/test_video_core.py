@@ -1530,7 +1530,7 @@ def test_download_hls_decrypts_aes128_without_ffmpeg(monkeypatch: pytest.MonkeyP
 
     playlist = (
         "#EXTM3U\n"
-        f'#EXT-X-KEY:METHOD=AES-128,URI="https://cdn/key.bin"\n'
+        '#EXT-X-KEY:METHOD=AES-128,URI="https://cdn/key.bin"\n'
         "#EXTINF:9.0,\nseg-1.ts\n#EXT-X-ENDLIST\n"
     )
 
@@ -1695,7 +1695,6 @@ def test_media_proxy_proxy_response_is_length_delimited(monkeypatch) -> None:  #
     import threading
     import urllib.request
 
-    from modu_workbench.services import media_proxy
     from modu_workbench.services import media_proxy
 
     monkeypatch.setenv("MODU_MEDIA_ALLOW_PRIVATE", "1")

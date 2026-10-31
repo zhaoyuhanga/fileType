@@ -615,7 +615,7 @@ class VideoBoardPage(QWidget):
 
     def _on_stall_detected(self, reason: str) -> None:
         """播放器报卡顿/起播超时 → 执行降档或换源（保留播放位置）。"""
-        from modu_workbench.core.video.abr import MAX_DOWNGRADES, next_lower, variant_label
+        from modu_workbench.core.video.abr import MAX_DOWNGRADES, variant_label
 
         remote = self._session_remote
         episode = self._session_episode
@@ -969,7 +969,7 @@ class VideoBoardPage(QWidget):
                 if item.message not in reasons:
                     reasons.append(item.message)
             summary += "；失败原因：" + "；".join(reasons)
-            summary += f"（可用「重试失败项」继续，已下载的分片不会重下）"
+            summary += "（可用「重试失败项」继续，已下载的分片不会重下）"
         self._task_bar.idle(summary)
         if ok:
             self._toaster.success(f"已下载 {len(ok)} 集，可在「我的视频」查看")

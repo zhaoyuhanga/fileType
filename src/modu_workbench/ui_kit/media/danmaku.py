@@ -383,7 +383,7 @@ def _escape(text: str) -> str:
 def to_danmaku_xml(items: list[DanmakuItem], *, chat_id: int = 0) -> str:
     """导出为标准弹幕 XML（可与主流播放器互导）。"""
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<i>",
-             f"  <chatserver>modu-workbench</chatserver>",
+             "  <chatserver>modu-workbench</chatserver>",
              f"  <chatid>{int(chat_id)}</chatid>",
              "  <mission>0</mission>", "  <maxlimit>99999</maxlimit>"]
     for item in sorted(items, key=lambda entry: entry.time_ms):

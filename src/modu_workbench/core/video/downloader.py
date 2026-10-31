@@ -822,7 +822,6 @@ def _localize_playlist(url: str, headers: dict) -> Path:
     """
     import tempfile
 
-    from modu_workbench.services import media_proxy
 
     text = _fetch_text(url, headers, timeout=20.0)
     rewritten = _proxy_playlist(text, url, headers)
@@ -945,7 +944,6 @@ def _run_ffmpeg_download(ffmpeg: str, args: list[str], target: Path, *,
         time.sleep(0.3)
 
     stop.set()
-    duration_ms = state["out_ms"]
     if process.returncode != 0:
         stderr = ""
         if process.stderr is not None:

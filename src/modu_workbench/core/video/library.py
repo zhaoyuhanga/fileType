@@ -385,7 +385,6 @@ class VideoLibrary:
             return resolved
         try:
             from .hls import list_qualities
-            from .sources.http import HttpClient
 
             provider = self.registry.get(resolved.source)
             client = _probe_client(provider)

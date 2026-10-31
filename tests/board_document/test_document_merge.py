@@ -241,7 +241,6 @@ def test_merge_with_ai_chat_callback() -> None:
 
     def chat(messages: list[dict]) -> str:
         calls.append(messages)
-        prompt = messages[-1]["content"]
         if "摘要" in messages[0]["content"]:
             return "1. 要点一"
         return "接下来是补充材料的内容。"

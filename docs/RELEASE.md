@@ -215,7 +215,7 @@ makensis（electron-builder 缓存里的 3.0.4.1）。
 | 已安装产物核对 | `__version__=2.0.0`；`ACTIVE_BOARDS` 恰好 6 个（book/convert/music/video/gallery/document）；副标题不含"动漫"；`import modu_workbench.core.anime` → `ModuleNotFoundError`（确认没被误打包） |
 | 静默卸载 `/S` | 退出码 0；安装目录、卸载注册表项、桌面与开始菜单快捷方式**全部清干净**；`modu.db` 用户数据保留 |
 
-> 全量 `pytest tests -q`：**1154 个用例全部通过**（`--collect-only` 计数；
+> 全量 `pytest tests -q`：**1195 个用例全部通过**（`--collect-only` 计数；
 > 删除了 `tests/board_anime/` 的 13 个文件后仍覆盖其余 6 个板块 + 平台层 + 架构闸门）。
 
 ### v1.1.0（历史记录）

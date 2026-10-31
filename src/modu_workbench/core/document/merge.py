@@ -43,6 +43,7 @@ from .models import (
     REVISION_INSERTED,
     REVISION_MODIFIED,
     TableData,
+    BeautifyOptions,
 )
 from modu_workbench.core.platform.logging import swallow
 
@@ -479,8 +480,7 @@ def merge_table_key(
         merged.header = True
     header = [cell.strip() for cell in merged.header_row()]
     other_header = [cell.strip() for cell in other.header_row()]
-    offset = len(header)
-    # 副表独有的列，接到主表右侧
+    # 副表独有的列，接到主表右侧（列号在下面 column_map 里现算，无需 offset）
     for index, name in enumerate(other_header):
         if name and name not in header:
             header.append(name)
@@ -537,7 +537,7 @@ def unify_terms(ir: DocumentIR, mapping: dict[str, str]) -> tuple[int, list[Chan
             hits += count
             changes.append(
                 Change(
-                    "术语统一", f"全文", f"「{old}」→「{new}」（{count} 处）", ai_generated=False
+                    "术语统一", "全文", f"「{old}」→「{new}」（{count} 处）", ai_generated=False
                 )
             )
     return hits, changes

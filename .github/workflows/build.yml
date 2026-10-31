@@ -58,6 +58,13 @@ jobs:
           pip install -e ".[dev,online]" 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
           exit $LASTEXITCODE
 
+      - name: 静态检查（ruff，最快，坏了立刻停）
+        shell: pwsh
+        run: |
+          "== ruff ==" | Out-File -FilePath $env:CI_LOG -Append -Encoding UTF8
+          python -m ruff check src tests 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          exit $LASTEXITCODE
+
       - name: 架构闸门（先跑快的，坏了立刻停）
         shell: pwsh
         env:

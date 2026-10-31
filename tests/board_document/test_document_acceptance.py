@@ -85,7 +85,7 @@ def test_acceptance_view_and_edit_core_formats(workspace: dict) -> None:
     ir = library.open_path(main)
     assert ir.headings() and ir.tables()
     ir.replace_text("整体表现良好", "整体表现优异")
-    saved = library.save(ir, main)
+    library.save(ir, main)   # 落盘（返回值未用）
     assert "整体表现优异" in main.read_text(encoding="utf-8")
 
     # Word：写出后可读回，且段落/标题结构保留

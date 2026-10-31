@@ -20,7 +20,9 @@ import os
 import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
+
+import requests
 
 from . import state
 from .cache import cache_key, get_cache
@@ -30,14 +32,10 @@ from .config import (
     MAX_PLAYLIST_BYTES,
     MAX_SEGMENT_BYTES,
     SEGMENT_MAX_AGE,
-    get_config,
 )
 from .fetch import identity_key, looks_like_playlist, read_all
 from .playlist import (
     cached_playlist,
-    hls_path,
-    image_path,
-    proxy_path,
     rewrite_playlist,
     store_playlist,
 )

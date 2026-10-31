@@ -9,10 +9,13 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List
+from typing import TYPE_CHECKING, Callable, Iterable, List
 from urllib.parse import urlsplit
 
 import requests
+
+if TYPE_CHECKING:  # ResolvedAudio 只出现在注解里（字符串注解，运行时不求值）
+    from .sources.base import ResolvedAudio
 
 from .models import RemoteTrack, safe_filename
 from modu_workbench.core.platform.media import probe_duration_ms

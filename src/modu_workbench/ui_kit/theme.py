@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from .tokens import (  # noqa: F401  对外沿用 ThemeTokens / TOKENS 名字
     CARD_PADDING,

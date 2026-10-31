@@ -354,7 +354,9 @@ def _split_by_blank_lines(text: str, min_blank: int = 2, max_chars: int = 5000) 
         else:
             chap_num += 1
             # 用段落第一行非空内容做标题(限 30 字)
-            first_line = next((l.strip() for l in lines[start_line: end_line] if l.strip()), "")
+            first_line = next(
+                (line_text.strip() for line_text in lines[start_line:end_line]
+                 if line_text.strip()), "")
             title = first_line[:30] if first_line else f"第{chap_num}段"
             chapters.append(Chapter(
                 title=title,
@@ -388,7 +390,8 @@ def _split_by_separator(text: str) -> List[Chapter]:
         body = "\n".join(lines[s: e]).strip()
         if not body:
             continue
-        first_line = next((l.strip() for l in lines[s: e] if l.strip()), "")
+        first_line = next(
+            (line_text.strip() for line_text in lines[s:e] if line_text.strip()), "")
         title = first_line[:30] if first_line else f"第{n}段"
         chapters.append(Chapter(
             title=title,

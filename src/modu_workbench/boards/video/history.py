@@ -146,7 +146,9 @@ class VideoHistoryPage(QWidget):
         action = self._action.currentData() or ""
         self._entries = self._storage.list_history(limit=400, action=action)
         self._table.setRowCount(len(self._entries))
-        for row, entry in enumerate(self._entries):
+        # 循环变量叫 row_index：`row` 是 modu_workbench.ui_kit 的布局助手，
+        # 用同名循环变量会遮蔽它（ruff F402），后续若在这个函数里调用 row() 就出事
+        for row_index, entry in enumerate(self._entries):
             values = [
                 entry.title,
                 entry.episode_label or "-",
@@ -160,7 +162,7 @@ class VideoHistoryPage(QWidget):
                 if index == 0:
                     item.setData(VIDEO_ID_ROLE, entry.video_id or None)
                     item.setToolTip(entry.path or entry.title)
-                self._table.setItem(row, index, item)
+                self._table.setItem(row_index, index, item)
         select_all(self._table, False)
         self._count.setText(f"共 {len(self._entries)} 条")
         # 有记录给表格，无记录给空状态（不留一张空表格）
@@ -182,7 +184,6 @@ class VideoHistoryPage(QWidget):
     def _row_menu(self, row: int) -> list[tuple[str, object]]:
         if not (0 <= row < len(self._entries)):
             return []
-        entry = self._entries[row]
         return [
             ("▶ 继续播放", lambda: self._play_action(row)),
             ("⬇ 下载这一集", lambda: self._download_action(row)),

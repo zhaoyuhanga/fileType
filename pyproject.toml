@@ -31,6 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "ruff>=0.6",          # 静态检查（只进开发依赖，不进运行时）
 ]
 # 在线书源可选的 UA 伪装依赖；未安装时自动回退到内置 UA 池（见 core/reader/online.py）
 online = [
@@ -44,3 +45,30 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 addopts = "-q"
+
+[tool.ruff]
+# 与 pyproject 的 requires-python 保持一致：语法必须能在 3.10 上通过
+target-version = "py310"
+line-length = 110
+exclude = ["build", "dist", ".venv", "src/modu_workbench.egg-info"]
+
+[tool.ruff.lint]
+# 只选**高信号**规则：语法错误、未定义名、未使用导入/变量、明显 bug
+# ——不启用 E501（行长）与 ANN/D/COM 这类风格规则，避免把项目刷成噪声。
+select = [
+    "E4",   # 导入相关
+    "E7",   # 语句层问题
+    "E9",   # 语法/运行时错误
+    "F",    # Pyflakes：未定义名、未使用导入、重复定义、无用变量
+    "W",    # 空白类警告
+]
+# 刻意**不启用**的两类，理由写在这里免得后人又来加：
+# - RUF100（失效 noqa）：全仓有 1500+ 处 `# noqa: BLE001` 等，对应规则并未启用。
+#   它们记录的是"这个宽捕获是故意的"这类**意图**，删掉是信息损失，所以不检查。
+# - I001（导入排序）：一次会重排上百个文件的导入顺序，风险（副作用顺序）大于收益。
+#
+# 另注：E501（行长）也不启用 —— 项目里长中文行很多，强制断行反而降低可读性。
+# 包内 __init__ 常见"再导出"，F401 在那里是设计意图
+[tool.ruff.lint.per-file-ignores]
+"src/modu_workbench/**/__init__.py" = ["F401"]
+"tests/**" = ["F401"]   # 测试里为副作用导入（如注册）是常见写法

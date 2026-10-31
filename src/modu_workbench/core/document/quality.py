@@ -298,7 +298,11 @@ def _signature(block) -> str:  # noqa: ANN001
         rows = block.table.normalized()
         head = " / ".join(rows[0]) if rows else ""
         return f"T[{block.table.name}]({len(rows)}行): {head}"
-    return f"{block.kind}: {re.sub(r'\\s+', '', block.text)[:200]}"
+    # 反斜杠不能出现在 f-string 的表达式里（**Python 3.10/3.11 是语法错误**，
+    # 只有 3.12 才允许）。pyproject 声明 requires-python >= 3.10，
+    # 所以必须先算好再插值。
+    squashed = re.sub(r"\s+", "", block.text)[:200]
+    return f"{block.kind}: {squashed}"
 
 
 def diff_irs(before: DocumentIR, after: DocumentIR, *, limit: int = 400) -> list[DiffLine]:

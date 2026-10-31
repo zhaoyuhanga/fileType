@@ -168,12 +168,12 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------ 保存
 
     def _save(self) -> None:
-        changed = False
+        # 只收集"真的改了"的页 key；是否整体有改动由 saved_keys 是否为空表达，
+        # 不再另设 changed 变量（曾经设了却没用上，ruff F841 指出）
         saved_keys: list[str] = []
         for key, page in self._pages.items():
             try:
                 if page.save():
-                    changed = True
                     saved_keys.append(key)
             except Exception as error:  # noqa: BLE001  单页保存失败不影响其它页
                 self._hint.setText(f"部分设置保存失败：{error}")

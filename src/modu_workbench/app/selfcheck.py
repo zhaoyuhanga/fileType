@@ -127,7 +127,8 @@ def run_checks(output_path: str) -> int:
 
         wav_path = ""
         try:
-            app = QApplication.instance() or QApplication([])
+            # 只要求 QApplication 存在（QMediaPlayer 需要），返回值本身用不上
+            QApplication.instance() or QApplication([])
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
                 wav_path = handle.name
             # 3 秒静音 WAV（纯 Python 生成，无需 ffmpeg；静音避免自检发声）
@@ -400,14 +401,11 @@ def run_checks(output_path: str) -> int:
         from modu_workbench.core.gallery import (
             EditStep,
             ImageLibrary,
-            ImageItem,
             ImageStorage,
             ai as _ai,
             apply_enhancement,
-            apply_steps,
             compute_quality_metrics,
             dhash_image,
-            hamming_distance,
         )
 
         with tempfile.TemporaryDirectory() as folder:

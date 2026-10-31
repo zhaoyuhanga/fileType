@@ -104,7 +104,6 @@ class ArchiveOrgVideoSource(VideoSource):
                 continue
             url = self.DOWNLOAD_URL.format(identifier=quote(video.remote_id, safe=""),
                                           name=quote(name, safe=""))
-            size = self._int(item.get("size"))
             episodes.append(Episode(
                 name=name,
                 url=url,

@@ -3,6 +3,25 @@
 > 目录约定见 `tests/README.md`；架构边界由 `tests/architecture/` 锁死；
 > 所有 UI 测试离屏运行（`QT_QPA_PLATFORM=offscreen`），数据目录隔离（`MODU_DATA_DIR`）。
 
+## 静态检查（ruff）
+
+```bash
+python -m ruff check src tests
+```
+
+规则集刻意收窄（`pyproject.toml` 的 `[tool.ruff.lint]`）——只留**高信号**项：
+`E4/E7/E9`（语法/导入）、`F`（未定义名、未使用导入与变量）、`W`（空白）。
+不启用 `E501`（长中文行）、`I001`（会重排上百文件）、`RUF100`（项目里
+1500+ 处 `# noqa: BLE001` 记录的是"宽捕获是故意的"这类意图，不该被当噪声清掉）。
+
+**它抓到的第一类真 bug**：5 个 `F821 undefined-name`，都是"只有特定操作才触发"
+的运行时崩溃 —— 例如文档页「导出模板」用了没导入的 `QFileDialog`。
+回归用例见 `tests/test_static_analysis_regressions.py`。
+
+另外 `target-version = "py310"` 还有一层作用：**防止写出 3.12 才支持的语法**
+（项目声明 `requires-python >= 3.10`）。实际就抓到过一处 f-string 里带反斜杠。
+
+
 ## 1. 分层
 
 | 目录 | 内容 | 是否依赖 Qt |

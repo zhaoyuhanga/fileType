@@ -403,8 +403,10 @@ def _write_docx(ir: DocumentIR, path: Path, options: BeautifyOptions,
     try:
         import docx as docx_lib
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
+        # 这两行只用于"确认 python-docx 的子模块存在"（缺失时会抛 ImportError
+        # 走下面的 WriteError），本函数体里并不直接调用，故标 noqa: F401
+        from docx.oxml import OxmlElement  # noqa: F401
+        from docx.oxml.ns import qn  # noqa: F401
         from docx.shared import Cm, Pt, RGBColor
     except ImportError as error:  # pragma: no cover - python-docx 是随包依赖
         raise WriteError("缺少 python-docx，无法导出 Word") from error
@@ -598,8 +600,6 @@ def _set_style_east_asian(style, cn: str) -> None:  # noqa: ANN001
 
 def _docx_table(document, table, options: BeautifyOptions) -> None:  # noqa: ANN001
     """表格美化：网格线 + 表头底纹 + 斑马纹（MR-DOC-301 第 4 条）。"""
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
     from docx.shared import Pt
 
     rows = table.normalized()
@@ -675,8 +675,6 @@ def _docx_toc(document, block) -> None:  # noqa: ANN001
 def _docx_header_footer(document, options: BeautifyOptions,
                         watermark: Optional[WatermarkOptions]) -> None:  # noqa: ANN001
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
 
     section = document.sections[0]
     header_text = options.header_text
@@ -863,7 +861,6 @@ def _apply_data_validation(sheet, table, openpyxl) -> list[str]:  # noqa: ANN001
 
     notes: list[str] = []
     applied = 0
-    rows = table.normalized()
     header = table.header_row()
     for column_index, name in enumerate(header, start=1):
         cells = _column_cells(sheet, column_index)

@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS music_tracks (
         FOREIGN KEY (playlist_id) REFERENCES music_playlists(id) ON DELETE CASCADE
     );
 
-    
+
 
     CREATE INDEX IF NOT EXISTS idx_music_history_time ON music_history(played_at DESC);
     CREATE INDEX IF NOT EXISTS idx_music_track_artist ON music_tracks(artist);
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS video_videos (
         PRIMARY KEY (video_id, episode_label)
     );
 
-    
+
 
     CREATE INDEX IF NOT EXISTS idx_video_series ON video_videos(series_key);
     CREATE INDEX IF NOT EXISTS idx_video_kind ON video_videos(kind);
@@ -273,7 +273,7 @@ CREATE TABLE IF NOT EXISTS gallery_images (
         finished_at INTEGER NOT NULL DEFAULT 0
     );
 
-    
+
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_images_path ON gallery_images(path) WHERE path <> '';
     CREATE INDEX IF NOT EXISTS idx_gallery_images_sha ON gallery_images(sha256);

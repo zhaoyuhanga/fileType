@@ -21,7 +21,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
-from modu_workbench.core.platform.logging import debug, swallow
+from modu_workbench.core.platform.logging import swallow
 
 #: A4 尺寸（点）—— 新建覆盖层时的默认页面大小
 A4_WIDTH_PT = 595.0
@@ -532,12 +532,13 @@ def list_form_fields(path: str | Path, *, password: str = "") -> list[dict]:
     except Exception:  # noqa: BLE001  没有表单或结构异常
         return []
     result: list[dict] = []
-    for name, field in fields.items():
+    # 变量名用 field_obj：`field` 是 dataclasses.field，被遮蔽会让 ruff 报 F402
+    for name, field_obj in fields.items():
         entry = {"name": str(name)}
         try:
-            entry["type"] = str(field.get("/FT") or "")
-            entry["value"] = str(field.get("/V") or "")
-            states = field.get("/_States_")
+            entry["type"] = str(field_obj.get("/FT") or "")
+            entry["value"] = str(field_obj.get("/V") or "")
+            states = field_obj.get("/_States_")
             if states:
                 entry["options"] = [str(item) for item in states]
         except Exception as error:  # noqa: BLE001  可忽略但必须留痕

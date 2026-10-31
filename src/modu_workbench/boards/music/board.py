@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -13,6 +15,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+if TYPE_CHECKING:  # 仅用于类型注解，运行时不需要导入
+    from modu_workbench.core.music.models import Track
 
 from modu_workbench.core.music import (
     PLAY_MODE_LABELS,

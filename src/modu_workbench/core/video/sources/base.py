@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import time
 from dataclasses import dataclass, field
 from typing import List
@@ -305,6 +307,10 @@ class ResolvedPlay:
     @property
     def episode_label(self) -> str:
         return self.episode.name if self.episode else ""
+
+
+if TYPE_CHECKING:  # 仅用于注解
+    from .probe import ProbeResult
 
 
 class VideoSource:

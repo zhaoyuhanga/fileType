@@ -16,9 +16,9 @@ def db_path(tmp_path: Path) -> str:
 
 def _write_txt(path: Path, title: str = "测试书") -> str:
     content = (
-        f"正文 第一章 起点\n\n这是第一章的内容。\n\n"
-        f"正文 第二章 发展\n\n这是第二章的内容。\n\n"
-        f"正文 第三章 结局\n\n这是第三章的内容。"
+        "正文 第一章 起点\n\n这是第一章的内容。\n\n"
+        "正文 第二章 发展\n\n这是第二章的内容。\n\n"
+        "正文 第三章 结局\n\n这是第三章的内容。"
     )
     path.write_text(content, encoding="utf-8")
     return str(path)

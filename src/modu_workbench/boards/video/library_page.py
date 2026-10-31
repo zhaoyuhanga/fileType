@@ -206,8 +206,9 @@ class VideoLibraryPage(QWidget):
 
         self._videos = videos
         self._table.setRowCount(len(videos))
-        for row, video in enumerate(videos):
-            fill_video_row(self._table, row, video)
+        # 循环变量叫 row_index：避免遮蔽 ui_kit 的 row() 布局助手（ruff F402）
+        for row_index, video in enumerate(videos):
+            fill_video_row(self._table, row_index, video)
         select_all(self._table, False)
         self._count_chip.setText(f"{len(videos)} 项")
         self._empty.setVisible(not videos)
