@@ -1,0 +1,46 @@
+# Node（electron 归档仅作参考，不再维护）
+node_modules/
+dist/
+release/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+.coverage
+htmlcov/
+
+# 工具
+.idea/
+.DS_Store
+Thumbs.db
+
+# 前端构建临时目录（最小 npm 依赖 + Vite 输出）
+.webbuild/
+.webfront-build/
+
+# PyInstaller 中转输出（打包后交换进 dist/）
+out-dist/
+out-build/
+
+# 图标预览图（由 packaging/icon_preview.py 生成）
+.icon_preview.png
+.icon_installer_preview.png
+
+# bundled ffmpeg binaries (fetched by packaging/build_app.ps1)
+tools/ffmpeg/
+
+# UI snapshot tool temp data dir (fallback)
+.ui-snapshot-data/
+
+# 另一套工具（workbuddy）在工作区里生成的产物 —— 不属于本项目代码，
+# 但会一直把 `git status` 弄脏。只忽略、不删除（文件可能是别人正在用的）。
+.workbuddy-ai/
+workbuddy-bridge/
+acl-reports/
+docs/workbuddy-auth.md
+tools/*.mjs

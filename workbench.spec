@@ -1,0 +1,290 @@
+# -*- mode: python ; coding: utf-8 -*-
+# 墨软·工作台 PyInstaller 打包配置（Windows onedir，随包依赖）
+# 构建：pyinstaller workbench.spec --noconfirm --clean
+# 产物：dist/ModuWorkbench/ModuWorkbench.exe
+
+EXCLUDES = [
+    # v1.0.0：前端统一 Qt 单栈，不再打包 QtWebEngine（体积减约 200MB）
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebEngineQuick",
+    # 用不到的 Qt 大模块（注意：QtPdf 要留着 —— 文档板块用它打印 PDF）
+    "PySide6.Qt3DCore",
+    "PySide6.Qt3DRender",
+    "PySide6.Qt3DExtras",
+    "PySide6.Qt3DInput",
+    "PySide6.Qt3DLogic",
+    "PySide6.QtQuick",
+    "PySide6.QtQuickWidgets",
+    "PySide6.QtQml",
+    "PySide6.QtCharts",
+    "PySide6.QtDataVisualization",
+    "PySide6.QtBluetooth",
+    "PySide6.QtNfc",
+    "PySide6.QtPositioning",
+    "PySide6.QtSensors",
+    "PySide6.QtSerialPort",
+    "PySide6.QtSql",
+    "PySide6.QtTest",
+    "PySide6.QtDesigner",
+    "PySide6.QtHelp",
+    "PySide6.QtRemoteObjects",
+    "PySide6.QtScxml",
+    "PySide6.QtStateMachine",
+    "PySide6.QtTextToSpeech",
+    "tkinter",
+]
+
+a = Analysis(
+    ["src/modu_workbench/__main__.py"],
+    pathex=["src"],
+    binaries=[],
+    datas=[
+        # 应用图标与安装包图形（services/assets.py 定位）
+        ("src/modu_workbench/assets", "modu_workbench/assets"),
+        # 随包 ffmpeg：用户无需自行安装即可转换音视频 / 下载 HLS 为 MP4
+        # （core/convert/media_io.bundled_dir() 从 _MEIPASS/tools/ffmpeg 定位）
+        ("tools/ffmpeg/ffmpeg.exe", "tools/ffmpeg"),
+        ("tools/ffmpeg/ffprobe.exe", "tools/ffmpeg"),
+    ],
+    hiddenimports=[
+        "modu_workbench.boards.book.online",
+        "modu_workbench.boards.book.reader",
+        "modu_workbench.boards.book.shelf",
+        "modu_workbench.boards.convert.board",
+        "modu_workbench.boards.convert.doc_viewer",
+        "modu_workbench.core.convert.media_io",
+        "modu_workbench.core.convert.pdf_out",
+        # 分板块设置页（旧版单体 settings_dialog 已拆分为 ui_kit/settings/ 包）
+        "modu_workbench.ui_kit.settings",
+        "modu_workbench.ui_kit.settings.base",
+        # markdown 扩展按名动态加载
+        "markdown.extensions.extra",
+        "markdown.extensions.fenced_code",
+        "markdown.extensions.sane_lists",
+        "markdown.extensions.tables",
+        "markdown.extensions.attr_list",
+        "markdown.extensions.def_list",
+        "markdown.extensions.footnotes",
+        "markdown.extensions.md_in_html",
+        "markdown.extensions.nl2br",
+        "markdown.extensions.toc",
+        "markdown.extensions.admonition",
+        # Pygments 常用词法器（其余回退纯文本）
+        "pygments.lexers.data",
+        "pygments.lexers.python",
+        "pygments.lexers.javascript",
+        "pygments.lexers.html",
+        "pygments.lexers.css",
+        "pygments.lexers.shell",
+        "pygments.lexers.sql",
+        "pygments.lexers.text",
+        "pygments.lexers.markup",
+        "pygments.formatters.html",
+        # 文档预览 WebView（完整 CSS 渲染，与旧版 Web 预览一致）
+        # 墨软乐库：板块页面与核心引擎（含 QtMultimedia 播放与在线音源）
+        "modu_workbench.boards.music.board",
+        "modu_workbench.boards.music.search",
+        "modu_workbench.boards.music.library_page",
+        "modu_workbench.boards.music.playlist",
+        "modu_workbench.boards.music.history",
+        "modu_workbench.boards.music.widgets",
+        "modu_workbench.core.music.sources",
+        "modu_workbench.core.music.sources.http",
+        "modu_workbench.core.music.sources.base",
+        "modu_workbench.core.music.sources.matcher",
+        "modu_workbench.core.music.sources.quality",
+        "modu_workbench.core.music.sources.registry",
+        "modu_workbench.core.music.sources.providers",
+        "modu_workbench.core.music.sources.providers.netease",
+        "modu_workbench.core.music.sources.providers.kuwo",
+        "modu_workbench.core.music.sources.providers.itunes",
+        "modu_workbench.core.music.sources.providers.audius",
+        "modu_workbench.core.music.sources.providers.archive_org",
+        "modu_workbench.core.music.sources.providers.ccmixter",
+        "modu_workbench.core.music.sources.providers.jamendo",
+        "modu_workbench.core.music.sources.providers.direct",
+        "modu_workbench.core.music.storage",
+        "modu_workbench.core.music.downloader",
+        "modu_workbench.core.music.library",
+        "modu_workbench.core.music.player",
+        # 墨软影视：板块页面与核心引擎（含多源搜索、HLS 下载、播放器与视频转换）
+        "modu_workbench.boards.video.board",
+        "modu_workbench.boards.video.search",
+        "modu_workbench.boards.video.library_page",
+        "modu_workbench.boards.video.history",
+        "modu_workbench.boards.video.detail",
+        "modu_workbench.boards.video.sources",
+        "modu_workbench.boards.video.widgets",
+        "modu_workbench.core.video.models",
+        "modu_workbench.core.video.storage",
+        "modu_workbench.core.video.library",
+        "modu_workbench.core.video.hls",
+        "modu_workbench.core.video.downloader",
+        "modu_workbench.core.video.abr",
+        "modu_workbench.core.video.segment_downloader",
+        "modu_workbench.core.video.sources",
+        "modu_workbench.core.video.sources.http",
+        "modu_workbench.core.video.sources.base",
+        "modu_workbench.core.video.sources.matcher",
+        "modu_workbench.core.video.sources.registry",
+        "modu_workbench.core.video.sources.providers",
+        "modu_workbench.core.video.sources.providers.cms_vod",
+        "modu_workbench.core.video.sources.providers.public",
+        # v1.1.0 共享媒体层：本机代理 + 播放器/视频面/弹幕/字幕/硬解注入
+        "modu_workbench.services.media_proxy",
+        "modu_workbench.services.media_proxy.server",
+        "modu_workbench.services.media_proxy.upstream",
+        "modu_workbench.services.media_proxy.cache",
+        "modu_workbench.services.media_proxy.playlist",
+        "modu_workbench.services.media_proxy.config",
+        "modu_workbench.services.media_proxy.stats",
+        "modu_workbench.services.media_proxy.state",
+        "modu_workbench.ui_kit.media",
+        "modu_workbench.ui_kit.media.surface",
+        "modu_workbench.ui_kit.media.player",
+        "modu_workbench.ui_kit.media.danmaku",
+        "modu_workbench.ui_kit.media.subtitle",
+        "modu_workbench.ui_kit.media.decode",
+        "modu_workbench.ui_kit.media.danmaku_bridge",
+        # 墨软图库：板块页面、核心引擎与分板块设置页
+        "modu_workbench.boards.gallery.board",
+        "modu_workbench.boards.gallery.widgets",
+        "modu_workbench.boards.gallery.editor",
+        "modu_workbench.boards.gallery.enhance",
+        "modu_workbench.core.gallery.models",
+        "modu_workbench.core.gallery.storage",
+        "modu_workbench.core.gallery.library",
+        "modu_workbench.core.gallery.hashing",
+        "modu_workbench.core.gallery.exif",
+        "modu_workbench.core.gallery.thumbs",
+        "modu_workbench.core.gallery.edits",
+        "modu_workbench.core.gallery.enhance",
+        "modu_workbench.core.gallery.ai",
+        # 墨软文档：板块页面与核心引擎（解析/美化/计算/合并/AI 工具与循环）＋设置页
+        "modu_workbench.boards.document.board",
+        "modu_workbench.boards.document.context",
+        "modu_workbench.boards.document.viewer",
+        "modu_workbench.boards.document.beautify_page",
+        "modu_workbench.boards.document.sheet_page",
+        "modu_workbench.boards.document.merge_page",
+        "modu_workbench.boards.document.loop_page",
+        "modu_workbench.boards.document.security_page",
+        "modu_workbench.boards.document.pdf_dialog",
+        "modu_workbench.boards.document.widgets",
+        "modu_workbench.core.document.models",
+        "modu_workbench.core.document.formats",
+        "modu_workbench.core.document.parser",
+        "modu_workbench.core.document.writer",
+        "modu_workbench.core.document.beautify",
+        "modu_workbench.core.document.sheet",
+        "modu_workbench.core.document.merge",
+        "modu_workbench.core.document.quality",
+        "modu_workbench.core.document.security",
+        "modu_workbench.core.document.tools",
+        "modu_workbench.core.document.ai",
+        "modu_workbench.core.document.loop",
+        "modu_workbench.core.document.library",
+        "modu_workbench.core.document.storage",
+        "modu_workbench.core.document.pdf_tools",
+        "modu_workbench.core.document.templates",
+        "modu_workbench.core.document.plugins",
+        "modu_workbench.core.document.ocr",
+        # 大模型能力中心：多类型/多配置/优先级降级
+        "modu_workbench.core.llm.models",
+        "modu_workbench.core.llm.router",
+        "modu_workbench.ui_kit.settings.general",
+        "modu_workbench.ui_kit.settings.book",
+        "modu_workbench.ui_kit.settings.convert",
+        "modu_workbench.ui_kit.settings.document",
+        "modu_workbench.ui_kit.settings.music",
+        "modu_workbench.ui_kit.settings.video",
+        "modu_workbench.ui_kit.settings.gallery",
+        "modu_workbench.ui_kit.settings.llm",
+        "numpy",
+        "pypdf",
+        "PIL.Image",
+        "PIL.ImageOps",
+        "PIL.ImageFilter",
+        "PIL.ImageEnhance",
+        "PIL.ExifTags",
+        "PySide6.QtMultimedia",
+        "PySide6.QtMultimediaWidgets",
+        # v2.1.0 事故修复：以下名字只出现在 importlib 字符串里，
+        # PyInstaller 静态分析看不到；漏了就是『装完启动失败』。
+        # 新增板块/单例时，tests/architecture/test_dynamic_imports_bundled.py 会失败提醒。
+        "modu_workbench.app.selfcheck",
+        "modu_workbench.boards.book.board",
+        "modu_workbench.boards.book.context",
+        "modu_workbench.boards.gallery.context",
+        "modu_workbench.boards.music.context",
+        "modu_workbench.boards.video.context",
+        "modu_workbench.core.llm.context",
+        "modu_workbench.ui_kit.theme_icons",
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=EXCLUDES,
+    noarchive=False,
+)
+
+# ---- v1.0.0 体积精简：Qt 单栈后不再需要这些 Qt 模块 ------------------------------
+# 说明：EXCLUDES 只影响 Python 绑定模块，Qt 的 DLL 仍会被 PySide6 hook 收进来，
+# 因此这里按文件名再过滤一次。已核实依赖：QtCore/Gui/Widgets/Multimedia/PrintSupport
+# 均不引用 Qml/Quick/VirtualKeyboard（用二进制导入表检查过）。
+# Qt6Pdf **不在**丢弃列表里：文档板块的「打印 PDF」用 QtPdf 渲染页面（约 1.5 MB）。
+_DROP_BINARY_TOKENS = (
+    "Qt6Qml", "Qt6Quick", "Qt6VirtualKeyboard",
+    "QtQml", "QtQuick", "QtVirtualKeyboard",
+)
+a.binaries = [item for item in a.binaries
+              if not any(token in item[0] for token in _DROP_BINARY_TOKENS)]
+a.datas = [item for item in a.datas
+           if not (item[0].replace("\\", "/").startswith("PySide6/qml")
+                   or "virtualkeyboard" in item[0].lower())]
+
+# ---- v2.2.0：丢掉 Qt 自带翻译包（124 个 .qm，6.8 MB）-----------------------------
+# 依据：本仓库**没有任何 QTranslator**（全仓 grep 为 0），所有界面文案都是我们自己写的
+# 中文；Qt 内置控件文案走英文默认值即可。留着 6.8 MB 的多语言 .qm 纯属死重量。
+# 只保留 zh_*（万一日后接 QTranslator 也有中文可用）。
+def _keep_data(entry) -> bool:
+    name = entry[0].replace("\\", "/")
+    if name.startswith("PySide6/translations/"):
+        base = name.rsplit("/", 1)[-1]
+        return base.startswith("qtbase_zh") or base.startswith("qt_zh")
+    return True
+a.datas = [item for item in a.datas if _keep_data(item)]
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="ModuWorkbench",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon="src/modu_workbench/assets/app.ico",
+    # Windows 版本资源（文件属性里可见 ProductName/FileVersion）
+    version="packaging/version_info.txt",
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="ModuWorkbench",
+)

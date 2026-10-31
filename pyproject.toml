@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modu-workbench"
+version = "2.2.0"
+description = "墨软·工作台：本地离线的一站式阅读、转换与媒体工作台（PySide6 单应用，六大板块）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "PySide6>=6.8",
+    "ebooklib>=0.18",      # EPUB 解析（墨软书库）
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "requests>=2.31",      # 在线书源下载
+    "Pillow>=10.0",        # 图片转换 + 墨软图库图像处理
+    "numpy>=1.26",         # 墨软图库增强算法（去噪/锐化/超分/通道运算）
+    "markdown>=3.5",       # Markdown → HTML
+    "html2text>=2020.1.16",  # HTML → Markdown
+    "python-docx>=1.1",    # Word(docx) 读写
+    "openpyxl>=3.1",       # Excel(xlsx)
+    "xlrd>=2.0.1",         # Excel(xls 旧版)
+    "rarfile>=4.0",        # RAR 解压（需要系统 unrar/7z）
+    "Pygments>=2.17",      # 预览语法高亮（JSON / Markdown 代码块）
+    "pypdf>=5.0",          # PDF 文本抽取（墨软转换：PDF → TXT / Markdown）
+    "PyYAML>=6.0",         # YAML 互转（墨软转换：json/xml/ini/yaml）
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+# 在线书源可选的 UA 伪装依赖；未安装时自动回退到内置 UA 池（见 core/reader/online.py）
+online = [
+    "fake-useragent>=1.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-q"

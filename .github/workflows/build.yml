@@ -1,0 +1,269 @@
+# 墨软·工作台 —— 持续集成（Windows）
+#
+# 为什么要有它：
+# 1. 开源免费代码签名（SignPath Foundation）要求「二进制能从公开仓库里
+#    可验证地构建出来」—— 没有 CI 就不满足条件，详见 docs/SIGNING.md；
+# 2. 本地打包脚本依赖开发机的环境（已装的 Windows SDK / NSIS / 手下的 ffmpeg），
+#    CI 上是干净机器，能顺带验证"照着文档能不能从零构建"。
+#
+# 说明：
+# - 这里**不跑 GUI 冒烟**（需要交互式桌面），改用产物自检
+#   `MODU_CHECK_DEPS` + `QT_QPA_PLATFORM=offscreen`，已实测可在无界面下出结果；
+# - ffmpeg 二进制不入库（.gitignore 排除，单个近 100MB），CI 里现下。
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Qt 在 CI 上没有显示设备，统一走 offscreen
+  QT_QPA_PLATFORM: offscreen
+  # 诊断日志文件（全作业共用一个，便于失败时整段落盘）
+  CI_LOG: ${{ github.workspace }}\.ci-steps.log
+
+# 需要写权限：失败时把日志推到 ci-logs 分支
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------- 架构闸门 + 测试
+  test:
+    name: 测试
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        shell: pwsh
+        run: |
+          "== pip install ==" | Out-File -FilePath $env:CI_LOG -Encoding UTF8
+          python -m pip install --upgrade pip 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          pip install -e ".[dev,online]" 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          exit $LASTEXITCODE
+
+      - name: 架构闸门（先跑快的，坏了立刻停）
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+          MODU_DATA_DIR: ${{ runner.temp }}\modu-ci-gates
+        run: |
+          "== pytest tests/architecture ==" | Out-File -FilePath $env:CI_LOG -Append -Encoding UTF8
+          python -m pytest tests/architecture -q 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          exit $LASTEXITCODE
+
+      - name: 全量测试
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+          MODU_DATA_DIR: ${{ runner.temp }}\modu-ci-tests
+        run: |
+          "== pytest（全量）==" | Out-File -FilePath $env:CI_LOG -Append -Encoding UTF8
+          python -m pytest -q 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { "pytest 退出码 $code" | Add-Content $env:CI_LOG }
+          exit $code
+
+      # 临时诊断机制：把失败日志推到 ci-logs 分支，便于在不登录的情况下排查。
+      # 排查结束后可整段删掉（或保留，反正只在失败时执行）。
+      - name: 失败时把日志推到 ci-logs 分支
+        if: failure()
+        shell: pwsh
+        run: |
+          $dest = "ci-last-failure.log"
+          # 先写环境信息：即使没有步骤日志，也能看出卡在哪
+          @(
+            "run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
+            "os: $env:RUNNER_OS",
+            "--- python ---"
+          ) | Set-Content -Path $dest -Encoding UTF8
+          python -VV 2>&1 | Add-Content $dest -Encoding UTF8
+          "--- pip freeze（前 40 行）---" | Add-Content $dest -Encoding UTF8
+          python -m pip freeze 2>&1 | Select-Object -First 40 | Add-Content $dest -Encoding UTF8
+          if (Test-Path $env:CI_LOG) {
+            "=== 步骤日志（尾部 500 行）===" | Add-Content $dest -Encoding UTF8
+            Get-Content $env:CI_LOG -Tail 500 | Add-Content $dest -Encoding UTF8
+          } else {
+            "（没有捕获到步骤日志）" | Add-Content $dest -Encoding UTF8
+          }
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git stash -u 2>$null
+          git checkout --orphan ci-logs 2>$null
+          if ($LASTEXITCODE -ne 0) { git checkout -B ci-logs }
+          git add -f $dest
+          git commit -m "ci: 最近一次失败诊断" 2>$null
+          git push -f origin ci-logs
+
+  # ---------------------------------------------------------------- 打包
+  build:
+    name: 打包
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[online]"
+          pip install "pyinstaller>=6.0"
+
+      - name: 准备 ffmpeg（不入库，CI 现下）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools\ffmpeg | Out-Null
+          # 主镜像 gyan.dev，备用 BtbN（GitHub 托管）。单一镜像偶发对 CI 出口限速，
+          # 一旦失败整个 job 就红了，所以必须留后路。
+          $mirrors = @(
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          )
+          $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+          $ok = $false
+          foreach ($url in $mirrors) {
+            try {
+              "尝试下载：$url"
+              Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 300
+              if ((Get-Item $zip).Length -gt 20MB) { $ok = $true; break }
+              "  文件太小，换下一个镜像"
+            } catch { "  失败：$($_.Exception.Message.Split([char]10)[0])" }
+          }
+          if (-not $ok) { throw "所有 ffmpeg 镜像都下载失败" }
+          $extract = Join-Path $env:RUNNER_TEMP "ffmpeg_x"
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $bin = Get-ChildItem $extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $bin) { throw "下载包里找不到 ffmpeg.exe" }
+          Copy-Item $bin.FullName tools\ffmpeg\ffmpeg.exe -Force
+          Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") tools\ffmpeg\ffprobe.exe -Force
+          Get-ChildItem tools\ffmpeg | ForEach-Object { "  $($_.Name): $([math]::Round($_.Length/1MB,1)) MB" }
+
+      - name: PyInstaller 打包（onedir）
+        run: python -m PyInstaller workbench.spec --noconfirm --clean
+
+      - name: 产物自检（无界面）
+        shell: pwsh
+        run: |
+          $env:MODU_CHECK_DEPS = Join-Path $env:RUNNER_TEMP "selfcheck.json"
+          $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
+          if (-not (Test-Path $exe)) { throw "没有产物：$exe" }
+          # 捕获 stderr：产物启动失败时 PyInstaller 常把原因写在这里
+          $errFile = Join-Path $env:RUNNER_TEMP "exe-stderr.txt"
+          $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardError $errFile
+          if (Test-Path $errFile) {
+            $stderr = Get-Content $errFile -Raw -Encoding UTF8
+            if ($stderr) { "产物 stderr：`n$stderr" }
+          }
+          if ($p.ExitCode -ne 0) { throw "产物退出码 $($p.ExitCode)（见上方 stderr）" }
+          if (-not (Test-Path $env:MODU_CHECK_DEPS)) { throw "自检没有产出 JSON" }
+          $raw = Get-Content $env:MODU_CHECK_DEPS -Raw -Encoding UTF8
+          $json = $raw | ConvertFrom-Json
+          $total = ($json.PSObject.Properties | Measure-Object).Count
+          $failed = @($json.PSObject.Properties | Where-Object { $_.Value -ne $true })
+          "自检项：$total，失败 $($failed.Count)"
+          # 写进 job summary：失败时在 Actions 页面能直接看到原因，不必翻日志
+          if ($env:GITHUB_STEP_SUMMARY) {
+            @(
+              "### 产物自检", "", "| 项 | 结果 |", "|---|---|"
+            ) + ($json.PSObject.Properties | ForEach-Object {
+              "| $($_.Name) | $(if ($_.Value -eq $true) { '通过' } else { '失败' }) |"
+            }) | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
+          if ($failed.Count -gt 0) {
+            $failed | ForEach-Object { "  失败：$($_.Name)" }
+            throw "产物自检未通过"
+          }
+
+      - name: 压缩产物
+        shell: pwsh
+        run: |
+          # 用 sha 而不是 ref_name：PR 构建时 ref_name 形如 "123/merge"，
+          # 带斜杠会生成非法文件名（CI 上这类错很难一眼看出）
+          $zip = "dist\ModuWorkbench-${{ github.sha }}.zip"
+          # 用系统自带 bsdtar 而不是 Compress-Archive：后者对 380MB / 数万文件
+          # 会吃光内存（CI 上常见的莫名失败）。实测 tar 9s / 14s，产物同为合法 zip。
+          tar -a -c -f $zip -C dist\ModuWorkbench .
+          if ($LASTEXITCODE -ne 0) { throw "tar 打包失败：$LASTEXITCODE" }
+          $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+          "压缩包：$mb MB"
+          if ($env:GITHUB_STEP_SUMMARY) {
+            "### 产物`n- 压缩包：$mb MB`n- 文件数：$((Get-ChildItem dist\ModuWorkbench -Recurse -File | Measure-Object).Count)" |
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
+
+      - name: 生成 SHA256
+        shell: pwsh
+        run: |
+          # 未签名发布物必须随附校验和，见 docs/SIGNING.md
+          $lines = @()
+          Get-ChildItem dist -Filter "*.zip" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $lines += "$hash  $($_.Name)"
+          }
+          $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
+          if (Test-Path $exe) {
+            $lines += "$((Get-FileHash $exe -Algorithm SHA256).Hash.ToLower())  ModuWorkbench.exe"
+          }
+          # 用 .NET API 写 UTF-8 无 BOM：`-Encoding utf8NoBOM` 只有 PowerShell 7+ 支持，
+          # 项目约定又是"无 BOM"，写死编码方式才能跨 PS 版本稳定
+          $sumPath = "dist\SHA256SUMS.txt"
+          [System.IO.File]::WriteAllLines($sumPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
+          Get-Content $sumPath
+
+      # 失败也把日志传上来，便于排查（CI 上最常见的是 ffmpeg 下载失败）
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modu-workbench-${{ github.sha }}
+          path: |
+            dist/SHA256SUMS.txt
+            dist/*.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------- 签名（预留，默认跳过）
+  # SignPath 获批后取消注释并填好 secrets。见 docs/SIGNING.md 的落地步骤第 6 步。
+  #
+  # sign:
+  #   name: 代码签名
+  #   needs: build
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: modu-workbench-${{ github.ref_name }}
+  #         path: dist
+  #     - uses: signpath/github-action-submit-signing-request@v1
+  #       with:
+  #         api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+  #         organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+  #         project-slug: modu-workbench
+  #         signing-policy-slug: release-signing
+  #         artifact-configuration-slug: zip
+  #         github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+  #         wait-for-completion: true
+  #         output-artifact-directory: signed

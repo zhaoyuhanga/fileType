@@ -1,0 +1,690 @@
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { describe, expect, it } from "vitest";
+import ffmpegPath from "ffmpeg-static";
+import JSZip from "jszip";
+import tarStream from "tar-stream";
+import { runConversion, type ConversionInput } from "../../src/main/services/conversionService";
+
+describe("conversion service", () => {
+  it("converts txt to html with the built-in converter", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello\nworld", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 11,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "txt-to-html",
+        label: "TXT 转 HTML",
+        sourceFormats: ["txt"],
+        targetFormat: "html",
+        category: "document",
+        engine: "text"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toBeTruthy();
+    await expect(readFile(result.outputPath!, "utf8")).resolves.toContain("<p>hello</p>");
+  });
+
+  it("converts txt to pdf with the built-in converter", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello pdf", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 9,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "txt-to-pdf",
+        label: "TXT 转 PDF",
+        sourceFormats: ["txt"],
+        targetFormat: "pdf",
+        category: "document",
+        engine: "text"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("pdf");
+    expect(result.outputPath).toMatch(/\.pdf$/);
+  });
+
+  it("extracts text from html documents saved with a doc extension", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "legacy.doc");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "<html><body><p>legacy word text</p></body></html>", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "legacy",
+        path: sourcePath,
+        name: "legacy.doc",
+        extension: "doc",
+        format: "doc",
+        category: "document",
+        sizeBytes: 51,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "doc-to-txt",
+        label: "DOC 转 TXT",
+        sourceFormats: ["doc"],
+        targetFormat: "txt",
+        category: "document",
+        engine: "word"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    await expect(readFile(result.outputPath!, "utf8")).resolves.toContain("legacy word text");
+  });
+
+  it("cleans mhtml documents saved with a doc extension", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "mhtml.doc");
+    const outputDir = join(root, "out");
+    await writeFile(
+      sourcePath,
+      [
+        "MIME-Version: 1.0",
+        'Content-Type: multipart/related; boundary="----=_NextPart_000"',
+        "",
+        "------=_NextPart_000",
+        'Content-Type: text/html; charset="utf-8"',
+        "Content-Transfer-Encoding: quoted-printable",
+        "",
+        "<html><body><p>MHTML word text</p></body></html>",
+        "------=_NextPart_000--"
+      ].join("\r\n"),
+      "utf8"
+    );
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "mhtml",
+        path: sourcePath,
+        name: "mhtml.doc",
+        extension: "doc",
+        format: "doc",
+        category: "document",
+        sizeBytes: 200,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "doc-to-txt",
+        label: "DOC 转 TXT",
+        sourceFormats: ["doc"],
+        targetFormat: "txt",
+        category: "document",
+        engine: "word"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    const output = await readFile(result.outputPath!, "utf8");
+    expect(output).toContain("MHTML word text");
+    expect(output).not.toContain("MIME-Version");
+  });
+
+  it("converts pdf text to docx", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "pdf to word", "utf8");
+
+    const pdf = await runConversion({
+      outputDir,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 11,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "txt-to-pdf",
+        label: "TXT 转 PDF",
+        sourceFormats: ["txt"],
+        targetFormat: "pdf",
+        category: "document",
+        engine: "text"
+      }
+    });
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "pdf",
+        path: pdf.outputPath!,
+        name: "note.pdf",
+        extension: "pdf",
+        format: "pdf",
+        category: "document",
+        sizeBytes: 100,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "pdf-to-word",
+        label: "PDF 转 Word",
+        sourceFormats: ["pdf"],
+        targetFormat: "docx",
+        category: "document",
+        engine: "pdf"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("docx");
+    expect(result.outputPath).toMatch(/\.docx$/);
+    await expect(stat(result.outputPath!)).resolves.toMatchObject({ size: expect.any(Number) });
+  });
+
+  it("converts m4a to wav with the bundled ffmpeg runtime", async () => {
+    if (!ffmpegPath) throw new Error("ffmpeg-static is unavailable");
+
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "tone.m4a");
+    const outputDir = join(root, "out");
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.1", "-c:a", "aac", sourcePath]);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "tone",
+        path: sourcePath,
+        name: "tone.m4a",
+        extension: "m4a",
+        format: "m4a",
+        category: "audio",
+        sizeBytes: 1,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "m4a-to-wav",
+        label: "M4A 转 WAV",
+        sourceFormats: ["m4a"],
+        targetFormat: "wav",
+        category: "audio",
+        engine: "media"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("wav");
+    expect(result.outputPath).toMatch(/\.wav$/);
+    await expect(stat(result.outputPath!)).resolves.toMatchObject({ size: expect.any(Number) });
+  });
+});
+
+  it("compresses a single file into a zip archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello zip", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 9,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "compress-to-zip",
+        label: "压缩为 ZIP",
+        sourceFormats: ["txt"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("zip");
+    expect(result.outputPath).toMatch(/\.zip$/);
+
+    const zipData = await readFile(result.outputPath!);
+    const zip = await JSZip.loadAsync(zipData);
+    expect(zip.file("note.txt")).toBeTruthy();
+    const content = await zip.file("note.txt")!.async("string");
+    expect(content).toBe("hello zip");
+  });
+
+  it("extracts files from a valid zip archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bundle.zip");
+    const outputDir = join(root, "out");
+
+    const zip = new JSZip();
+    zip.file("readme.txt", "hello from zip");
+    zip.file("sub/note.txt", "nested file");
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+    await writeFile(sourcePath, zipBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "bundle",
+        path: sourcePath,
+        name: "bundle.zip",
+        extension: "zip",
+        format: "zip",
+        category: "archive",
+        sizeBytes: zipBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "zip-extract",
+        label: "ZIP 解压",
+        sourceFormats: ["zip"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toBeTruthy();
+    await expect(readFile(join(result.outputPath!, "readme.txt"), "utf8")).resolves.toBe("hello from zip");
+    await expect(readFile(join(result.outputPath!, "sub", "note.txt"), "utf8")).resolves.toBe("nested file");
+  });
+
+  it("rejects a corrupt zip archive for extraction", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bad.zip");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "not a zip file at all", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "bad",
+        path: sourcePath,
+        name: "bad.zip",
+        extension: "zip",
+        format: "zip",
+        category: "archive",
+        sizeBytes: 22,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "zip-extract",
+        label: "ZIP 解压",
+        sourceFormats: ["zip"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("不是有效的 ZIP");
+  });
+
+  it("reports an empty zip extraction as failed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "empty.zip");
+    const outputDir = join(root, "out");
+
+    const zip = new JSZip();
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+    await writeFile(sourcePath, zipBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "empty",
+        path: sourcePath,
+        name: "empty.zip",
+        extension: "zip",
+        format: "zip",
+        category: "archive",
+        sizeBytes: zipBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "zip-extract",
+        label: "ZIP 解压",
+        sourceFormats: ["zip"],
+        targetFormat: "zip",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("空");
+  });
+
+  it("compresses a single file into a tar archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello tar", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "note",
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 9,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "compress-to-tar",
+        label: "压缩为 TAR",
+        sourceFormats: ["txt"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.targetFormat).toBe("tar");
+    expect(result.outputPath).toMatch(/\.tar$/);
+
+    const entries: Array<{ name: string }> = [];
+    await new Promise<void>((resolve) => {
+      const extract = tarStream.extract();
+      extract.on("entry", (header, _stream, next) => {
+        entries.push({ name: header.name });
+        _stream.resume();
+        next();
+      });
+      extract.on("finish", resolve);
+      require("fs").createReadStream(result.outputPath!).pipe(extract);
+    });
+    expect(entries.some((e) => e.name === "note.txt")).toBe(true);
+  });
+
+  it("extracts files from a valid tar archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bundle.tar");
+    const outputDir = join(root, "out");
+
+    const pack = tarStream.pack();
+    pack.entry({ name: "readme.txt" }, "hello from tar");
+    pack.entry({ name: "sub/note.txt" }, "nested tar file");
+    pack.finalize();
+    const tarBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      pack.on("data", (chunk: Buffer) => chunks.push(chunk));
+      pack.on("end", () => resolve(Buffer.concat(chunks)));
+      pack.on("error", reject);
+    });
+    await writeFile(sourcePath, tarBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "bundle",
+        path: sourcePath,
+        name: "bundle.tar",
+        extension: "tar",
+        format: "tar",
+        category: "archive",
+        sizeBytes: tarBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "tar-extract",
+        label: "TAR 解压",
+        sourceFormats: ["tar"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toBeTruthy();
+    await expect(readFile(join(result.outputPath!, "readme.txt"), "utf8")).resolves.toBe("hello from tar");
+    await expect(readFile(join(result.outputPath!, "sub", "note.txt"), "utf8")).resolves.toBe("nested tar file");
+  });
+
+  it("rejects an invalid tar archive", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "bad.tar");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "not a tar file", "utf8");
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "bad",
+        path: sourcePath,
+        name: "bad.tar",
+        extension: "tar",
+        format: "tar",
+        category: "archive",
+        sizeBytes: 15,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "tar-extract",
+        label: "TAR 解压",
+        sourceFormats: ["tar"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+  });
+
+  it("avoids silently overwriting an existing output file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "note.txt");
+    const outputDir = join(root, "out");
+    await writeFile(sourcePath, "hello world", "utf8");
+
+    const buildInput = (): ConversionInput => ({
+      outputDir,
+      file: {
+        id: `note-${Math.random()}`,
+        path: sourcePath,
+        name: "note.txt",
+        extension: "txt",
+        format: "txt",
+        category: "document",
+        sizeBytes: 11,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "txt-to-pdf",
+        label: "TXT 转 PDF",
+        sourceFormats: ["txt"],
+        targetFormat: "pdf",
+        category: "document",
+        engine: "text"
+      }
+    });
+
+    const first = await runConversion(buildInput());
+    const second = await runConversion(buildInput());
+
+    expect(first.status).toBe("succeeded");
+    expect(second.status).toBe("succeeded");
+    expect(first.outputPath).not.toBe(second.outputPath);
+    expect(second.outputPath).toMatch(/ \(2\)\.pdf$/);
+  });
+
+  it("rejects a tar archive that tries to escape the target directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "evil.tar");
+    const outputDir = join(root, "out");
+
+    const pack = tarStream.pack();
+    pack.entry({ name: "ok.txt" }, "safe content");
+    pack.entry({ name: "../escape.txt" }, "should never be written");
+    pack.finalize();
+    const tarBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      pack.on("data", (chunk: Buffer) => chunks.push(chunk));
+      pack.on("end", () => resolve(Buffer.concat(chunks)));
+      pack.on("error", reject);
+    });
+    await writeFile(sourcePath, tarBuffer);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "evil",
+        path: sourcePath,
+        name: "evil.tar",
+        extension: "tar",
+        format: "tar",
+        category: "archive",
+        sizeBytes: tarBuffer.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "tar-extract",
+        label: "TAR 解压",
+        sourceFormats: ["tar"],
+        targetFormat: "tar",
+        category: "archive",
+        engine: "archive"
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("越界路径");
+    await expect(stat(join(root, "escape.txt"))).rejects.toBeTruthy();
+  });
+
+  it("converts a png to bmp without corrupting pixel colors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "convert-"));
+    const sourcePath = join(root, "red.png");
+    const outputDir = join(root, "out");
+
+    const sharp = require("sharp") as typeof import("sharp");
+    const bmpJs = require("bmp-js") as {
+      decode: (data: Buffer) => { data: Buffer };
+    };
+    const png = await sharp({
+      create: { width: 1, height: 1, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } }
+    })
+      .png()
+      .toBuffer();
+    await writeFile(sourcePath, png);
+
+    const result = await runConversion({
+      outputDir,
+      file: {
+        id: "red",
+        path: sourcePath,
+        name: "red.png",
+        extension: "png",
+        format: "png",
+        category: "image",
+        sizeBytes: png.length,
+        selected: true,
+        status: "queued",
+        progress: 0
+      },
+      action: {
+        id: "png-to-bmp",
+        label: "PNG 转 BMP",
+        sourceFormats: ["png"],
+        targetFormat: "bmp",
+        category: "image",
+        engine: "image"
+      }
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.outputPath).toMatch(/\.bmp$/);
+
+    // bmp-js 解码输出布局为 [0, B, G, R]。
+    const decoded = bmpJs.decode(await readFile(result.outputPath!)).data;
+    expect(decoded[1]).toBe(0); // B
+    expect(decoded[2]).toBe(0); // G
+    expect(decoded[3]).toBe(255); // R
+  });
+
+function runFfmpeg(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffmpegPath as string, args, { stdio: "ignore", windowsHide: true });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited with ${code}`));
+    });
+  });
+}

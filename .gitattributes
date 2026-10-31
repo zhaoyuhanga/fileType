@@ -1,0 +1,3 @@
+# 换行规范：Windows 工作区默认 CRLF（core.autocrlf=true），
+# 但 shell 脚本必须保持 LF，否则在 macOS/Linux 上无法执行。
+*.sh text eol=lf

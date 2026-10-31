@@ -1,0 +1,2 @@
+# 墨软·工作台运行依赖（安装到 .venv：pip install -e .）
+-e .

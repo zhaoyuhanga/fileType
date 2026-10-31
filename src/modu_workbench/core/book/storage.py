@@ -1,0 +1,191 @@
+"""SQLite 存储:书库 + 上次阅读位置 + 历史记录。
+
+表设计:
+- books:        主表(每本书一条)
+- reading_pos:  上次阅读位置(每本书一条,UPSERT)
+- history:      历史记录(每次"打开"或"读完一章"追加一条)
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from typing import List, Optional
+
+from modu_workbench.core.platform.db import SqliteStore
+
+
+@dataclass
+class BookRecord:
+    id: int
+    path: str
+    title: str
+    author: str
+    format: str
+    added_at: int
+    last_opened_at: Optional[int] = None
+    last_chapter_index: int = 0
+    last_offset_in_chapter: int = 0
+    last_progress: float = 0.0  # 0~1
+
+
+@dataclass
+class HistoryEntry:
+    id: int
+    book_id: int
+    book_title: str
+    chapter_index: int
+    chapter_title: str
+    opened_at: int
+    action: str  # 'open' / 'chapter' / 'progress'
+
+
+class Storage(SqliteStore):
+    """线程安全的 SQLite 封装。"""
+
+
+    settings_namespace = "book"
+
+    def __init__(self, db_path: str):
+        super().__init__(db_path)
+
+
+    # ---------- books ----------
+
+    def upsert_book(self, path: str, title: str, author: str, fmt: str) -> int:
+        """注册一本书;若已存在则更新元数据,返回 book_id。"""
+        now = int(time.time())
+        with self._lock:
+            cur = self._conn.execute("SELECT id FROM book_books WHERE path = ?", (path,))
+            row = cur.fetchone()
+            if row:
+                book_id = row["id"]
+                self._conn.execute(
+                    "UPDATE book_books SET title=?, author=?, format=? WHERE id=?",
+                    (title, author, fmt, book_id),
+                )
+            else:
+                cur = self._conn.execute(
+                    "INSERT INTO book_books (path, title, author, format, added_at) VALUES (?,?,?,?,?)",
+                    (path, title, author, fmt, now),
+                )
+                book_id = cur.lastrowid
+            self._commit()
+            return book_id
+
+    def list_books(self) -> List[BookRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT id, path, title, author, format, added_at,
+                          last_opened_at, last_chapter_index,
+                          last_offset_in_chapter, last_progress
+                   FROM book_books
+                   ORDER BY COALESCE(last_opened_at, added_at) DESC"""
+            ).fetchall()
+        return [self._row_to_book(r) for r in rows]
+
+    def get_book(self, book_id: int) -> Optional[BookRecord]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM book_books WHERE id = ?", (book_id,)
+            ).fetchone()
+        return self._row_to_book(row) if row else None
+
+    def get_book_by_path(self, path: str) -> Optional[BookRecord]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM book_books WHERE path = ?", (path,)
+            ).fetchone()
+        return self._row_to_book(row) if row else None
+
+    def delete_book(self, book_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM book_books WHERE id = ?", (book_id,))
+            self._commit()
+
+    # ---------- reading position ----------
+
+    def save_position(self, book_id: int, chapter_index: int,
+                      offset_in_chapter: int, progress: float) -> None:
+        now = int(time.time())
+        with self._lock:
+            self._conn.execute(
+                """UPDATE book_books
+                   SET last_opened_at = ?,
+                       last_chapter_index = ?,
+                       last_offset_in_chapter = ?,
+                       last_progress = ?
+                   WHERE id = ?""",
+                (now, chapter_index, offset_in_chapter, progress, book_id),
+            )
+            self._commit()
+
+    # ---------- history ----------
+
+    def add_history(self, book_id: int, chapter_index: int, chapter_title: str,
+                    action: str = "open") -> int:
+        now = int(time.time())
+        with self._lock:
+            cur = self._conn.execute(
+                """INSERT INTO book_history (book_id, chapter_index, chapter_title, opened_at, action)
+                   VALUES (?,?,?,?,?)""",
+                (book_id, chapter_index, chapter_title, now, action),
+            )
+            self._commit()
+            return cur.lastrowid
+
+    def list_history(self, book_id: Optional[int] = None, limit: int = 200) -> List[HistoryEntry]:
+        """历史记录，最近打开的在前。
+
+        `opened_at` 是**秒级**时间戳：同一秒内打开两本书时，单靠它排序结果不确定
+        （SQLite 不保证稳定顺序），用户快速切换书籍会看到历史乱序。
+        所以补一个 `id DESC` 作为次级排序键 —— 自增 id 天然反映插入顺序。
+        """
+        with self._lock:
+            if book_id is None:
+                rows = self._conn.execute(
+                    """SELECT h.id, h.book_id, b.title AS book_title,
+                              h.chapter_index, h.chapter_title, h.opened_at, h.action
+                       FROM book_history h JOIN book_books b ON b.id = h.book_id
+                       ORDER BY h.opened_at DESC, h.id DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT h.id, h.book_id, b.title AS book_title,
+                              h.chapter_index, h.chapter_title, h.opened_at, h.action
+                       FROM book_history h JOIN book_books b ON b.id = h.book_id
+                       WHERE h.book_id = ?
+                       ORDER BY h.opened_at DESC, h.id DESC LIMIT ?""",
+                    (book_id, limit),
+                ).fetchall()
+        return [
+            HistoryEntry(
+                id=r["id"], book_id=r["book_id"], book_title=r["book_title"],
+                chapter_index=r["chapter_index"], chapter_title=r["chapter_title"],
+                opened_at=r["opened_at"], action=r["action"],
+            )
+            for r in rows
+        ]
+
+    def clear_history(self, book_id: Optional[int] = None) -> None:
+        with self._lock:
+            if book_id is None:
+                self._conn.execute("DELETE FROM book_history")
+            else:
+                self._conn.execute("DELETE FROM book_history WHERE book_id = ?", (book_id,))
+            self._commit()
+
+    # ---------- helpers ----------
+
+    @staticmethod
+    def _row_to_book(row) -> BookRecord:
+        return BookRecord(
+            id=row["id"], path=row["path"], title=row["title"], author=row["author"],
+            format=row["format"], added_at=row["added_at"],
+            last_opened_at=row["last_opened_at"],
+            last_chapter_index=row["last_chapter_index"],
+            last_offset_in_chapter=row["last_offset_in_chapter"],
+            last_progress=row["last_progress"],
+        )
+
+
