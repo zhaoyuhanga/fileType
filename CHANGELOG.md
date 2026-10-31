@@ -4,6 +4,69 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 26. CI 首次运行就抓到一个真 bug：长路径把设置页顶出横向滚动
+
+补完 CI 后第一次跑，`main` 上就挂了：
+
+```
+FAILED tests/smoke/test_cross_board_link.py::test_settings_pages_fit_default_width
+AssertionError: general 页需要横向滚动（最大 1020px）
+```
+
+而这条用例**在本机一直是绿的**。典型的"本机能过、CI 挂"。
+
+#### 怎么定位的
+
+GitHub API 被限流（403）、页面内容截断，拿不到日志。改用**在干净克隆里复现**：
+
+```
+git clone --depth 1 file:///D:/work/fileType <tmp>
+PYTHONPATH=<tmp>/src pytest -q        # 复现成功
+```
+
+再在克隆里打印每页的 `minimumSizeHint().width()` 和最宽标签，一眼看到：
+
+```
+general 页最宽 label 1452px:
+  ffmpeg：C:\Users\me\AppData\Local\Microsoft\WinGet\Packages\
+          Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\...\ffmpeg.exe
+```
+
+#### 根因
+
+`general.py` 的 `_pickable()` 早就给**数据库路径**插了零宽断点（U+200B），
+理由是"QLabel 即使 `setWordWrap` 也按最长不可断行算最小宽度"。但**外部工具那一段
+（ffmpeg / ffprobe / LibreOffice）漏了**，只开了 `setWordWrap`。
+
+于是：开发机装了 WinGet 版 ffmpeg → 路径 1452px → 980px 窗口横向滚动 768px；
+CI 上没装 ffmpeg → 路径不同 → 恰好不触发。**这条测试的结果取决于机器上路径长短。**
+
+#### 修复
+
+- 抽出 `breakable_text()`（先放在 `general.py`，发现 `convert` 页同样问题后
+  提到 `ui_kit/settings/base.py` 共用）；
+- 两层断点：`\ / _ - .` 之后插零宽空格 + **每 24 个字符强制一个兜底断点**
+  （`Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe` 这种五十多字符、
+  只有 `.` `_` 的片段，光靠分隔符不够）；
+- `general` 与 `convert` 两页的所有长路径都走它，完整原文放 tooltip。
+
+效果：本机 8 个设置页横向滚动**全部 0px**（原来 general 768px、convert 780px）。
+
+#### 新增两条**不依赖环境**的回归用例
+
+原来那条测试之所以会骗人，是因为它读的是"当前机器上真实路径"。新增：
+
+- `test_general_page_survives_very_long_tool_paths`：monkeypatch 成 120+ 字符的
+  超长路径，断言无横向滚动 —— 任何机器上都可复现；
+- `test_breakable_inserts_zero_width_breaks`：断点存在、可见文字不变、
+  最长不可断片段 ≤ 30 字符。
+
+### 验证
+
+- **干净克隆**（模拟 CI 环境）全量测试：**通过**；
+- 本机全量测试：**通过**；8 个设置页横向滚动全为 0。
+
+
 ### 25. 补 CI（`.github/workflows/build.yml`）—— SignPath 免费签名的前置条件
 
 上一轮确认了 SignPath 的资质要求里，本项目唯一的硬缺口是
