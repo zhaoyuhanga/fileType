@@ -141,3 +141,68 @@ def test_online_page_respects_settings_default(qapp: QApplication) -> None:
         assert page._compliance.isChecked()  # noqa: SLF001  # 默认合规开启
     finally:
         page.close()
+
+
+def test_general_page_survives_very_long_tool_paths(qapp: QApplication, monkeypatch) -> None:
+    """**超长外部工具路径**也不能把「通用」页顶出横向滚动。
+
+    ## 这条用例是一次 CI 失败换来的
+
+    原有的 `test_settings_pages_fit_default_width` 只在本机能过：它依赖
+    "当前机器上 ffmpeg 路径有多长"。开发机装了 WinGet 版 ffmpeg 后，路径是
+
+        C:\\Users\\me\\AppData\\Local\\Microsoft\\WinGet\\Packages\\
+        Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\...\\ffmpeg.exe
+
+    单个标签实测 **1452px**，`general` 页在 980px 窗口里横向滚动 768px ——
+    而 GitHub Actions 上没装 ffmpeg，路径不同，于是**本机能过、CI 挂**。
+
+    根本原因是 `_pickable()` 给数据库路径插了零宽断点，但**外部工具那一段漏了**。
+    这条用例把"长路径"直接注入，不再依赖环境，任何机器上都可复现。
+    """
+    from modu_workbench.ui_kit.settings import general as general_module
+
+    # 一个没有任何自然断点、比真实 ffmpeg 路径还长的路径
+    long_path = (
+        "C:\\Users\\someone\\AppData\\Local\\Microsoft\\WinGet\\Packages\\"
+        "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\"
+        "ffmpeg-9.0.2-essentials_build\\bin\\ffmpeg.exe"
+    )
+    assert len(long_path) > 120
+    monkeypatch.setattr(general_module, "find_ffmpeg", lambda: long_path)
+    monkeypatch.setattr(general_module, "find_ffprobe", lambda: long_path.replace("ffmpeg.exe", "ffprobe.exe"))
+    monkeypatch.setattr(general_module, "find_soffice", lambda: long_path.replace("ffmpeg.exe", "soffice.exe"))
+
+    dialog = SettingsDialog()
+    dialog.resize(980, 700)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        dialog._select("general")            # noqa: SLF001
+        qapp.processEvents()
+        scroll = dialog._scrolls["general"]  # noqa: SLF001
+        bar = scroll.horizontalScrollBar()
+        assert bar.maximum() == 0, (
+            f"超长工具路径让「通用」页横向滚动了 {bar.maximum()}px —— "
+            "外部工具那一段也要用零宽断点（见 general.py 的 _breakable）"
+        )
+    finally:
+        dialog.close()
+
+
+def test_breakable_inserts_zero_width_breaks() -> None:
+    """`_breakable()` 必须给出可断点，且不改变可见文字。
+
+    零宽空格（U+200B）不可见，但会出现在复制的文本里 —— 这是"路径可复制
+    又要能折行"的既有取舍，完整原文保留在 tooltip 中。
+    """
+    from modu_workbench.ui_kit.settings.general import _breakable
+
+    path = "C:\\a\\" + "x" * 80 + "\\file.db"
+    broken = _breakable(path)
+    assert "\u200b" in broken, "没有插入任何零宽断点"
+    assert broken.replace("\u200b", "") == path, "插入断点后可见文字被改变了"
+    # 最长不可断片段应被压到阈值以内
+    longest = max(len(part) for part in broken.split("\u200b"))
+    assert longest <= 30, f"仍有 {longest} 字符无法断行"
+
