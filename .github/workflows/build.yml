@@ -29,6 +29,12 @@ env:
   PYTHON_VERSION: "3.12"
   # Qt 在 CI 上没有显示设备，统一走 offscreen
   QT_QPA_PLATFORM: offscreen
+  # 诊断日志文件（全作业共用一个，便于失败时整段落盘）
+  CI_LOG: ${{ github.workspace }}\.ci-steps.log
+
+# 需要写权限：失败时把日志推到 ci-logs 分支
+permissions:
+  contents: write
 
 jobs:
   # ---------------------------------------------------------------- 架构闸门 + 测试
@@ -45,15 +51,22 @@ jobs:
           cache: pip
 
       - name: 安装依赖
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,online]"
+          "== pip install ==" | Out-File -FilePath $env:CI_LOG -Encoding UTF8
+          python -m pip install --upgrade pip 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          pip install -e ".[dev,online]" 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          exit $LASTEXITCODE
 
       - name: 架构闸门（先跑快的，坏了立刻停）
+        shell: pwsh
         env:
           PYTHONPATH: src
           MODU_DATA_DIR: ${{ runner.temp }}\modu-ci-gates
-        run: python -m pytest tests/architecture -q
+        run: |
+          "== pytest tests/architecture ==" | Out-File -FilePath $env:CI_LOG -Append -Encoding UTF8
+          python -m pytest tests/architecture -q 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          exit $LASTEXITCODE
 
       - name: 全量测试
         shell: pwsh
@@ -61,12 +74,10 @@ jobs:
           PYTHONPATH: src
           MODU_DATA_DIR: ${{ runner.temp }}\modu-ci-tests
         run: |
-          # tee 一份日志：失败时要能查到"哪个用例、什么错"
-          python -m pytest -q 2>&1 | Tee-Object -FilePath $env:RUNNER_TEMP\pytest.log
+          "== pytest（全量）==" | Out-File -FilePath $env:CI_LOG -Append -Encoding UTF8
+          python -m pytest -q 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
           $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            "pytest 退出码 $code" | Add-Content $env:RUNNER_TEMP\pytest.log
-          }
+          if ($code -ne 0) { "pytest 退出码 $code" | Add-Content $env:CI_LOG }
           exit $code
 
       # 临时诊断机制：把失败日志推到 ci-logs 分支，便于在不登录的情况下排查。
@@ -75,17 +86,29 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          $src = Join-Path $env:RUNNER_TEMP "pytest.log"
-          if (-not (Test-Path $src)) { "没有日志可推送"; exit 0 }
           $dest = "ci-last-failure.log"
-          # 只留尾部 400 行，避免仓库里堆大文件
-          Get-Content $src -Tail 400 | Set-Content -Path $dest -Encoding UTF8
+          # 先写环境信息：即使没有步骤日志，也能看出卡在哪
+          @(
+            "run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
+            "os: $env:RUNNER_OS",
+            "--- python ---"
+          ) | Set-Content -Path $dest -Encoding UTF8
+          python -VV 2>&1 | Add-Content $dest -Encoding UTF8
+          "--- pip freeze（前 40 行）---" | Add-Content $dest -Encoding UTF8
+          python -m pip freeze 2>&1 | Select-Object -First 40 | Add-Content $dest -Encoding UTF8
+          if (Test-Path $env:CI_LOG) {
+            "=== 步骤日志（尾部 500 行）===" | Add-Content $dest -Encoding UTF8
+            Get-Content $env:CI_LOG -Tail 500 | Add-Content $dest -Encoding UTF8
+          } else {
+            "（没有捕获到步骤日志）" | Add-Content $dest -Encoding UTF8
+          }
           git config user.name "ci-bot"
           git config user.email "ci-bot@users.noreply.github.com"
+          git stash -u 2>$null
           git checkout --orphan ci-logs 2>$null
           if ($LASTEXITCODE -ne 0) { git checkout -B ci-logs }
           git add -f $dest
-          git commit -m "ci: 最近一次失败日志" 2>$null
+          git commit -m "ci: 最近一次失败诊断" 2>$null
           git push -f origin ci-logs
 
   # ---------------------------------------------------------------- 打包
