@@ -4,6 +4,60 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 27. CI 一直红，真因是「测试全过但进程退出时崩溃」（PySide6 6.12）
+
+上一节以为是设置页宽度问题，修完 CI 仍红。这轮把它查到底了。
+
+#### 怎么确认的
+
+GitHub API 403 限流、无 gh CLI/token，读不到 CI 日志。改用三条线索交叉定位：
+
+1. 抓 Actions 页面 HTML 统计：4 次运行全失败，时长 4m49s ~ 6m54s
+   —— **比 `build` 作业（含 109MB ffmpeg 下载 + PyInstaller）应该短得多**，
+   所以失败在 `test` 作业，`build` 根本没轮到；
+2. 本地"干净克隆 + 现有 venv"能过，但那不是 CI 环境；
+3. **建全新 venv 忠实复现**：`pip install -e ".[dev,online]"` 装出来是
+   **PySide6 6.12.0 / pytest 9.2.0**（本地是 6.11）——一跑就复现：
+
+```
+100% 通过（无 FAILED）
+exit=-1073740791      ← 0xC0000409，解释器退出时崩溃
+```
+
+**全部用例通过，但进程退出时崩了**，CI 因此判失败。
+
+#### 二分定位
+
+| 范围 | 退出码 |
+|---|---|
+| `tests/board_gallery`（我上轮加的 ThumbnailWorker） | 0 ✅ |
+| `tests/board_book` | 0 ✅ |
+| `tests/board_music/test_music_import_thread.py`（我上轮新加） | 0 ✅ |
+| **`tests/board_music/test_music_ui.py`** | **0xC0000409** ❌ |
+| **`tests/smoke/test_cross_board_link.py`** | **0xC0000005** ❌ |
+
+两个都不是这轮新写的用例，而是**既有测试在新版 PySide6 上暴露的退出崩溃**：
+测试里创建的顶层窗口 / 媒体对象没有在解释器销毁前释放。
+
+#### 修复
+
+`tests/conftest.py` 加 session 级 autouse 夹具 `_qt_shutdown_cleanup`：
+会话结束时按「关闭顶层窗口 → deleteLater → 处理事件 → quit」收尾，
+让 Qt 走正常析构路径。**这是测试基础设施的通用修复**，不是给某个用例打补丁。
+
+修复后两个 venv 全量均 `exit=0`（PySide6 6.11 与 6.12 都过）。
+
+#### 教训
+
+「本地全绿」这句话在没有复现 CI 的依赖版本前不成立。CI 的价值恰恰在于：
+它用的是**最新依赖**，能照出本地被锁住的版本掩盖的问题。
+
+### 验证
+
+- 全新 venv（PySide6 6.12）：全量 **exit=0**，2.1 分钟；
+- 本地 venv（PySide6 6.11）：全量 **exit=0**。
+
+
 ### 26. CI 首次运行就抓到一个真 bug：长路径把设置页顶出横向滚动
 
 补完 CI 后第一次跑，`main` 上就挂了：

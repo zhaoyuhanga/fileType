@@ -24,3 +24,36 @@ def qapp() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _qt_shutdown_cleanup():
+    """退出测试前把残留的 Qt 对象销毁干净。
+
+    ## 为什么需要它
+
+    PySide6 6.12 上出现过一种很难查的现象：**所有用例都通过**，但 pytest
+    进程退出时崩溃（Windows 退出码 0xC0000409 / 0xC0000005），CI 因此判失败，
+    而本地旧版本 PySide6 上一切正常。
+
+    典型来源是测试里创建的顶层窗口、`QMediaPlayer` 等 Qt 对象没有在解释器
+    销毁前释放。这里在会话结束时按"关闭 → deleteLater → 处理事件"的顺序收尾，
+    让 Qt 自己走正常的析构路径。
+    """
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    try:
+        for widget in list(app.topLevelWidgets()):
+            widget.close()
+            widget.deleteLater()
+        app.processEvents()
+        for widget in list(app.allWidgets()):
+            widget.deleteLater()
+        app.processEvents()
+        app.quit()
+        app.processEvents()
+    except Exception:  # noqa: BLE001  清理失败不应该让测试结果变红
+        pass
+
