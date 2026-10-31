@@ -93,8 +93,10 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer -Sig
 - **自签名证书不管用**：SAC 只认受信任的公共 CA 签发的代码签名证书。
   自签名后 `Get-AuthenticodeSignature` 会显示 `UnknownError`
   （"证书链终止于不受信任的根证书"），SAC 照样拦；
-- 证书分 OV / EV：**EV 证书**通常能立刻建立 SmartScreen 信誉，OV 需要累积下载量。
-  个人开发者可考虑开源项目免费签名（如 SignPath.io）、或云签名服务。
+- 证书分 OV / EV：**EV 证书**通常能立刻建立 SmartScreen 信誉，OV 需要累积下载量；
+- **个人开发者 / 开源项目的免费与低成本路径**（SignPath Foundation 的逐条条件、
+  本项目差距清单、落地步骤、Code signing policy 模板）见
+  [`docs/SIGNING.md`](SIGNING.md)。
 
 **③ 用构建产物（临时用一下）**
 

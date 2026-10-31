@@ -380,6 +380,11 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer -Sig
 不签名时的用户侧处理，见 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 「智能应用控制已阻止可能不安全的应用」一节（含关闭 SAC 的代价说明）。
 
+**想免费拿到签名？** 见 [`docs/SIGNING.md`](docs/SIGNING.md) ——
+逐条列出 SignPath Foundation（OSS 免费）的申请条件、本项目当前差距、
+落地步骤，以及 Certum / Azure Trusted Signing 的对比（后两者资格与价格
+请以官方页面为准）。
+
 ### 手动打包
 
 ```
