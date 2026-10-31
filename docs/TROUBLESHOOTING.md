@@ -19,13 +19,97 @@
 —— 现在的构建链有**板块冒烟**（真的逐个打开六个板块）和**GUI 冒烟**（认标题、认崩溃框），
 这两类问题会在打包时就失败，不会再流到用户手里。
 
-### 症状：双击没反应，或提示 `An Application Control policy has blocked this file`
+### 症状：双击后弹出「智能应用控制已阻止可能不安全的应用」
 
-**原因**：Windows 11 的 **Smart App Control** 拦截了未签名的 exe。它有个很坑的特性：
-**刚构建/刚下载的文件会被拦一段时间，过后自动放行**（实测从几秒到十几分钟不等）。
+完整对话框文字：
 
-**处理**：等一会儿再试。持续被拦就三选一：关闭 Smart App Control、对 exe 签名、
-或改用源码运行（见 `docs/CONTRIBUTING.md`）。**这不是程序缺陷**。
+> **智能应用控制已阻止可能不安全的应用**
+> 我们已阻止 `C:\Users\<你>\AppData\Local\Programs\墨软工作台\ModuWorkbench.exe`，
+> 因为无法验证其发布者，无法确认它是否能安全运行。
+> 已阻止此应用以帮助保护你的设备和数据。Microsoft 将审核该应用以确认其安全性。
+
+或命令行 / 构建脚本里出现：
+
+```
+An Application Control policy has blocked this file
+```
+
+#### 原因（已实测确认）
+
+墨软工作台**没有代码签名证书**，而 Windows 11 的 **Smart App Control（智能应用控制）**
+只放行「有可信发布者」的程序。这不是程序缺陷，也不是杀毒误报 —— 是策略。
+
+实测过一个很能说明问题的现象（同一台机器、同一个未签名 exe）：
+
+| 位置 | 结果 |
+|---|---|
+| `dist\ModuWorkbench\ModuWorkbench.exe`（构建产物） | **能运行** |
+| `C:\Users\...\AppData\Local\Programs\墨软工作台\ModuWorkbench.exe`（安装后） | **被拦** |
+
+也就是**换个路径就可能从能跑变成不能跑**，SAC 的判定按文件信誉走、对用户不可预测。
+
+#### 先确认自己是不是这个原因
+
+```powershell
+# 1) SAC 是否处于强制模式（1=强制，2=评估，0=关闭）
+Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy `
+  -Name VerifiedAndReputablePolicyState
+
+# 2) exe 有没有签名（NotSigned = 没签）
+Get-AuthenticodeSignature "$env:LOCALAPPDATA\Programs\墨软工作台\ModuWorkbench.exe" |
+  Select-Object Status, SignerCertificate
+```
+
+`VerifiedAndReputablePolicyState = 1` 且 `Status = NotSigned` → 就是本文说的原因。
+
+#### 三条出路（按推荐顺序）
+
+**① 关闭智能应用控制（最快，但有代价）**
+
+设置 → 隐私和安全性 → Windows 安全中心 → 应用和浏览器控制 → 智能应用控制 → **关闭**。
+
+> ⚠️ **重要**：Smart App Control 一旦关闭，**无法再打开**（除非重置或重装 Windows）。
+> Microsoft 就是这样设计的。只在你确认需要长期运行未签名程序时才关。
+
+**② 给程序签名（真正解决，需要证书）**
+
+签名后 SAC 与 SmartScreen 都会放行，且**分发给别人也不会被拦**。
+构建脚本已支持，拿到证书后一条命令：
+
+```powershell
+# 证书在证书存储里（EV 证书多为硬件令牌，只能这样引用）
+powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer -Sign `
+  -CertificateThumbprint <证书指纹>
+
+# 或者用 .pfx 文件
+powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer -Sign `
+  -PfxPath D:\cert.pfx -PfxPassword "密码"
+```
+
+说明：
+
+- 脚本优先用 `signtool`（Windows SDK）。**没装 SDK 也能用** —— 会回退到
+  PowerShell 原生 `Set-AuthenticodeSignature`；
+- **自签名证书不管用**：SAC 只认受信任的公共 CA 签发的代码签名证书。
+  自签名后 `Get-AuthenticodeSignature` 会显示 `UnknownError`
+  （"证书链终止于不受信任的根证书"），SAC 照样拦；
+- 证书分 OV / EV：**EV 证书**通常能立刻建立 SmartScreen 信誉，OV 需要累积下载量。
+  个人开发者可考虑开源项目免费签名（如 SignPath.io）、或云签名服务。
+
+**③ 用构建产物（临时用一下）**
+
+`dist\ModuWorkbench\` 是免安装的 onedir 目录，**实测能运行**（见上表）。
+但 SAC 可能过一会儿把它也标记掉，所以只适合临时使用，不适合日常。
+
+#### 相关：发布时请一并提供校验和
+
+构建脚本现在会自动生成 `dist\SHA256SUMS.txt`。未签名的发布物**尤其**应该给出
+校验和，让用户能确认拿到的文件没被篡改：
+
+```powershell
+Get-FileHash .\墨软工作台-Setup-2.2.0.exe -Algorithm SHA256
+# 与 SHA256SUMS.txt 里那一行对比
+```
 
 ### 症状：卸载器 `/S` 静默退出、什么都没删
 

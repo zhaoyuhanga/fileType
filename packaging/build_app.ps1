@@ -10,6 +10,12 @@
 #   -Installer    打包成功后继续生成 NSIS 安装包（需要已安装 makensis）
 #   -Python       指定解释器（默认优先用 .venv\Scripts\python.exe）
 #
+# 代码签名（解决 Smart App Control / SmartScreen 拦截，见 docs\TROUBLESHOOTING.md）：
+#   -Sign                          启用签名（还需给证书参数之一）
+#   -CertificateThumbprint <指纹>  用证书存储里的证书（EV 令牌只能这样引用）
+#   -PfxPath <路径> / -PfxPassword <密码>   用 .pfx 文件
+#   -TimestampServer <url>         时间戳服务器（默认 DigiCert）
+#
 # 产物：
 #   dist\ModuWorkbench\ModuWorkbench.exe           （onedir，随包依赖）
 #   dist\墨软工作台-Setup-<版本>.exe                （仅 -Installer 时）
@@ -19,7 +25,13 @@ param(
     [switch]$NoClean,
     [switch]$SkipDeps,
     [switch]$Installer,
-    [string]$Python = ""
+    [string]$Python = "",
+    # ---- 代码签名（解决智能应用控制 / SmartScreen 拦截）----
+    [switch]$Sign,
+    [string]$CertificateThumbprint = "",
+    [string]$PfxPath = "",
+    [string]$PfxPassword = "",
+    [string]$TimestampServer = "http://timestamp.digicert.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -409,6 +421,147 @@ if ($Installer) {
         Write-Warn2 "安装包生成失败：$($_.Exception.Message)"
         Write-Warn2 "  可单独重跑：powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1"
     }
+}
+
+# ---------------------------------------------------------------- 代码签名（可选）
+
+# Smart App Control / SmartScreen 只认「可信发布者」。未签名的 exe 在开启智能应用
+# 控制的 Windows 11 上会被拦下（弹「智能应用控制已阻止可能不安全的应用」），
+# 而且同一个文件换个路径就可能从能跑到不能跑 —— 这不是能靠代码绕过的，
+# 唯一正解是签名。详见 docs\TROUBLESHOOTING.md。
+function Find-SignTool {
+    $found = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    $roots = @(
+        (Join-Path $env:ProgramFiles "Windows Kits\10\bin"),
+        (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    foreach ($root in $roots) {
+        $candidate = Get-ChildItem -Path $root -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\x64\*" } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
+    return $null
+}
+
+function Get-SigningCertificate {
+    if ($CertificateThumbprint) {
+        foreach ($store in @("Cert:\CurrentUser\My", "Cert:\LocalMachine\My")) {
+            $hit = Get-ChildItem $store -ErrorAction SilentlyContinue |
+                Where-Object { $_.Thumbprint -eq $CertificateThumbprint } | Select-Object -First 1
+            if ($hit) { return $hit }
+        }
+        Write-Warn2 "证书存储里找不到指纹 $CertificateThumbprint 的证书"
+        return $null
+    }
+    if ($PfxPath) {
+        if (-not (Test-Path $PfxPath)) {
+            Write-Warn2 "找不到 pfx 文件：$PfxPath"
+            return $null
+        }
+        try {
+            $secure = ConvertTo-SecureString -String $PfxPassword -AsPlainText -Force
+            return New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 ($PfxPath, $secure)
+        } catch {
+            Write-Warn2 "读取 pfx 失败：$($_.Exception.Message)"
+            return $null
+        }
+    }
+    return $null
+}
+
+function Invoke-SignFile([string]$Path) {
+    if (-not (Test-Path $Path)) {
+        Write-Warn2 "待签名文件不存在：$Path"
+        return
+    }
+    $name = Split-Path $Path -Leaf
+    if ($script:SignTool) {
+        $signArgs = @("sign", "/fd", "SHA256", "/td", "SHA256", "/tr", $TimestampServer)
+        if ($CertificateThumbprint) {
+            $signArgs += @("/sha1", $CertificateThumbprint)
+        } else {
+            $signArgs += @("/f", $PfxPath)
+            if ($PfxPassword) { $signArgs += @("/p", $PfxPassword) }
+        }
+        $signArgs += $Path
+        & $script:SignTool @signArgs | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn2 "签名失败：$name（signtool 退出码 $LASTEXITCODE）"
+            return
+        }
+    } else {
+        $certificate = Get-SigningCertificate
+        if (-not $certificate) {
+            Write-Warn2 "无法取得签名证书，跳过：$name"
+            return
+        }
+        try {
+            $result = Set-AuthenticodeSignature -FilePath $Path -Certificate $certificate -TimestampServer $TimestampServer -HashAlgorithm SHA256
+            if ($result.Status -ne "Valid") {
+                Write-Warn2 "签名未生效（$($result.Status)）：$name"
+                Write-Warn2 "  $($result.StatusMessage)"
+                return
+            }
+        } catch {
+            Write-Warn2 "签名失败：$name — $($_.Exception.Message)"
+            return
+        }
+    }
+    $status = (Get-AuthenticodeSignature $Path).Status
+    if ($status -eq "Valid") {
+        Write-Ok "已签名：$name"
+    } else {
+        Write-Warn2 "签名后状态为 $status：$name"
+        Write-Warn2 "  自签名证书不会被智能应用控制接受，需受信任的代码签名证书"
+    }
+}
+
+if ($Sign) {
+    Write-Step "代码签名"
+    if (-not $CertificateThumbprint -and -not $PfxPath) {
+        Write-Warn2 "指定了 -Sign 但没给 -CertificateThumbprint 或 -PfxPath，跳过签名"
+    } else {
+        $script:SignTool = Find-SignTool
+        if ($script:SignTool) {
+            Write-Ok "signtool：$script:SignTool"
+        } else {
+            Write-Warn2 "未找到 signtool.exe（Windows SDK），改用 PowerShell 原生签名"
+        }
+        Invoke-SignFile (Join-Path $repoRoot "dist\ModuWorkbench\ModuWorkbench.exe")
+        $setupFile = Get-ChildItem (Join-Path $repoRoot "dist") -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($setupFile) { Invoke-SignFile $setupFile.FullName }
+    }
+} else {
+    Write-Step "代码签名"
+    Write-Warn2 "未签名（未指定 -Sign）"
+    Write-Warn2 "  未签名产物在开启「智能应用控制」的 Windows 11 上会被拦截运行"
+    Write-Warn2 "  签名用法见 docs\TROUBLESHOOTING.md「智能应用控制拦截」一节"
+}
+
+# ---------------------------------------------------------------- 发布校验和
+
+# 发布时一并给出 SHA256：用户可在运行前自行核对，也便于日后排查文件是否被改。
+Write-Step "生成 SHA256 校验和"
+$distDir = Join-Path $repoRoot "dist"
+$sumTargets = @()
+$mainExe = Join-Path $distDir "ModuWorkbench\ModuWorkbench.exe"
+if (Test-Path $mainExe) { $sumTargets += $mainExe }
+$latestSetup = Get-ChildItem $distDir -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($latestSetup) { $sumTargets += $latestSetup.FullName }
+if ($sumTargets.Count -gt 0) {
+    $sumLines = foreach ($target in $sumTargets) {
+        $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
+        "$hash  $([System.IO.Path]::GetFileName($target))"
+    }
+    $sumFile = Join-Path $distDir "SHA256SUMS.txt"
+    [System.IO.File]::WriteAllLines($sumFile, $sumLines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Ok "已生成：dist\SHA256SUMS.txt（$($sumTargets.Count) 个文件）"
+} else {
+    Write-Warn2 "没有可计算校验和的产物，跳过"
 }
 
 # ---------------------------------------------------------------- 完成

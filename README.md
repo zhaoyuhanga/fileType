@@ -351,6 +351,35 @@ powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1
 
 > **注意**：新增了 Python 包（例如 `core/video`）时**必须** `--clean`， 否则 PyInstaller 复用旧的分析缓存会导致新模块漏打包 —— 表现就是「首页少一个板块」。
 
+### 代码签名（解决 Windows 11「智能应用控制」拦截）
+
+本项目的发布物**默认未签名**。未签名的 exe 在开启了
+**智能应用控制（Smart App Control）** 的 Windows 11 上会被直接拦下，
+弹「智能应用控制已阻止可能不安全的应用」；而且同一个文件换个路径就可能
+从能跑变成不能跑（实测：`dist\` 里能跑，装到 `AppData\Local\Programs\` 后被拦）。
+
+这不是程序缺陷，是系统策略。**唯一正解是签名**，构建脚本已支持：
+
+```
+# 用证书存储里的证书（EV 证书多为硬件令牌，只能这样引用）
+powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer -Sign `
+  -CertificateThumbprint <证书指纹>
+
+# 或用 .pfx 文件
+powershell -ExecutionPolicy Bypass -File packaging\build_app.ps1 -Installer -Sign `
+  -PfxPath D:\cert.pfx -PfxPassword "密码"
+```
+
+要点：
+
+- 有 `signtool`（Windows SDK）就用它；**没有也能签**，脚本回退到 PowerShell 原生
+  `Set-AuthenticodeSignature`；
+- **自签名证书不管用** —— SAC 只认受信任公共 CA 签发的证书；
+- 构建结束会自动生成 `dist\SHA256SUMS.txt`。未签名发布物**请务必**随附这份校验和。
+
+不签名时的用户侧处理，见 [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+「智能应用控制已阻止可能不安全的应用」一节（含关闭 SAC 的代价说明）。
+
 ### 手动打包
 
 ```
