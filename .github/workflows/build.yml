@@ -35,6 +35,7 @@ jobs:
   test:
     name: 测试
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -65,6 +66,7 @@ jobs:
     name: 打包
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -83,12 +85,26 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path tools\ffmpeg | Out-Null
-          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          # 主镜像 gyan.dev，备用 BtbN（GitHub 托管）。单一镜像偶发对 CI 出口限速，
+          # 一旦失败整个 job 就红了，所以必须留后路。
+          $mirrors = @(
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          )
           $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
-          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "ffmpeg") -Force
-          $bin = Get-ChildItem (Join-Path $env:RUNNER_TEMP "ffmpeg") -Recurse -Filter ffmpeg.exe |
-            Select-Object -First 1
+          $ok = $false
+          foreach ($url in $mirrors) {
+            try {
+              "尝试下载：$url"
+              Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 300
+              if ((Get-Item $zip).Length -gt 20MB) { $ok = $true; break }
+              "  文件太小，换下一个镜像"
+            } catch { "  失败：$($_.Exception.Message.Split([char]10)[0])" }
+          }
+          if (-not $ok) { throw "所有 ffmpeg 镜像都下载失败" }
+          $extract = Join-Path $env:RUNNER_TEMP "ffmpeg_x"
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $bin = Get-ChildItem $extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           if (-not $bin) { throw "下载包里找不到 ffmpeg.exe" }
           Copy-Item $bin.FullName tools\ffmpeg\ffmpeg.exe -Force
           Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") tools\ffmpeg\ffprobe.exe -Force
@@ -103,12 +119,28 @@ jobs:
           $env:MODU_CHECK_DEPS = Join-Path $env:RUNNER_TEMP "selfcheck.json"
           $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
           if (-not (Test-Path $exe)) { throw "没有产物：$exe" }
-          $p = Start-Process -FilePath $exe -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "产物退出码 $($p.ExitCode)" }
+          # 捕获 stderr：产物启动失败时 PyInstaller 常把原因写在这里
+          $errFile = Join-Path $env:RUNNER_TEMP "exe-stderr.txt"
+          $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardError $errFile
+          if (Test-Path $errFile) {
+            $stderr = Get-Content $errFile -Raw -Encoding UTF8
+            if ($stderr) { "产物 stderr：`n$stderr" }
+          }
+          if ($p.ExitCode -ne 0) { throw "产物退出码 $($p.ExitCode)（见上方 stderr）" }
           if (-not (Test-Path $env:MODU_CHECK_DEPS)) { throw "自检没有产出 JSON" }
-          $json = Get-Content $env:MODU_CHECK_DEPS -Raw -Encoding UTF8 | ConvertFrom-Json
+          $raw = Get-Content $env:MODU_CHECK_DEPS -Raw -Encoding UTF8
+          $json = $raw | ConvertFrom-Json
+          $total = ($json.PSObject.Properties | Measure-Object).Count
           $failed = @($json.PSObject.Properties | Where-Object { $_.Value -ne $true })
-          "自检项：$(($json.PSObject.Properties | Measure-Object).Count)，失败 $($failed.Count)"
+          "自检项：$total，失败 $($failed.Count)"
+          # 写进 job summary：失败时在 Actions 页面能直接看到原因，不必翻日志
+          if ($env:GITHUB_STEP_SUMMARY) {
+            @(
+              "### 产物自检", "", "| 项 | 结果 |", "|---|---|"
+            ) + ($json.PSObject.Properties | ForEach-Object {
+              "| $($_.Name) | $(if ($_.Value -eq $true) { '通过' } else { '失败' }) |"
+            }) | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
           if ($failed.Count -gt 0) {
             $failed | ForEach-Object { "  失败：$($_.Name)" }
             throw "产物自检未通过"
@@ -120,8 +152,16 @@ jobs:
           # 用 sha 而不是 ref_name：PR 构建时 ref_name 形如 "123/merge"，
           # 带斜杠会生成非法文件名（CI 上这类错很难一眼看出）
           $zip = "dist\ModuWorkbench-${{ github.sha }}.zip"
-          Compress-Archive -Path "dist\ModuWorkbench\*" -DestinationPath $zip -CompressionLevel Optimal
-          (Get-Item $zip).Length / 1MB | ForEach-Object { "压缩包：{0:N1} MB" -f $_ }
+          # 用系统自带 bsdtar 而不是 Compress-Archive：后者对 380MB / 数万文件
+          # 会吃光内存（CI 上常见的莫名失败）。实测 tar 9s / 14s，产物同为合法 zip。
+          tar -a -c -f $zip -C dist\ModuWorkbench .
+          if ($LASTEXITCODE -ne 0) { throw "tar 打包失败：$LASTEXITCODE" }
+          $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+          "压缩包：$mb MB"
+          if ($env:GITHUB_STEP_SUMMARY) {
+            "### 产物`n- 压缩包：$mb MB`n- 文件数：$((Get-ChildItem dist\ModuWorkbench -Recurse -File | Measure-Object).Count)" |
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
 
       - name: 生成 SHA256
         shell: pwsh
