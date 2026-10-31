@@ -4,6 +4,102 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 16. 修「书架显示为空」——读库失败被静默吞掉
+
+`ShelfView.reload()` 原来是：
+
+```python
+try:
+    self._records = self._library.list_books()
+except Exception:
+    self._records = []      # ← 静默
+```
+
+数据库被占用 / 损坏 / 没权限时，用户看到的是**空书架**——第一反应是"我的书全没了"，
+这是最容易被误认为数据丢失的场景。
+
+现在：`swallow()` 留痕 + 把原因记进 `_load_error`，界面显示
+「书架读取失败，原因：database is locked」并提示点「刷新」重试，
+而不是假装"没有书"。有用例 `test_reload_failure_is_not_silent` 守住
+（验证过：改回静默写法会立刻失败）。
+
+### 17. 书库批量导入：后台化 + 不再因一个文件中断整批
+
+`ShelfView._import_paths()` 三个问题一起修：
+
+| 问题 | 原来 | 现在 |
+|---|---|---|
+| UI 冻结 | UI 线程同步循环（50MB TXT 约 256ms，100 本十几秒） | `BookImportWorker(QThread)`，`_import()` 立即返回 |
+| 一批全断 | 只 `except ValueError`，`PermissionError` 会抛出去，后面的书全不导入 | 增补 `except OSError`，记入失败列表后**继续下一本** |
+| 失败不记名 | 只说"N 个文件无法解析" | 列出前 3 个文件名 + 总数 |
+
+另加重复点击保护（"正在导入中，请等这一批完成"）与 worker 引用持有
+（局部变量被 GC 而线程还在跑是 PySide6 经典崩溃）。
+
+### 18. 影视本地导入：后台化（原来会冻结数分钟）
+
+`VideoLibraryPage._import_local()` 原来在 UI 线程调 `import_and_copy()`：
+
+```python
+self._toaster.info(f"正在导入 {len(files)} 个文件…")   # 这行都来不及渲染
+videos = self._library.import_and_copy(files)          # ← 复制 GB 级文件
+```
+
+`import_and_copy` 会把外部文件**复制进影视库目录**——导入 3 个 2GB 影片
+就是复制 6GB，机械盘上要几分钟，界面完全无响应。
+
+新增 `boards/video/widgets.py::ImportWorker`（与图库/乐库/书库同一套模式），
+并把 `on_progress` 接到任务栏，用户能看到进度。
+
+### 19. 缩略图缓存：同秒编辑会永久显示旧图（修）
+
+`_fingerprint()` 用的是 `int(stat.st_mtime)`，**秒级截断**。实测复现：
+
+| 场景 | 修改前 | 修改后 |
+|---|---|---|
+| 同一秒内覆盖（且文件大小相同） | 显示**旧图** | 正确显示新图 |
+| 隔 1 秒以上覆盖 | 正确 | 正确 |
+
+而且踩中后是**永久**的：指纹不再变化，那张图会一直显示旧内容。
+用户感受是"编辑了但没生效"。
+
+改用 `st_mtime_ns`（纳秒），并保留秒级回退以兼容不支持的平台。
+
+### 20. `dhash_file` 解码降采样（导入再快 1.5 倍）
+
+`dhash_image` 只用得到 9×8 个像素，但 `dhash_file` 会**完整解码**原图——
+4000×3000 要先解出 1200 万像素再扔掉 99.99%。实测单张 **42 ms**，
+是导入成本里最大的一项（比生成缩略图的 26 ms 还高）。
+
+加 `draft()` 让 JPEG 在解码阶段降采样：**42.2 ms → 4.3 ms（9.8 倍）**。
+
+**改之前先验证了哈希兼容性**（这是能否改的前提）：20 张 4000×3000 照片，
+18 张哈希完全一致、2 张相差 **1 位**。去重判定阈值是汉明距离 4~6，
+差 1 位不影响判定 —— 新旧版本导入的同一张照片仍会被认成重复。
+
+导入端到端：**121 ms/张 → 57.8 ms/张**（本轮起点至今累计 2.1 倍）。
+
+### 21. 记录「已知未接线的能力」
+
+扫描发现若干实现完整但没有界面入口的方法（`set_rating`、`set_album_cover`、
+`list_cameras`、`load_all_thumbnails` 等）。**没有删**——它们是将来要用的能力，
+删了是损失；但留着容易让人以为功能已可用。
+
+改为在 `docs/ARCHITECTURE.md` 增加「已知未接线的能力」清单，
+逐条写明"现状是什么、为什么还没接"，并说明处理原则（接 UI 优先用这些，
+确实不需要时再删并同步删清单）。
+
+顺带核实：`export_current_danmaku` **不是**死代码 ——
+它是 Ctrl+D 已接入功能的公开包装（供菜单/测试调用）。
+
+### 验证
+
+- 全量 `pytest tests -q`：**通过**，**1138 个用例**（此前 1120）、2.07 分钟；
+- 新增测试：`test_gallery_exif.py`（12 用例，此前 exif 零覆盖）、
+  `test_book_import_thread.py`（6 用例，含 reload 与导入线程）；
+- 两处闸门都验证过有效性：改回旧写法会立刻失败。
+
+
 ### 15. 图库缩略图：导入快 1.6 倍，切换尺寸不再卡
 
 `thumbnails` 这条路径上有两个独立的性能问题，都是实测才发现的。

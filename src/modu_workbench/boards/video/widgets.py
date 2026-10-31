@@ -874,6 +874,49 @@ def _enhanced_result(video, path):  # noqa: ANN001, ANN202
     )
 
 
+class ImportWorker(QThread):
+    """后台导入本地影片（复制进库目录 + 入库，可取消）。
+
+    ## 为什么必须后台跑
+
+    `import_and_copy()` 不只是入库 —— 它会把外部文件 **复制进影视库目录**。
+    导入 3 个 2GB 的影片意味着复制 6GB，机械盘上要几分钟。
+    原来 `_import_local()` 在 **UI 线程**同步调用，这段时间：
+
+    - 窗口完全无响应（用户以为卡死）；
+    - 那句"正在导入 N 个文件…"的提示**根本来不及渲染**（UI 线程已被占住）。
+
+    与图库 / 乐库 / 书库同一套模式：`progressed` / `finishedImport` / `failed` + `cancel()`。
+    """
+
+    progressed = Signal(int, int, str)
+    finishedImport = Signal(object)      # List[Video]
+    failed = Signal(str)
+
+    def __init__(self, library, paths, *, category: str = "", parent=None):  # noqa: ANN001
+        super().__init__(parent)
+        self._library = library
+        self._paths = list(paths)
+        self._category = category
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    def run(self) -> None:  # noqa: D102
+        try:
+            videos = self._library.import_and_copy(
+                self._paths,
+                category=self._category,
+                on_progress=lambda done, total, message: self.progressed.emit(
+                    done, total, message
+                ),
+            )
+            self.finishedImport.emit(videos)
+        except Exception as error:  # noqa: BLE001  线程里不能让异常冒出去
+            self.failed.emit(str(error))
+
+
 class ConvertWorker(QThread):
     """视频格式转换（逐个条目，支持取消）。"""
 

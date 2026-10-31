@@ -27,13 +27,26 @@ _MATTE = (246, 248, 252)
 
 
 def _fingerprint(path: Path, size: int) -> str:
-    """内容指纹：路径 + mtime + 文件大小 + 目标尺寸。
+    """内容指纹：路径 + mtime(ns) + 文件大小 + 目标尺寸。
 
     故意不用文件内容哈希（大图读取太慢）；文件一变指纹就变，缓存自然失效。
+
+    ## 为什么用 `st_mtime_ns` 而不是 `int(st_mtime)`
+
+    秒级 mtime 会漏掉"同一秒内的修改"。实测复现：图片被编辑覆盖后，
+    若新文件恰好**大小相同且同一秒内保存**，指纹完全不变 →
+    `make_thumbnail` 看到缓存文件已存在就直接返回 → **界面一直显示旧缩略图**，
+    而且这个错误状态是永久的（指纹再也不会变）。
+
+    用户感受是"编辑了但没生效"。改用纳秒精度后该场景消失。
     """
     try:
         stat = path.stat()
-        stamp = f"{path}|{int(stat.st_mtime)}|{stat.st_size}|{size}"
+        # 优先用纳秒时间戳；个别文件系统/平台可能没有，退回秒级
+        stamp_mtime = getattr(stat, "st_mtime_ns", None)
+        if stamp_mtime is None:
+            stamp_mtime = int(stat.st_mtime * 1_000_000_000)
+        stamp = f"{path}|{stamp_mtime}|{stat.st_size}|{size}"
     except OSError:
         stamp = f"{path}|0|0|{size}"
     return hashlib.sha1(stamp.encode("utf-8", "replace")).hexdigest()

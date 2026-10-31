@@ -39,6 +39,7 @@ from modu_workbench.ui_kit.toast import Toaster
 from .widgets import (
     CollectionPicker,
     ConvertWorker,
+    ImportWorker,
     EnhanceWorker,
     action_video_ids,
     attach_context_menu,
@@ -72,6 +73,8 @@ class VideoLibraryPage(QWidget):
         self._videos = []
         self._convert_worker: ConvertWorker | None = None
         self._enhance_worker: EnhanceWorker | None = None
+        #: 后台导入线程（必须持引用：局部变量被回收而线程还在跑 → 崩溃）
+        self._import_worker: ImportWorker | None = None
         self._tail_stretch = False
         self._fallback_status = QLabel("就绪。")   # 兼容旧引用/单页自测
 
@@ -265,16 +268,44 @@ class VideoLibraryPage(QWidget):
         self.playRequested.emit(videos, 0)
 
     def _import_local(self) -> None:
+        """导入本地影片（后台线程）。
+
+        **必须后台跑**：`import_and_copy` 会把外部文件复制进影视库目录，
+        导入几个 2GB 的影片就是复制几个 GB —— 在 UI 线程做会冻结数分钟，
+        连"正在导入"的提示都渲染不出来。
+        """
         files, _filter = QFileDialog.getOpenFileNames(
             self, "选择本地影片", "", "视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.webm *.m4v *.ts *.mpg *.rmvb)"
         )
         if not files:
             return
-        self._toaster.info(f"正在导入 {len(files)} 个文件…")
-        videos = self._library.import_and_copy(files)
-        self._toaster.success(f"已导入 {len(videos)} 个影片")
+        if self._import_worker is not None and self._import_worker.isRunning():
+            self._toaster.info("正在导入中，请等这一批完成")
+            return
+
+        worker = ImportWorker(self._library, files, parent=self)
+        self._import_worker = worker
+        worker.progressed.connect(self._on_import_progress)
+        worker.finishedImport.connect(self._on_import_finished)
+        worker.failed.connect(self._on_import_failed)
+        worker.finished.connect(lambda: setattr(self, "_import_worker", None))
+        self._toaster.info(f"正在导入 {len(files)} 个文件（大文件复制需要一会儿）…")
+        worker.start()
+
+    def _on_import_progress(self, done: int, total: int, message: str) -> None:
+        """导入进度：直接复用任务栏（大批量时用户能看到"还在动"）。"""
+        report = getattr(self, "_report", None)
+        if callable(report):
+            report(message, done, total)
+
+    def _on_import_finished(self, videos: list) -> None:
+        """导入完成（在主线程执行，可以安全刷界面）。"""
         self.reload()
         self.libraryChanged.emit()
+        self._toaster.success(f"已导入 {len(videos)} 个影片")
+
+    def _on_import_failed(self, reason: str) -> None:
+        self._toaster.error(f"导入失败：{reason}")
 
     def _add_to_collection(self, ids: list | None = None) -> None:
         ids = self._normalize_ids(ids)

@@ -242,6 +242,26 @@ except sqlite3.Error as error:                 # 只吞得起的类型
   `ai_suggest_keywords` / `ai_suggest_edit_params` 走文字类型。
 - 旧版图库里的 DeepSeek Key 会在首次打开「大模型」页时迁移成文字 + 图片两份配置。
 
+## 已知未接线的能力（诚实清单）
+
+扫描全仓后确认：有若干**实现完整、但没有界面入口**的方法。它们不是 bug，
+也不是可以随手删的死代码 —— 删了可能删掉将来要用的能力，留着又容易让人
+以为"功能已经能用"。这里如实记下来，避免两种误解。
+
+| 位置 | 能力 | 现状 |
+|---|---|---|
+| `core/gallery/storage.py::set_rating` | 给图片打星级 | 详情面板会**显示**评分，但没有设置入口；`rating` 目前只能来自外部导入 |
+| `core/gallery/storage.py::set_album_cover` | 设置相册封面 | 相册菜单未提供 |
+| `core/gallery/storage.py::list_cameras` | 按相机型号筛选 | 筛选栏只有关键词/相册/标签 |
+| `core/gallery/storage.py::find_similar` | 按感知哈希找相似图 | 去重走 `library.find_duplicates()`，这个方法并行存在但未被调用 |
+| `boards/gallery/widgets.py::load_all_thumbnails` | 一次性生成全部缩略图 | 导入时已逐张生成，暂时不需要单独入口 |
+| `boards/gallery/widgets.py::refresh_row` | 单行刷新缩略图 | 编辑保存后走 `reload()` 全量刷新，已覆盖 |
+| `core/music/sources/providers/*` 的 `episode_ids` 等 | 在线源辅助 | 由 `direct` / `archive_org` 内部路径覆盖 |
+| `core/document/library.py::merge_reports` | 读取合并报告 | 合并页未展示历史报告 |
+
+**处理原则**：要新增 UI 入口时优先接这些（实现和测试都已有）；
+确定不再需要时再删，并同步删掉这里的一行。
+
 ## 设置分区
 
 设置页从"一个混合对话框"改为 `ui_kit/settings/` 下的**分板块页面**：
