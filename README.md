@@ -1,5 +1,7 @@
 # 墨软·工作台 (Modu Workbench)
 
+[![build](https://github.com/zhaoyuhanga/fileType/actions/workflows/build.yml/badge.svg)](https://github.com/zhaoyuhanga/fileType/actions/workflows/build.yml)
+
 > 本地离线的一站式阅读、转换、音乐、影视、图库与文档工作台 —— 板块化设计，能力可扩展。
 
 **当前版本：v2.2.0** · 变更记录见 [CHANGELOG.md](CHANGELOG.md) · 发布产物：`dist\ModuWorkbench\ModuWorkbench.exe`（PyInstaller onedir）与 `dist\墨软工作台-Setup-2.2.0.exe`（NSIS 安装包）。

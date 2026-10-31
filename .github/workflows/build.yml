@@ -1,0 +1,179 @@
+# 墨软·工作台 —— 持续集成（Windows）
+#
+# 为什么要有它：
+# 1. 开源免费代码签名（SignPath Foundation）要求「二进制能从公开仓库里
+#    可验证地构建出来」—— 没有 CI 就不满足条件，详见 docs/SIGNING.md；
+# 2. 本地打包脚本依赖开发机的环境（已装的 Windows SDK / NSIS / 手下的 ffmpeg），
+#    CI 上是干净机器，能顺带验证"照着文档能不能从零构建"。
+#
+# 说明：
+# - 这里**不跑 GUI 冒烟**（需要交互式桌面），改用产物自检
+#   `MODU_CHECK_DEPS` + `QT_QPA_PLATFORM=offscreen`，已实测可在无界面下出结果；
+# - ffmpeg 二进制不入库（.gitignore 排除，单个近 100MB），CI 里现下。
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Qt 在 CI 上没有显示设备，统一走 offscreen
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  # ---------------------------------------------------------------- 架构闸门 + 测试
+  test:
+    name: 测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,online]"
+
+      - name: 架构闸门（先跑快的，坏了立刻停）
+        env:
+          PYTHONPATH: src
+          MODU_DATA_DIR: ${{ runner.temp }}\modu-ci-gates
+        run: python -m pytest tests/architecture -q
+
+      - name: 全量测试
+        env:
+          PYTHONPATH: src
+          MODU_DATA_DIR: ${{ runner.temp }}\modu-ci-tests
+        run: python -m pytest -q
+
+  # ---------------------------------------------------------------- 打包
+  build:
+    name: 打包
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[online]"
+          pip install "pyinstaller>=6.0"
+
+      - name: 准备 ffmpeg（不入库，CI 现下）
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools\ffmpeg | Out-Null
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "ffmpeg") -Force
+          $bin = Get-ChildItem (Join-Path $env:RUNNER_TEMP "ffmpeg") -Recurse -Filter ffmpeg.exe |
+            Select-Object -First 1
+          if (-not $bin) { throw "下载包里找不到 ffmpeg.exe" }
+          Copy-Item $bin.FullName tools\ffmpeg\ffmpeg.exe -Force
+          Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") tools\ffmpeg\ffprobe.exe -Force
+          Get-ChildItem tools\ffmpeg | ForEach-Object { "  $($_.Name): $([math]::Round($_.Length/1MB,1)) MB" }
+
+      - name: PyInstaller 打包（onedir）
+        run: python -m PyInstaller workbench.spec --noconfirm --clean
+
+      - name: 产物自检（无界面）
+        shell: pwsh
+        run: |
+          $env:MODU_CHECK_DEPS = Join-Path $env:RUNNER_TEMP "selfcheck.json"
+          $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
+          if (-not (Test-Path $exe)) { throw "没有产物：$exe" }
+          $p = Start-Process -FilePath $exe -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "产物退出码 $($p.ExitCode)" }
+          if (-not (Test-Path $env:MODU_CHECK_DEPS)) { throw "自检没有产出 JSON" }
+          $json = Get-Content $env:MODU_CHECK_DEPS -Raw -Encoding UTF8 | ConvertFrom-Json
+          $failed = @($json.PSObject.Properties | Where-Object { $_.Value -ne $true })
+          "自检项：$(($json.PSObject.Properties | Measure-Object).Count)，失败 $($failed.Count)"
+          if ($failed.Count -gt 0) {
+            $failed | ForEach-Object { "  失败：$($_.Name)" }
+            throw "产物自检未通过"
+          }
+
+      - name: 压缩产物
+        shell: pwsh
+        run: |
+          # 用 sha 而不是 ref_name：PR 构建时 ref_name 形如 "123/merge"，
+          # 带斜杠会生成非法文件名（CI 上这类错很难一眼看出）
+          $zip = "dist\ModuWorkbench-${{ github.sha }}.zip"
+          Compress-Archive -Path "dist\ModuWorkbench\*" -DestinationPath $zip -CompressionLevel Optimal
+          (Get-Item $zip).Length / 1MB | ForEach-Object { "压缩包：{0:N1} MB" -f $_ }
+
+      - name: 生成 SHA256
+        shell: pwsh
+        run: |
+          # 未签名发布物必须随附校验和，见 docs/SIGNING.md
+          $lines = @()
+          Get-ChildItem dist -Filter "*.zip" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $lines += "$hash  $($_.Name)"
+          }
+          $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
+          if (Test-Path $exe) {
+            $lines += "$((Get-FileHash $exe -Algorithm SHA256).Hash.ToLower())  ModuWorkbench.exe"
+          }
+          # 用 .NET API 写 UTF-8 无 BOM：`-Encoding utf8NoBOM` 只有 PowerShell 7+ 支持，
+          # 项目约定又是"无 BOM"，写死编码方式才能跨 PS 版本稳定
+          $sumPath = "dist\SHA256SUMS.txt"
+          [System.IO.File]::WriteAllLines($sumPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
+          Get-Content $sumPath
+
+      # 失败也把日志传上来，便于排查（CI 上最常见的是 ffmpeg 下载失败）
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modu-workbench-${{ github.sha }}
+          path: |
+            dist/SHA256SUMS.txt
+            dist/*.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------- 签名（预留，默认跳过）
+  # SignPath 获批后取消注释并填好 secrets。见 docs/SIGNING.md 的落地步骤第 6 步。
+  #
+  # sign:
+  #   name: 代码签名
+  #   needs: build
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: modu-workbench-${{ github.ref_name }}
+  #         path: dist
+  #     - uses: signpath/github-action-submit-signing-request@v1
+  #       with:
+  #         api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+  #         organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+  #         project-slug: modu-workbench
+  #         signing-policy-slug: release-signing
+  #         artifact-configuration-slug: zip
+  #         github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+  #         wait-for-completion: true
+  #         output-artifact-directory: signed

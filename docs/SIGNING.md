@@ -3,6 +3,9 @@
 > 用途：解决「智能应用控制已阻止可能不安全的应用」与 SmartScreen 警告。
 > 现象与诊断见 [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) 同名小节。
 
+> **现状**：CI 已就绪（`.github/workflows/build.yml`），仓库已确认公开，
+> 资质类条件全部满足。**下一步只剩「写 Code signing policy + 提交申请」**。
+
 ## 为什么必须签名
 
 墨软工作台**没有代码签名**，所以：
@@ -63,8 +66,8 @@ SignPath 不是 CA，也不会给你个人发证书。做法是：**证书签发
 | 项目**在维护** | 持续迭代（见 `CHANGELOG.md`） | ✅ 满足 |
 | 项目**已发布** | v2.0.0 → v2.2.0 多个发布版本 | ✅ 满足 |
 | 功能有文档 | `README.md` + `docs/` | ✅ 满足 |
-| **能从源码可验证地构建**（CI） | **只有本地 `build_app.ps1`** | ❌ **最大缺口** |
-| **公开仓库** | `github.com/zhaoyuhanga/fileType`（**公开状态待确认**） | ⚠️ 待确认 |
+| **能从源码可验证地构建**（CI） | `.github/workflows/build.yml`：测试 → 打包 → 无界面自检 → 产物 | ✅ 满足 |
+| **公开仓库** | `github.com/zhaoyuhanga/fileType`（已确认公开） | ✅ 满足 |
 | 首页要有 **Code signing policy** 段 | 无 | ❌ 缺（模板见下） |
 | 签名产物必须带 **product name / version 元数据** | `packaging/version_info.txt` 已有 `ProductName`/`FileVersion` | ✅ 满足 |
 | 每个 release **人工审批**签名 | — | 流程上要做 |
@@ -74,9 +77,9 @@ SignPath 不是 CA，也不会给你个人发证书。做法是：**证书签发
 ### 落地步骤（按依赖顺序）
 
 1. **确认仓库公开**（私有仓库不能申请）；
-2. **补 CI**：加 `.github/workflows/build.yml`，在 `windows-latest` 上
-   `pip install -r requirements` → `pyinstaller workbench.spec` → 上传产物。
-   这是"可验证构建"的前提，也是所有后续步骤的基础；
+2. ~~**补 CI**~~ ✅ **已完成**：`.github/workflows/build.yml` 会在 `windows-latest` 上
+   跑「架构闸门 + 全量测试 → 下载 ffmpeg → PyInstaller 打包 → 无界面自检（17 项）
+   → 压缩 → SHA256」并上传产物。这就是 SignPath 认可的可验证构建来源；
 3. **在 README 加 Code signing policy 段**（模板见下）；
 4. **开启 GitHub 与 SignPath 账号的 MFA**；
 5. **提交申请**：<https://signpath.org/apply>；

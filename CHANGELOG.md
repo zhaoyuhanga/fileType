@@ -4,6 +4,60 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 25. 补 CI（`.github/workflows/build.yml`）—— SignPath 免费签名的前置条件
+
+上一轮确认了 SignPath 的资质要求里，本项目唯一的硬缺口是
+「**二进制必须能从公开仓库可验证地构建**」。仓库已确认公开，这轮把 CI 补上。
+
+#### 工作流做什么
+
+| 作业 | 步骤 |
+|---|---|
+| `test` | 安装依赖 → 架构闸门（先跑快的） → 全量测试 |
+| `build` | 安装依赖 → **现下 ffmpeg**（不入库，单文件近 100MB） → PyInstaller 打包 → **无界面产物自检** → 压缩 → SHA256 → 上传产物 |
+
+关键设计取舍：
+
+- **不跑 GUI 冒烟**（需要交互式桌面，CI 上不可靠），改用产物自检
+  `MODU_CHECK_DEPS` + `QT_QPA_PLATFORM=offscreen` —— 已实测无界面下能出
+  完整结果（17 项全通过），既验证了二进制能启动、又对 CI 友好；
+- ffmpeg 由 CI 现下（`.gitignore` 排除，不能入库）；
+- 预留了 SignPath 签名作业（注释状态），获批后填 secrets 即可。
+
+#### 写工作流时踩到并修掉的两个坑
+
+1. **产物名用了 `github.ref_name`** —— PR 构建时它是 `123/merge`，
+   带斜杠会生成非法文件名。改用 `github.sha`；
+2. **`Set-Content -Encoding utf8NoBOM`** —— 只有 PowerShell 7+ 支持，
+   而项目约定是"无 BOM"。改用 `.NET` 的
+   `[System.IO.File]::WriteAllLines(..., UTF8Encoding($false))`（与
+   `build_app.ps1` 保持一致），跨 PS 版本稳定。
+
+#### 本地逐步骤验证过（不是写完就交）
+
+| 步骤 | 验证结果 |
+|---|---|
+| YAML 解析 | 通过（jobs/触发器等结构正确） |
+| ffmpeg 下载地址 | 109.5 MB 下载成功，包内 `bin/ffmpeg.exe` + `ffprobe.exe` 路径正确 |
+| `pip install -e ".[online]"` | extras 可解析 |
+| `python -m PyInstaller workbench.spec` | 打包成功（41 秒） |
+| 无界面产物自检 | **17 项全通过** |
+| `Compress-Archive` | 152.7 MB 压缩包生成 |
+| SHA256 写入 | 无 BOM，格式与 `build_app.ps1` 一致 |
+
+#### 文档同步
+
+- `docs/SIGNING.md`：对照表里 CI 与仓库公开两项改为 ✅，落地步骤第 2 步标记完成，
+  顶部写明「资质类条件全部满足，下一步只剩写 Code signing policy + 提交申请」；
+- `README.md`：加构建徽章。
+
+### 验证
+
+- 全量 `pytest tests -q`：**通过**；
+- 工作流每个步骤本地实测可用（见上表）；
+- 提交后 GitHub Actions 会自动跑第一次构建。
+
+
 ### 24. 新增 `docs/SIGNING.md`：个人开发者怎么免费拿到代码签名
 
 上一轮做完签名支持后留了个尾巴：「个人开发者可看 SignPath.io 这类开源免费签名」
