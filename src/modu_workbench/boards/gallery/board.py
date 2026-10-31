@@ -50,6 +50,7 @@ from modu_workbench.core.gallery import (
     source_label,
 )
 from . import context as app_context
+from modu_workbench.core.platform.logging import swallow
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.components import EmptyState, TaskBar
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
@@ -242,6 +243,23 @@ class GalleryBoardPage(QWidget):
         self._favorite_only = QCheckBox("仅收藏")
         self._favorite_only.toggled.connect(self._on_filter_changed)
         filter_row.addWidget(self._favorite_only)
+
+        # 评分筛选：配合右键「⭐ 评分」使用 —— 打 1~2 星标记待删，只看高星挑精选。
+        # `list_images(min_rating=...)` 本来就支持，界面上一直没有入口。
+        self._rating_combo = QComboBox()
+        self._rating_combo.addItem("全部评分", 0)
+        for stars in range(5, 0, -1):
+            self._rating_combo.addItem("★" * stars + " 以上", stars)
+        self._rating_combo.currentIndexChanged.connect(self._on_filter_changed)
+        self._rating_combo.setToolTip("只显示评分不低于所选星级的图片")
+        filter_row.addWidget(self._rating_combo)
+
+        # 相机筛选：EXIF 里读到的机型（`list_cameras()` 早就实现，之前没入口）
+        self._camera_combo = QComboBox()
+        self._camera_combo.addItem("全部相机", "")
+        self._camera_combo.currentIndexChanged.connect(self._on_filter_changed)
+        self._camera_combo.setToolTip("按拍摄机型筛选（需要照片带 EXIF）")
+        filter_row.addWidget(self._camera_combo)
 
         self._timeline_combo = QComboBox()
         self._timeline_combo.addItem("全部时间", "")
@@ -581,6 +599,8 @@ class GalleryBoardPage(QWidget):
             keyword=keyword, album_id=int(album_id) or None, tag=tag, source=source,
             favorite_only=self._favorite_only.isChecked(), order=order,
             date_from=int(date_from),
+            min_rating=int(self._rating_combo.currentData() or 0),
+            camera=str(self._camera_combo.currentData() or ""),
         )
         # 「最近导入」节点：在结果集上再按时间收窄（放在最后，避免与其它筛选冲突）
         recent_days = getattr(self, "_recent_days", 0)
@@ -704,6 +724,12 @@ class GalleryBoardPage(QWidget):
             parts.append(f"最近 {self._recent_days} 天导入")
         if self._favorite_only.isChecked():
             parts.append("仅收藏")
+        min_rating = int(self._rating_combo.currentData() or 0)
+        if min_rating:
+            parts.append(f"{min_rating} 星以上")
+        camera = str(self._camera_combo.currentData() or "")
+        if camera:
+            parts.append(f"相机「{camera}」")
         album_id = self._kind_combo.currentData()
         if album_id:
             album = self._library.storage.get_album(int(album_id))
@@ -758,6 +784,24 @@ class GalleryBoardPage(QWidget):
         index = self._timeline_combo.findData(current_time)
         self._timeline_combo.setCurrentIndex(index if index >= 0 else 0)
         self._timeline_combo.blockSignals(False)
+
+        # 相机下拉：只有存在带 EXIF 机型的照片时才有内容
+        current_camera = self._camera_combo.currentData()
+        self._camera_combo.blockSignals(True)
+        self._camera_combo.clear()
+        self._camera_combo.addItem("全部相机", "")
+        try:
+            cameras = self._library.storage.list_cameras()
+        except Exception as error:  # noqa: BLE001  纯筛选项，读失败不该影响主列表
+            swallow("读取相机列表", error)
+            cameras = []
+        for camera, count in cameras[:30]:
+            self._camera_combo.addItem(f"{camera}（{count}）", camera)
+        index = self._camera_combo.findData(current_camera)
+        self._camera_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._camera_combo.blockSignals(False)
+        # 没有 EXIF 机型时隐藏，避免占着一格空白下拉
+        self._camera_combo.setVisible(bool(cameras))
 
         # 延后重建：直接重建会在左侧树节点点击事件处理中销毁该节点（shiboken 崩溃）
         self._schedule_side_refresh()
@@ -1124,6 +1168,28 @@ class GalleryBoardPage(QWidget):
         self._toaster.success("已收藏" if target else "已取消收藏")
         self.reload()
 
+    def _set_rating(self, stars: int) -> None:
+        """给选中的图片打分（0 = 清除）。
+
+        `ImageStorage.set_rating()` 早就实现了、详情面板也一直在显示
+        「评分 ★★★」，但**界面上没有任何打分入口** —— 用户能看到星级，
+        却永远是空的。这里补上右键菜单入口。
+
+        评分的用途是筛掉废片：打 1~2 星标记"待删"，5 星标记"精选"，
+        再配合筛选只显示高星。
+        """
+        items = self._grid.action_items()
+        if not items:
+            self._toaster.info("请先选择图片")
+            return
+        stars = max(0, min(5, int(stars)))
+        changed = self._library.storage.set_rating([item.id for item in items], stars)
+        if changed:
+            self._toaster.success(
+                f"已{'清除评分' if stars == 0 else f'评 {stars} 星'}：{changed} 张"
+            )
+        self.reload()
+
     def _add_to_album(self) -> None:
         items = self._grid.action_items()
         if not items:
@@ -1394,6 +1460,21 @@ class GalleryBoardPage(QWidget):
         for label, handler in actions:
             action = menu.addAction(label)
             action.triggered.connect(lambda _checked=False, fn=handler: fn())
+
+        # 评分：`storage.set_rating()` 早就实现了，但界面上一直没有入口
+        # （详情面板会显示"评分 ★★★"，用户却没法打分）
+        rating_menu = menu.addMenu("⭐ 评分")
+        current = items[0].rating if items else 0
+        for stars in range(5, -1, -1):
+            label = "清除评分" if stars == 0 else "★" * stars
+            if stars == current and stars:
+                label += "（当前）"
+            action = rating_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, value=stars: self._set_rating(value)
+            )
+        # 注意：`mapToGlobal(pos)` 要和 `exec` 同一个控件坐标 —
+        # 菜单有子项后 `viewport()` 仍是正确参照，不要改成 self
         menu.exec(self._grid.viewport().mapToGlobal(pos))
 
     def _reveal(self, item: ImageItem) -> None:

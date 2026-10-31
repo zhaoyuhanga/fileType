@@ -250,14 +250,17 @@ except sqlite3.Error as error:                 # 只吞得起的类型
 
 | 位置 | 能力 | 现状 |
 |---|---|---|
-| `core/gallery/storage.py::set_rating` | 给图片打星级 | 详情面板会**显示**评分，但没有设置入口；`rating` 目前只能来自外部导入 |
-| `core/gallery/storage.py::set_album_cover` | 设置相册封面 | 相册菜单未提供 |
-| `core/gallery/storage.py::list_cameras` | 按相机型号筛选 | 筛选栏只有关键词/相册/标签 |
+| `core/gallery/storage.py::set_album_cover` | 设置相册封面 | **未接线**：数据库有 `cover_path` 字段且能写，但界面没有任何地方**显示**相册封面 —— 要接线得先做相册卡片 |
 | `core/gallery/storage.py::find_similar` | 按感知哈希找相似图 | 去重走 `library.find_duplicates()`，这个方法并行存在但未被调用 |
 | `boards/gallery/widgets.py::load_all_thumbnails` | 一次性生成全部缩略图 | 导入时已逐张生成，暂时不需要单独入口 |
 | `boards/gallery/widgets.py::refresh_row` | 单行刷新缩略图 | 编辑保存后走 `reload()` 全量刷新，已覆盖 |
 | `core/music/sources/providers/*` 的 `episode_ids` 等 | 在线源辅助 | 由 `direct` / `archive_org` 内部路径覆盖 |
 | `core/document/library.py::merge_reports` | 读取合并报告 | 合并页未展示历史报告 |
+
+**已接线的**（保留在这里作为记录）：
+`set_rating` → 图库右键「⭐ 评分」菜单；
+`list_cameras` → 筛选栏「全部相机」下拉；
+`min_rating` → 筛选栏「全部评分」下拉。
 
 **处理原则**：要新增 UI 入口时优先接这些（实现和测试都已有）；
 确定不再需要时再删，并同步删掉这里的一行。
