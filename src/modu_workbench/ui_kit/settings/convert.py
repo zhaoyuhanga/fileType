@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from modu_workbench.core.platform.media import find_ffmpeg
 from modu_workbench.core.convert.office_io import find_soffice
 
-from .base import SettingsPage, app_settings
+from .base import SettingsPage, app_settings, breakable_text
 
 
 class ConvertSettingsPage(SettingsPage):
@@ -56,8 +56,10 @@ class ConvertSettingsPage(SettingsPage):
 
         ffmpeg = find_ffmpeg()
         soffice = find_soffice()
+        # 长路径必须插零宽断点，否则会把这一页顶出横向滚动（见 base.breakable_text）
         engine = QLabel(
-            f"ffmpeg：{ffmpeg or '未找到'}\nLibreOffice：{soffice or '未找到（使用内置兜底排版）'}"
+            f"ffmpeg：{breakable_text(ffmpeg) or '未找到'}\n"
+            f"LibreOffice：{breakable_text(soffice) or '未找到（使用内置兜底排版）'}"
         )
         engine.setWordWrap(True)
         engine.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

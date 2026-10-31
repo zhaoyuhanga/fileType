@@ -134,8 +134,65 @@ class SettingsPage(QWidget):
         return ""
 
 
+#: 超过这个长度的"连续不可断片段"就强制插一个零宽断点
+MAX_UNBROKEN_RUN = 24
+#: 这些字符后面天然是好的断行位置
+BREAK_AFTER = "\\/_-."
+
+
+def breakable_text(text: str) -> str:
+    """在长路径里插入零宽断点（U+200B），让 `QLabel` 能真正折行。
+
+    ## 为什么设置页都需要它
+
+    `QLabel` 即使开了 `setWordWrap(True)`，`minimumSizeHint()` 仍按
+    "最长不可断行"计算。Windows 路径用 `\\` 分隔、没有空格，Qt 找不到断点，
+    于是一条长路径就能把整页最小宽度顶到 1500px 以上 —— 默认窗口宽度下
+    直接出现横向滚动条。
+
+    ## 这个坑是 CI 暴露出来的
+
+    最初只在「通用」页对数据库路径做了处理，漏了两处：
+
+    - 「通用」页的**外部工具**（ffmpeg/ffprobe/LibreOffice）；
+    - 「转换」页的 ffmpeg / LibreOffice 提示。
+
+    开发机装了 WinGet 版 ffmpeg 后路径是
+
+        C:\\Users\\me\\AppData\\Local\\Microsoft\\WinGet\\Packages\\
+        Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\...\\ffmpeg.exe
+
+    单个标签实测 **1452px**，两页分别横向滚动 768px / 780px；而 GitHub Actions
+    上没装 ffmpeg、路径不同，于是**本机能过、CI 挂**。
+
+    ## 为什么要"每 24 字符"再兜一层
+
+    只按分隔符断还不够：`Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe`
+    有五十多个字符、只有 `.` / `_`，仍然很长。所以再加一条兜底规则。
+
+    断点零宽不可见，但**会被复制进去** —— 这是"路径要可选中复制、又要能折行"
+    的既有取舍；完整原文放 tooltip。
+    """
+    out: list[str] = []
+    run = 0
+    for char in text or "":
+        out.append(char)
+        if char in BREAK_AFTER:
+            out.append("\u200b")
+            run = 0
+        elif char.isspace():
+            run = 0
+        else:
+            run += 1
+            if run >= MAX_UNBROKEN_RUN:
+                out.append("\u200b")
+                run = 0
+    return "".join(out)
+
+
 __all__ = [
     "SETTINGS_APP",
+    "breakable_text",
     "SETTINGS_ORG",
     "SettingsPage",
     "app_settings",

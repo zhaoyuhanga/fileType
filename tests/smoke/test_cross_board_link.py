@@ -196,10 +196,10 @@ def test_breakable_inserts_zero_width_breaks() -> None:
     零宽空格（U+200B）不可见，但会出现在复制的文本里 —— 这是"路径可复制
     又要能折行"的既有取舍，完整原文保留在 tooltip 中。
     """
-    from modu_workbench.ui_kit.settings.general import _breakable
+    from modu_workbench.ui_kit.settings.base import breakable_text
 
     path = "C:\\a\\" + "x" * 80 + "\\file.db"
-    broken = _breakable(path)
+    broken = breakable_text(path)
     assert "\u200b" in broken, "没有插入任何零宽断点"
     assert broken.replace("\u200b", "") == path, "插入断点后可见文字被改变了"
     # 最长不可断片段应被压到阈值以内
