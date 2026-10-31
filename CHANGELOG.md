@@ -4,6 +4,62 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 28. CI 唯一失败用例的真因：预览渲染依赖真实 QSettings
+
+上一节修了退出崩溃，CI 仍红。靠临时加的"失败日志推分支"机制终于拿到真实报错：
+
+```
+FAILED tests/board_document/test_document_nonfunctional.py::
+       test_viewer_preview_is_capped_for_huge_documents
+AssertionError: assert 0 >= 800
+  where 0 = ''.count('第')      # _preview.toPlainText() 是空串
+```
+
+#### 根因
+
+`DocViewer._refresh()` 里：
+
+```python
+show_editor  = editing and mode in (MODE_SOURCE, MODE_PARAGRAPH)
+show_preview = (not show_editor) or (self._split_button.isChecked() and ...)
+```
+
+`markdown` 属于 `SOURCE_FORMATS`，所以载入后「编辑」按钮被勾上 → `show_editor` 为真
+→ **是否渲染预览完全取决于「分栏」开关**；而分栏的初始值来自
+`app_settings().value("document/split_view", False)`。
+
+于是：
+
+| 环境 | 注册表里的 `document/split_view` | 结果 |
+|---|---|---|
+| 开发机 | `true`（历史残留） | 预览有内容 → **通过** |
+| GitHub Actions | 不存在（全新） | 预览为空 → **`0 >= 800` 失败** |
+
+**这正好违反项目自己定的测试规则**：不允许依赖本机 QSettings。
+
+#### 修法
+
+用例里注入内存版 settings（`_MemorySettings`）并显式打开分栏，
+断言变成"预览确实受上限保护"，而不是"这台机器的注册表恰好开着分栏"。
+验证方式：把注册表里的 `document/split_view` **临时删掉**（模拟 CI 空注册表），
+用例仍 `exit=0`，之后恢复原值。
+
+#### 顺带保留下来的诊断机制
+
+`.github/workflows/build.yml` 里加了一段 `if: failure()` 的步骤：
+把「安装依赖 / 架构闸门 / 全量测试」三步的输出 tee 到同一日志，
+失败时把尾部 500 行 + `python -VV` + `pip freeze` 推到 `ci-logs` 分支。
+
+这在拿不到 CI 日志（GitHub API 403 限流、无 gh CLI/token）时是唯一能自查的办法，
+**正是它定位了本节和上一节的根因**。保留着，只在失败时触发。
+
+### 验证
+
+- 全新 venv（PySide6 6.12）：全量 **exit=0**；
+- 本地 venv（PySide6 6.11）：全量 **exit=0**；
+- 空注册表模拟：目标用例 **exit=0**。
+
+
 ### 27. CI 一直红，真因是「测试全过但进程退出时崩溃」（PySide6 6.12）
 
 上一节以为是设置页宽度问题，修完 CI 仍红。这轮把它查到底了。

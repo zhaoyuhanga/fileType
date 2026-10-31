@@ -118,6 +118,13 @@ def test_viewer_preview_is_capped_for_huge_documents(qapp, tmp_path: Path) -> No
         assert html.count("<p>") <= PREVIEW_BLOCK_LIMIT + 5
 
         # 保护只作用于预览：导出/保存仍是全文
+        #
+        # 注入内存版 settings 并显式打开分栏：markdown 属于 SOURCE_FORMATS，
+        # `_bind()` 会把「编辑」按钮勾上，此时**是否渲染预览取决于分栏开关**，
+        # 而分栏开关的初始值来自 QSettings 的 `document/split_view`。
+        # 不注入的话这条用例会依赖本机注册表残留值 —— CI 上全新注册表就是空的，
+        # 于是 `_preview.toPlainText()` 拿到空串、断言 `0 >= 800` 失败（真实踩过）。
+        viewer._settings = _MemorySettings({"document/split_view": True})  # noqa: SLF001
         viewer.load(huge)
         assert len(viewer.current_ir().blocks) == PREVIEW_BLOCK_LIMIT + 50
         assert viewer._preview.toPlainText().count("第") >= PREVIEW_BLOCK_LIMIT  # noqa: SLF001
@@ -229,3 +236,20 @@ def test_ctrl_s_saves_current_document(qapp, tmp_path: Path) -> None:  # noqa: A
     finally:
         page.shutdown()
         page.close()
+
+
+class _MemorySettings:
+    """内存版 QSettings 替身：测试不得读写真实注册表。"""
+
+    def __init__(self, values: dict | None = None) -> None:
+        self._values = dict(values or {})
+
+    def value(self, key: str, default=None, **_kwargs):  # noqa: ANN001, ANN003
+        return self._values.get(key, default)
+
+    def setValue(self, key: str, value) -> None:  # noqa: N802, ANN001
+        self._values[key] = value
+
+    def sync(self) -> None:
+        return None
+
