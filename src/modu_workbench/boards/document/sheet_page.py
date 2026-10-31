@@ -304,7 +304,12 @@ class SheetPanel(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self._table.resizeColumnsToContents()
         self._shape_label.setText(f"{table.height} 行 × {table.width} 列")
-        self._fill_columns([name for name in table.header_row()])
+        # 只有**真的有表头**时才把首行当列名；无表头的表（如无标题 CSV）
+        # 首行是数据。原来无条件取 `header_row()`，会让用户把「第一行数据」
+        # 选成"列名"，而 `_column_values()` 的 body 又包含这一行 ——
+        # 统计结果会多算一行。`_fill_columns([])` 会显示「（无表头）」，
+        # 这条路径本来就是为无表头表准备的。
+        self._fill_columns([name for name in table.header_row()] if table.header else [])
 
     def _fill_columns(self, names: list[str]) -> None:
         for combo in (self._fill_column, self._smart_input, self._smart_target,
