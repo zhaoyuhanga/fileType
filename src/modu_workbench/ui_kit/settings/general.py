@@ -1,17 +1,21 @@
 """通用设置页：环境信息、数据目录、全局合规开关。"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
 )
 
 from modu_workbench.core.platform.media import find_ffmpeg, find_ffprobe
 from modu_workbench.core.convert.office_io import find_soffice
 from modu_workbench.core.platform import paths as config
+from modu_workbench.core.platform.logging import swallow
 
 from .base import SettingsPage, app_settings, breakable_text
 
@@ -60,6 +64,25 @@ class GeneralSettingsPage(SettingsPage):
             f"LibreOffice：{soffice or '未找到'}"
         )
         form.addRow("外部工具", engine)
+
+        # 日志：窗口程序没有 stderr，出问题时用户需要能拿到文件
+        self._log_dir_label = self._pickable(str(config.logs_dir()))
+        log_row = QHBoxLayout()
+        log_row.addWidget(self._log_dir_label, 1)
+        open_logs = QPushButton("打开日志文件夹")
+        open_logs.setToolTip("出问题时把这个目录里的 modu.log 发给维护者")
+        open_logs.clicked.connect(lambda: self._open_dir(config.logs_dir()))
+        log_row.addWidget(open_logs)
+        form.addRow("日志", log_row)
+
+        data_row = QHBoxLayout()
+        open_data = QPushButton("打开数据目录")
+        open_data.setToolTip("备份就是复制这个目录里的 modu.db（先关闭程序）")
+        open_data.clicked.connect(lambda: self._open_dir(config.app_data_dir()))
+        data_row.addWidget(open_data)
+        data_row.addStretch(1)
+        form.addRow("备份迁移", data_row)
+
         layout.addLayout(form)
         layout.addStretch(1)
 
@@ -70,6 +93,18 @@ class GeneralSettingsPage(SettingsPage):
         hint.setObjectName("readerStatus")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
+    @staticmethod
+    def _open_dir(path) -> None:  # noqa: ANN001
+        """用资源管理器打开目录（不存在就先建出来）。"""
+        from pathlib import Path as _Path
+
+        try:
+            target = _Path(path)
+            target.mkdir(parents=True, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+        except OSError as error:  # noqa: BLE001  打不开就算了，不能让设置页崩
+            swallow("打开目录", error)
 
     @staticmethod
     def _pickable(text: str) -> QLabel:

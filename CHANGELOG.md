@@ -4,6 +4,43 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 31. 日志落盘：窗口程序终于有了可提供的现场
+
+#### 问题
+
+日志原来只写 `stderr`。而打包后是**窗口程序**——双击运行时根本没有控制台，
+`stderr` 无处可去。于是用户遇到问题时**手上没有任何信息**，反馈只能靠描述
+"它不动了"；`logging.py` 的 docstring 还写着"stderr 仍可由启动器捕获"，
+对双击启动的窗口程序而言是不成立的。
+
+#### 改法
+
+- `paths.logs_dir()` / `log_file_path()`：日志放 `<数据目录>/logs/modu.log`；
+- `logging._configure()` 增加 `RotatingFileHandler`：**1 MB × 保留 3 份**
+  （约 4 MB 封顶），行首带**时间戳**，便于判断"何时出的问题"；
+- **目录不可写时静默退化**为只有 stderr —— 日志绝不能反过来让程序起不来；
+- 「设置 → 通用」新增：日志路径 + **「打开日志文件夹」** + **「打开数据目录」**
+  两个按钮（后者直接服务于"备份就是复制 modu.db"这条说明）；
+- `docs/TROUBLESHOOTING.md` 增加「出问题时：先把日志找出来」章节。
+
+#### 顺带修掉一个设计脆弱点
+
+"是否已配置"原来挂在 **logger 对象**上（`_logger._modu_configured`）。
+`logging.getLogger()` 是全局单例，`importlib.reload(模块)` **不会重置**挂在
+logger 上的属性 —— 测试里一旦先配置过，后续用例就再也加不上文件处理器
+（写测试时当场暴露：文件日志"没生成"）。改为**模块级标记**，reload 即重置。
+
+#### 新增闸门 `tests/platform/test_logging_file.py`（5 条）
+
+日志文件真的生成、记录含时间戳/作用域/异常类型、`debug()` 默认不写、
+**目录不可写时不崩**、**轮转生效**（单文件与总量都有上限）。
+
+### 验证
+
+- `ruff check src tests`：All checks passed；
+- 全量 pytest：**通过**，**1206 个用例**（此前 1201）、91 文件。
+
+
 ### 30. 备齐 SignPath 申请材料（先走通申请，再一起发版）
 
 #### README 加 `## Code signing policy`

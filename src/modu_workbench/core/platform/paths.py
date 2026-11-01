@@ -25,6 +25,23 @@ def app_data_dir() -> Path:
     return path
 
 
+def logs_dir() -> Path:
+    """日志目录（`<数据目录>/logs`）。
+
+    为什么要有它：打包后是**窗口程序**，双击运行时 stderr 无处可去 ——
+    用户遇到问题时手上没有任何可提供的信息。日志落盘后，
+    用户可以把 `logs/modu.log` 直接发给维护者。
+    """
+    path = app_data_dir() / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def log_file_path() -> Path:
+    """主日志文件路径。"""
+    return logs_dir() / "modu.log"
+
+
 def app_db_path() -> str:
     """**唯一**应用数据库（v1.0.0 起板块共用一个库，表名带板块前缀）。"""
     return str(app_data_dir() / "modu.db")
