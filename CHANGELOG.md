@@ -35,12 +35,33 @@
 
 同样的坑对 `test` 作业的诊断步骤也一并修了。
 
-#### 本轮未能闭环的验证
+#### 验证结果（有据可查）
 
-加完断言后 GitHub 侧连续出现网络不可达（`curl 28`），**没能读到最新一次 CI 的
-结论**。所以"CI 上安装包真实产出"这一点，当前证据只有：
-本地同脚本多次成功（152.6 MB）、断言已就位（缺产物必红）。
-待网络恢复后需再确认一次。
+网络恢复后，从 `ci-logs` 分支读到了 CI 自己上传的产物清单：
+
+```
+job: build   status: SUCCESS   run: 41333157194   sha: 486851d0
+--- dist 顶层 ---
+ModuWorkbench-<sha>.zip            155.1 MB
+墨软工作台-Setup-2.2.0.exe          155 MB     ← 安装包确实产出了
+--- onedir ---
+ModuWorkbench.exe                   12.3 MB   文件数 250
+--- makensis ---
+PATH: （空，说明 PATH 里找不到 makensis）
+C:\Program Files (x86)\NSIS 存在: True         ← 生效的正是补的那条
+```
+
+两个结论：
+
+1. **安装包在 CI 上真实产出**（155 MB），断言与产物上传都正常；
+2. **`makensis` 在 CI 上确实不在 PATH 里** —— 补的
+   `Program Files (x86)\NSIS` 兜底路径是这次能成的关键，而不是"照例通过"。
+
+CI 连续三次 SUCCESS（10m05s / 9m05s / 8m19s），比之前
+（只产 zip 时约 8m）多出的正是装 NSIS 与打安装包的时间。
+
+以后想核实 CI 真实产物，不用登录：`git fetch origin ci-logs` 后看
+`ci-last-failure.log` 即可（每次运行都会更新）。
 
 
 ### 32. CI 自动产出安装包 + 一次"把脚本写成空文件"的教训
