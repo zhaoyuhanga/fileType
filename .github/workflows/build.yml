@@ -93,32 +93,42 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
+          # 报告先写到 RUNNER_TEMP（仓库外），最后再拷进 ci-logs 分支
+          $report = Join-Path $env:RUNNER_TEMP "ci-report.txt"
           $dest = "ci-last-failure.log"
-          # 先写环境信息：即使没有步骤日志，也能看出卡在哪
           @(
-            "run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
+            "job: test   run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
             "os: $env:RUNNER_OS",
             "--- python ---"
-          ) | Set-Content -Path $dest -Encoding UTF8
-          python -VV 2>&1 | Add-Content $dest -Encoding UTF8
-          "--- pip freeze（前 40 行）---" | Add-Content $dest -Encoding UTF8
-          python -m pip freeze 2>&1 | Select-Object -First 40 | Add-Content $dest -Encoding UTF8
+          ) | Set-Content -Path $report -Encoding UTF8
+          python -VV 2>&1 | Add-Content $report -Encoding UTF8
+          "--- pip freeze（前 40 行）---" | Add-Content $report -Encoding UTF8
+          python -m pip freeze 2>&1 | Select-Object -First 40 | Add-Content $report -Encoding UTF8
           if (Test-Path $env:CI_LOG) {
-            "=== 步骤日志（尾部 500 行）===" | Add-Content $dest -Encoding UTF8
-            Get-Content $env:CI_LOG -Tail 500 | Add-Content $dest -Encoding UTF8
+            "=== 步骤日志（尾部 500 行）===" | Add-Content $report -Encoding UTF8
+            Get-Content $env:CI_LOG -Tail 500 | Add-Content $report -Encoding UTF8
           } else {
-            "（没有捕获到步骤日志）" | Add-Content $dest -Encoding UTF8
+            "（没有捕获到步骤日志）" | Add-Content $report -Encoding UTF8
           }
+          # 发布到独立分支：先切 orphan → 清索引 → 再从 RUNNER_TEMP 拷进来。
+          # 一定要先写在 RUNNER_TEMP（仓库外）：直接写在仓库里会被
+          # `git checkout --orphan` / `git rm --cached` 牵连，
+          # 曾经用 `git stash -u` 清理时把日志文件本身收走了（本地复现确认）。
           git config user.name "ci-bot"
           git config user.email "ci-bot@users.noreply.github.com"
-          git stash -u 2>$null
           git checkout --orphan ci-logs 2>$null
           if ($LASTEXITCODE -ne 0) { git checkout -B ci-logs }
+          git rm -rf --cached . 2>$null | Out-Null
+          Copy-Item $report $dest -Force
           git add -f $dest
-          git commit -m "ci: 最近一次失败诊断" 2>$null
-          git push -f origin ci-logs
+          git commit -q -m "ci: 产物清单 / 失败诊断" 2>$null
+          # CI runner 出网偶发抖动，一次失败不该让诊断白跑
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            git push -f origin ci-logs 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { "诊断已推送（第 $attempt 次）"; break }
+            Start-Sleep -Seconds 5
+          }
 
-  # ---------------------------------------------------------------- 打包
   build:
     name: 打包
     needs: test
@@ -295,73 +305,63 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          # 每次运行都留一份产物清单：不登录也能确认真实产物（安装包有没有、
+          # 多大），而不是只看徽章的绿/红。
+          $report = Join-Path $env:RUNNER_TEMP "ci-report.txt"
           $dest = "ci-last-failure.log"
           $status = if ("${{ job.status }}" -eq "success") { "SUCCESS" } else { "FAILURE" }
           @(
             "job: build   status: $status   run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
             "",
             "--- dist 顶层 ---"
-          ) | Set-Content -Path $dest -Encoding UTF8
+          ) | Set-Content -Path $report -Encoding UTF8
           Get-ChildItem dist -ErrorAction SilentlyContinue |
             ForEach-Object { "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" } |
-            Add-Content $dest -Encoding UTF8
-          "--- 安装包 ---" | Add-Content $dest -Encoding UTF8
+            Add-Content $report -Encoding UTF8
+          "--- 安装包 ---" | Add-Content $report -Encoding UTF8
           $setup = Get-ChildItem dist -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue
           if ($setup) {
             $setup | ForEach-Object { "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" } |
-              Add-Content $dest -Encoding UTF8
+              Add-Content $report -Encoding UTF8
           } else {
-            "（没有安装包）" | Add-Content $dest -Encoding UTF8
+            "（没有安装包）" | Add-Content $report -Encoding UTF8
           }
-          "--- onedir ---" | Add-Content $dest -Encoding UTF8
+          "--- onedir ---" | Add-Content $report -Encoding UTF8
           $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
           if (Test-Path $exe) {
             "ModuWorkbench.exe  $([math]::Round((Get-Item $exe).Length/1MB,1)) MB" |
-              Add-Content $dest -Encoding UTF8
+              Add-Content $report -Encoding UTF8
             "文件数：$((Get-ChildItem dist\ModuWorkbench -Recurse -File | Measure-Object).Count)" |
-              Add-Content $dest -Encoding UTF8
+              Add-Content $report -Encoding UTF8
           }
-          "--- makensis ---" | Add-Content $dest -Encoding UTF8
+          "--- makensis ---" | Add-Content $report -Encoding UTF8
           "PATH: $((Get-Command makensis.exe -ErrorAction SilentlyContinue).Source)" |
-            Add-Content $dest -Encoding UTF8
+            Add-Content $report -Encoding UTF8
           foreach ($root in @("${env:ProgramFiles(x86)}\NSIS", "$env:ProgramFiles\NSIS")) {
-            "$root 存在: $(Test-Path $root)" | Add-Content $dest -Encoding UTF8
+            "$root 存在: $(Test-Path $root)" | Add-Content $report -Encoding UTF8
           }
-          "--- 步骤日志（尾部 400 行）---" | Add-Content $dest -Encoding UTF8
+          "--- 步骤日志（尾部 400 行）---" | Add-Content $report -Encoding UTF8
           if (Test-Path $env:CI_LOG) {
-            Get-Content $env:CI_LOG -Tail 400 | Add-Content $dest -Encoding UTF8
+            Get-Content $env:CI_LOG -Tail 400 | Add-Content $report -Encoding UTF8
           } else {
-            "（没有捕获到步骤日志）" | Add-Content $dest -Encoding UTF8
+            "（没有捕获到步骤日志）" | Add-Content $report -Encoding UTF8
           }
+          # 发布到独立分支：先切 orphan → 清索引 → 再从 RUNNER_TEMP 拷进来。
+          # 一定要先写在 RUNNER_TEMP（仓库外）：直接写在仓库里会被
+          # `git checkout --orphan` / `git rm --cached` 牵连，
+          # 曾经用 `git stash -u` 清理时把日志文件本身收走了（本地复现确认）。
           git config user.name "ci-bot"
           git config user.email "ci-bot@users.noreply.github.com"
-          git stash -u 2>$null
           git checkout --orphan ci-logs 2>$null
           if ($LASTEXITCODE -ne 0) { git checkout -B ci-logs }
+          git rm -rf --cached . 2>$null | Out-Null
+          Copy-Item $report $dest -Force
           git add -f $dest
-          git commit -m "ci: build 作业失败诊断" 2>$null
-          git push -f origin ci-logs
+          git commit -q -m "ci: 产物清单 / 失败诊断" 2>$null
+          # CI runner 出网偶发抖动，一次失败不该让诊断白跑
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            git push -f origin ci-logs 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { "诊断已推送（第 $attempt 次）"; break }
+            Start-Sleep -Seconds 5
+          }
 
-  # ---------------------------------------------------------------- 签名（预留，默认跳过）
-  # SignPath 获批后取消注释并填好 secrets。见 docs/SIGNING.md 的落地步骤第 6 步。
-  #
-  # sign:
-  #   name: 代码签名
-  #   needs: build
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   runs-on: windows-latest
-  #   steps:
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: modu-workbench-${{ github.ref_name }}
-  #         path: dist
-  #     - uses: signpath/github-action-submit-signing-request@v1
-  #       with:
-  #         api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-  #         organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-  #         project-slug: modu-workbench
-  #         signing-policy-slug: release-signing
-  #         artifact-configuration-slug: zip
-  #         github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
-  #         wait-for-completion: true
-  #         output-artifact-directory: signed
