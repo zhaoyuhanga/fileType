@@ -128,6 +128,11 @@ class VideoLibraryPage(QWidget):
 
         self._table = configure_table(QTableWidget(), COLUMNS)
 
+        # 列宽记忆：用户拉宽过的列下次打开还是那么宽
+        from modu_workbench.ui_kit.view_state import remember_table_layout
+
+        remember_table_layout(self._table, "video/library_columns")
+
         # 拖拽导入：视频文件或文件夹直接拖进影视库
         from modu_workbench.ui_kit.dnd import FileDropController
 
@@ -588,8 +593,15 @@ class VideoLibraryPage(QWidget):
         self._check_all.setEnabled(has_rows)
         self._check_none.setEnabled(has_rows)
 
+    def _save_layout(self) -> None:
+        """保存列宽（关窗/切走时调用）。"""
+        from modu_workbench.ui_kit.view_state import save_table_layout
+
+        save_table_layout(self._table, "video/library_columns")
+
     def shutdown(self) -> None:
         worker = self._convert_worker
         if worker is not None and worker.isRunning():
             worker.cancel()
             worker.wait(3000)
+        self._save_layout()

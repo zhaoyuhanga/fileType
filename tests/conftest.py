@@ -14,7 +14,19 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MODU_DATA_DIR", tempfile.mkdtemp(prefix="modu-test-"))
 
 import pytest  # noqa: E402
+from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
+
+# 把 QSettings 隔离到临时 INI 目录：测试绝不读写真注册表。
+#
+# 为什么必须做：曾经有一条用例（预览渲染）依赖本机注册表里的
+# `document/split_view` 残留值 —— 开发机上是 true 所以通过，CI 上全新注册表
+# 就是空的，于是断言 `0 >= 800` 失败，查了很久才定位。
+# 隔离之后"本机残留值"这类事故从根上消失，测试之间也不会互相影响。
+_SETTINGS_DIR = tempfile.mkdtemp(prefix="modu-settings-")
+QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, _SETTINGS_DIR)
+QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.SystemScope, _SETTINGS_DIR)
 
 
 @pytest.fixture(scope="session")

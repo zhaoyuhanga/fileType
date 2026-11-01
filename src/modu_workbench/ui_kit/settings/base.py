@@ -28,8 +28,9 @@ from typing import Callable
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QWidget
 
-SETTINGS_ORG = "ModuWorkbench"
-SETTINGS_APP = "modu-workbench"
+# 单一来源在 core.platform.paths（轻量模块）；这里再导出一次，
+# 让 `from ...settings.base import SETTINGS_ORG` 的老写法继续可用。
+from modu_workbench.core.platform.paths import SETTINGS_APP, SETTINGS_ORG
 
 
 def app_settings():  # noqa: ANN201

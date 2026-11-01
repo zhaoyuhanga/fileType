@@ -190,6 +190,11 @@ class MusicLibraryPage(QWidget):
         self._table = configure_table(
             QTableWidget(), ["曲名", "歌手", "专辑", "时长", "格式", "分类", "收藏", "播放次数"]
         )
+
+        # 列宽记忆：用户拉宽过的列下次打开还是那么宽
+        from modu_workbench.ui_kit.view_state import remember_table_layout
+
+        remember_table_layout(self._table, "music/library_columns")
         self._table.doubleClicked.connect(lambda _index: self.play_selected())
         # 点击「收藏」列即可单独切换该曲目收藏（无需先选中再点按钮）
         self._table.itemClicked.connect(self._on_item_clicked)
@@ -718,7 +723,14 @@ class MusicConvertPage(QWidget):
         self._start.setEnabled(True)
         self._cancel.setEnabled(False)
 
+    def _save_layout(self) -> None:
+        """保存列宽（切走/关窗时调用）。"""
+        from modu_workbench.ui_kit.view_state import save_table_layout
+
+        save_table_layout(self._table, "music/library_columns")
+
     def shutdown(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(3000)
+        self._save_layout()

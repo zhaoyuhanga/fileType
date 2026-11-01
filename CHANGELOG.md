@@ -4,6 +4,56 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 36. 功能打磨（三）：列宽记忆 + 测试的 QSettings 隔离
+
+#### 1. 列表列宽会被记住
+
+乐库/影视的列表每次启动都回默认列宽：用户把「剧名」拉宽，下次打开又变窄。
+新增 `ui_kit/view_state.py`，存 `header().saveState()`（一次记住顺序/宽度/隐藏，
+列数变了 `restoreState` 自带容错），板块 `shutdown()` 时保存。
+
+#### 2. 一个被架构闸门否掉的功能（记下来）
+
+原本还想做"记住上次所在板块，启动时自动回去"——交互上很讨喜，但**与项目的
+懒加载设计正面冲突**：
+
+| 指标 | 限制 | 恢复上次板块后 |
+|---|---|---|
+| 启动加载模块数 | ≤ 60（实测 24） | **110** |
+| `requests` 是否进启动路径 | 不允许 | **进了**（约 95ms） |
+
+因为"恢复板块"意味着启动那一刻就要构建该板块，把它依赖的 core 域和
+`requests`/`bs4`/`lxml` 一起拉进来。这正是 v2.1.1 修过的性能缺陷。
+
+**决定：放弃这个功能**，理由与实测数字写进模块 docstring 与本节，
+避免以后有人再提一遍又踩一次。列宽记忆没有这个问题（板块已经构建了才用到）。
+
+#### 3. 测试的 QSettings 彻底隔离
+
+之前测试读写的都是**真实注册表**。这不只是洁癖——曾经有一条用例依赖本机
+注册表里的 `document/split_view` 残留值：开发机上是 `true` 所以通过，
+CI 上全新注册表是空的，于是断言 `0 >= 800` 失败，查了很久才定位。
+
+现在 `tests/conftest.py` 在 import 期就把 QSettings 指到临时 INI 目录
+（`setDefaultFormat(IniFormat)` + `setPath(...)`），测试之间也互不影响。
+这类"本机残留值"事故从根上消失。
+
+#### 4. 又一次被闸门拦下的启动回归
+
+`view_state` 一开始想复用 `ui_kit.settings.app_settings()` —— 但
+`ui_kit/settings` 是个**包**，导入其子模块会先执行包 `__init__`，
+把八个设置页的工厂全拉进启动路径（模块数 46 → 110）。
+改成直接用 `QSettings(SETTINGS_ORG, SETTINGS_APP)`，并把这两个常量
+下沉到轻量的 `core/platform/paths.py`（`ui_kit/settings/base.py` 改为复用，
+保持单一来源）。
+
+### 验证
+
+- `ruff check src tests`：All checks passed；
+- 全量 pytest 连跑两次：**exit=0**，**1237 个用例**（此前 1233）、95 文件；
+- 启动预算闸门：4 项全过（模块数、无 requests、无板块 core、无板块 board）。
+
+
 ### 35. 功能打磨（二）：Ctrl+F / F5 快捷键、空状态一键行动
 
 #### 1. 通用快捷键

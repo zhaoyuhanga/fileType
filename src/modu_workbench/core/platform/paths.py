@@ -13,6 +13,16 @@ APP_DIR_NAME = "ModuWorkbench"
 LEGACY_APP_DIR_NAME = "WinEBook"  # win-e-book 旧数据目录
 
 
+#: QSettings 的 org / app 名（**单一来源**）。
+#: 放在这里而不是 `ui_kit/settings/base.py`：后者是**包内容**，
+#: 任何子模块导入都会先执行 `ui_kit/settings/__init__.py`，
+#: 那个文件会把所有设置页工厂（进而 core.document / core.convert / requests）
+#: 一起拉进启动路径 —— 实测启动模块数从 46 涨到 110。
+#: 需要读一个键的轻量模块（如 ui_kit/view_state.py）应当从这里取常量。
+SETTINGS_ORG = "ModuWorkbench"
+SETTINGS_APP = "modu-workbench"
+
+
 def app_data_dir() -> Path:
     override = os.environ.get("MODU_DATA_DIR")
     if override:
