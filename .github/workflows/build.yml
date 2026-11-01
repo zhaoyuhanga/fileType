@@ -184,7 +184,14 @@ jobs:
           # 没有这一步，安装包缺失时 CI 依然会绿，而用户下载页会少一个文件。
           $setup = Get-ChildItem dist -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $setup) { throw "NSIS 安装包没有生成（dist\*-Setup-*.exe 不存在）" }
+          if (-not $setup) {
+            # 把现场打全，免得只看到一句"没生成"
+            "makensis 位置：$((Get-Command makensis.exe -ErrorAction SilentlyContinue).Source)"
+            "dist 目录内容："
+            Get-ChildItem dist -ErrorAction SilentlyContinue |
+              ForEach-Object { "  $($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" }
+            throw "NSIS 安装包没有生成（dist\*-Setup-*.exe 不存在）"
+          }
           $mb = [math]::Round($setup.Length / 1MB, 1)
           if ($mb -lt 50) { throw "安装包体积异常：$mb MB（预期 > 50MB）" }
           "安装包：$($setup.Name)  $mb MB"
@@ -278,6 +285,41 @@ jobs:
             dist/*-Setup-*.exe
           if-no-files-found: warn
           retention-days: 14
+
+      # 失败诊断：test 作业有同名步骤，但失败也可能发生在 build 作业
+      # （例如"安装包没产出"），所以这里也要一份。
+      - name: 失败时把日志推到 ci-logs 分支（build）
+        if: failure()
+        shell: pwsh
+        run: |
+          $dest = "ci-last-failure.log"
+          @(
+            "job: build   run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
+            "--- dist 目录 ---"
+          ) | Set-Content -Path $dest -Encoding UTF8
+          Get-ChildItem dist -ErrorAction SilentlyContinue |
+            ForEach-Object { "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" } |
+            Add-Content $dest -Encoding UTF8
+          "--- makensis ---" | Add-Content $dest -Encoding UTF8
+          "PATH: $((Get-Command makensis.exe -ErrorAction SilentlyContinue).Source)" |
+            Add-Content $dest -Encoding UTF8
+          foreach ($root in @("${env:ProgramFiles(x86)}\NSIS", "$env:ProgramFiles\NSIS")) {
+            "$root 存在: $(Test-Path $root)" | Add-Content $dest -Encoding UTF8
+          }
+          "--- 步骤日志（尾部 400 行）---" | Add-Content $dest -Encoding UTF8
+          if (Test-Path $env:CI_LOG) {
+            Get-Content $env:CI_LOG -Tail 400 | Add-Content $dest -Encoding UTF8
+          } else {
+            "（没有捕获到步骤日志）" | Add-Content $dest -Encoding UTF8
+          }
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git stash -u 2>$null
+          git checkout --orphan ci-logs 2>$null
+          if ($LASTEXITCODE -ne 0) { git checkout -B ci-logs }
+          git add -f $dest
+          git commit -m "ci: build 作业失败诊断" 2>$null
+          git push -f origin ci-logs
 
   # ---------------------------------------------------------------- 签名（预留，默认跳过）
   # SignPath 获批后取消注释并填好 secrets。见 docs/SIGNING.md 的落地步骤第 6 步。
