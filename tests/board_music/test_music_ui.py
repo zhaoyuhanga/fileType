@@ -127,6 +127,9 @@ def test_library_page_lists_and_plays(qapp: QApplication, storage: MusicStorage,
     page._favorite_only.setCurrentIndex(0)
 
     page._keyword.setText("歌曲1")
+    # 搜索已改为防抖（安静 250ms 才真正 reload）：用例里显式 flush，
+    # 否则断言的是"旧表格"，与真实行为无关
+    page._search_debounce.flush()
     assert page._table.rowCount() == 1
     page._keyword.setText("")
 

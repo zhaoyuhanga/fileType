@@ -170,6 +170,17 @@ class ShelfView(QWidget):
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_search_changed)
 
+        # 拖拽导入：把 .txt/.epub（或含它们的文件夹）拖进书架即可
+        from modu_workbench.core.book.files import SUPPORTED_BOOK_EXTENSIONS
+        from modu_workbench.ui_kit.dnd import FileDropController
+
+        self._drop = FileDropController(
+            self,
+            self._import_paths,
+            suffixes=SUPPORTED_BOOK_EXTENSIONS,
+            hint="松手即导入（.txt / .epub，或包含它们的文件夹）",
+        )
+
         toolbar.addWidget(import_files)
         toolbar.addWidget(import_folder)
         toolbar.addWidget(refresh)

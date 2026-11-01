@@ -249,6 +249,15 @@ class ConvertBoardPage(QWidget):
 
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.cellDoubleClicked.connect(self._on_double_click)
+
+        # 拖拽导入：任意文件（转换板块自己按格式判断能否处理）
+        from modu_workbench.ui_kit.dnd import FileDropController
+
+        self._drop = FileDropController(
+            self,
+            self._append_paths,
+            hint="松手即加入转换列表",
+        )
         self._rebuild_action_list()
 
     # ---------- 导入 ----------

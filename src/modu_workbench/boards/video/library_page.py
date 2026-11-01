@@ -23,7 +23,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from modu_workbench.core.video import VIDEO_TARGETS, VideoLibrary, VideoStorage
+from modu_workbench.core.video import (
+    VIDEO_EXTENSIONS,
+    VIDEO_TARGETS,
+    VideoLibrary,
+    VideoStorage,
+)
 from modu_workbench.ui_kit.components import (
     ColumnPage,
     EmptyState,
@@ -94,7 +99,12 @@ class VideoLibraryPage(QWidget):
         self._keyword = QLineEdit()
         self._keyword.setObjectName("searchBox")
         self._keyword.setPlaceholderText("搜索片名 / 演员 / 标签")
-        self._keyword.textChanged.connect(lambda _text: self.reload())
+        # 防抖：reload() 会查库 + 重建整张表，逐键触发会让输入一顿一顿的
+        from modu_workbench.ui_kit.debounce import Debouncer
+
+        self._search_debounce = Debouncer(self, self.reload)
+        self._keyword.textChanged.connect(lambda _text: self._search_debounce.trigger())
+        self._keyword.returnPressed.connect(self._search_debounce.flush)
         self._kind = make_kind_combo(include_all=True)
         self._kind.currentIndexChanged.connect(lambda _index: self.reload())
         self._collection = QComboBox()
@@ -110,6 +120,16 @@ class VideoLibraryPage(QWidget):
                                 stretch=self._keyword))
 
         self._table = configure_table(QTableWidget(), COLUMNS)
+
+        # 拖拽导入：视频文件或文件夹直接拖进影视库
+        from modu_workbench.ui_kit.dnd import FileDropController
+
+        self._drop = FileDropController(
+            self,
+            self._import_paths,
+            suffixes=VIDEO_EXTENSIONS,
+            hint="松手即导入（视频文件，或包含视频的文件夹）",
+        )
         self._table.doubleClicked.connect(lambda _index: self._play_action())
         attach_context_menu(self._table, self._row_menu)
         self._empty = EmptyState(
@@ -275,9 +295,19 @@ class VideoLibraryPage(QWidget):
         导入几个 2GB 的影片就是复制几个 GB —— 在 UI 线程做会冻结数分钟，
         连"正在导入"的提示都渲染不出来。
         """
+        pattern = " ".join(f"*{suffix}" for suffix in VIDEO_EXTENSIONS)
         files, _filter = QFileDialog.getOpenFileNames(
-            self, "选择本地影片", "", "视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.webm *.m4v *.ts *.mpg *.rmvb)"
+            self, "选择本地影片", "", f"视频文件 ({pattern})"
         )
+        self._import_paths(files)
+
+    def _import_paths(self, files: list[str]) -> None:
+        """把一批路径导入影视库（后台线程）。
+
+        独立成方法是为了**拖拽导入**也能复用：对话框与拖放的区别只是
+        "路径从哪来"，后面这段（查重、起 worker、接信号）完全一样。
+        """
+        files = [path for path in files if path]
         if not files:
             return
         if self._import_worker is not None and self._import_worker.isRunning():

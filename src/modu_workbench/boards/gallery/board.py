@@ -471,6 +471,17 @@ class GalleryBoardPage(QWidget):
         import_button.setObjectName("primaryButton")
         import_button.setToolTip("选择一个或多个图片文件")
         import_button.clicked.connect(self._import_files)
+
+        # 拖拽导入：图片或文件夹直接拖进来
+        from modu_workbench.core.gallery.models import IMAGE_EXTENSIONS
+        from modu_workbench.ui_kit.dnd import FileDropController
+
+        self._drop = FileDropController(
+            self,
+            self._on_drop_paths,
+            suffixes=IMAGE_EXTENSIONS,
+            hint="松手即导入（图片文件，或包含图片的文件夹）",
+        )
         row.addWidget(import_button)
 
         folder_button = QPushButton("扫描文件夹…")
@@ -1085,6 +1096,14 @@ class GalleryBoardPage(QWidget):
             self._toaster.info("未找到常见截图目录（通常在 图片/Screenshots）")
             return
         self._start_import(folders, source="screenshot")
+
+    def _on_drop_paths(self, paths: list[str]) -> None:
+        """拖拽导入的统一入口（把来源标成「拖拽」，便于提示与统计）。
+
+        单独成方法而不是传 lambda：`FileDropController` 用弱引用持有回调，
+        lambda 无法弱引用（会退化成强引用，重新形成引用环）。
+        """
+        self._start_import(paths, source="拖拽")
 
     def _start_import(self, paths: list[str], *, source: str) -> None:
         if self._browse_worker is not None and self._browse_worker.isRunning():

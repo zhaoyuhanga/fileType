@@ -148,7 +148,12 @@ class MusicLibraryPage(QWidget):
         self._keyword = QLineEdit()
         self._keyword.setObjectName("searchBox")
         self._keyword.setPlaceholderText("筛选：曲名 / 歌手 / 专辑")
-        self._keyword.textChanged.connect(lambda _text: self.reload())
+        # 防抖：reload() 会查库 + 重建整张表，逐键触发会让输入一顿一顿的
+        from modu_workbench.ui_kit.debounce import Debouncer
+
+        self._search_debounce = Debouncer(self, self.reload)
+        self._keyword.textChanged.connect(lambda _text: self._search_debounce.trigger())
+        self._keyword.returnPressed.connect(self._search_debounce.flush)
         self._artist = QComboBox()
         self._artist.currentIndexChanged.connect(lambda _i: self.reload())
         self._category = QComboBox()
