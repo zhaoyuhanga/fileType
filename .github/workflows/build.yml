@@ -179,7 +179,18 @@ jobs:
           choco install nsis --no-progress -y 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
           powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1 2>&1 |
             Tee-Object -FilePath $env:CI_LOG -Append
-          exit $LASTEXITCODE
+          if ($LASTEXITCODE -ne 0) { throw "build_installer.ps1 失败：$LASTEXITCODE" }
+          # **显式断言**：脚本"退出码 0"不等于"安装包真的产出了"。
+          # 没有这一步，安装包缺失时 CI 依然会绿，而用户下载页会少一个文件。
+          $setup = Get-ChildItem dist -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $setup) { throw "NSIS 安装包没有生成（dist\*-Setup-*.exe 不存在）" }
+          $mb = [math]::Round($setup.Length / 1MB, 1)
+          if ($mb -lt 50) { throw "安装包体积异常：$mb MB（预期 > 50MB）" }
+          "安装包：$($setup.Name)  $mb MB"
+          if ($env:GITHUB_STEP_SUMMARY) {
+            "### 安装包`n- $($setup.Name)`n- $mb MB" | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
 
       - name: 产物自检（无界面）
         shell: pwsh
