@@ -105,6 +105,13 @@ class VideoLibraryPage(QWidget):
         self._search_debounce = Debouncer(self, self.reload)
         self._keyword.textChanged.connect(lambda _text: self._search_debounce.trigger())
         self._keyword.returnPressed.connect(self._search_debounce.flush)
+
+        # 通用快捷键：Ctrl+F 找、F5 刷新
+        from modu_workbench.ui_kit.shortcuts import install_board_shortcuts
+
+        self._shortcuts = install_board_shortcuts(
+            self, search=self._keyword, refresh=self.reload
+        )
         self._kind = make_kind_combo(include_all=True)
         self._kind.currentIndexChanged.connect(lambda _index: self.reload())
         self._collection = QComboBox()

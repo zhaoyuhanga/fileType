@@ -170,6 +170,11 @@ class ShelfView(QWidget):
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_search_changed)
 
+        # 通用快捷键：Ctrl+F 找、F5 刷新
+        from modu_workbench.ui_kit.shortcuts import install_board_shortcuts
+
+        self._shortcuts = install_board_shortcuts(self, search=self._search, refresh=self.reload)
+
         # 拖拽导入：把 .txt/.epub（或含它们的文件夹）拖进书架即可
         from modu_workbench.core.book.files import SUPPORTED_BOOK_EXTENSIONS
         from modu_workbench.ui_kit.dnd import FileDropController
@@ -323,11 +328,21 @@ class ShelfView(QWidget):
                     "若反复失败，检查数据目录是否被其它程序占用或没有写入权限。",
                 )
             else:
+                # 空状态带一个主操作按钮：不用把鼠标先挪回工具条
+                from modu_workbench.ui_kit.components import primary_button
+
+                if self._filter:
+                    action = primary_button("清空搜索")
+                    action.clicked.connect(lambda: self._search.clear())
+                else:
+                    action = primary_button("导入书籍")
+                    action.clicked.connect(self._pick_files)
                 empty = EmptyState(
                     "📚",
                     "书架空空如也" if not self._filter else "没有匹配的书",
-                    "用上方「导入文件 / 导入文件夹」把 TXT / EPUB 加进来"
-                    if not self._filter else "换个关键词试试，或清空搜索框",
+                    "支持 TXT / EPUB；也可以直接把文件拖进窗口"
+                    if not self._filter else "换个关键词试试，或点下面的按钮清空",
+                    action=action,
                 )
             empty.setMaximumHeight(240)
             layout.addStretch(1)

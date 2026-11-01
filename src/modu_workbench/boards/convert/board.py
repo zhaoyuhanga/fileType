@@ -165,9 +165,14 @@ class ConvertBoardPage(QWidget):
         left_header.addStretch(1)
         left_header.addWidget(self._count_label)
         left_layout.addLayout(left_header)
+        from modu_workbench.ui_kit.components import primary_button
+
+        empty_action = primary_button("添加文件")
+        empty_action.clicked.connect(self._pick_files)
         self._empty = EmptyState(
             "📄", "还没有待转换的文件",
-            "用「添加文件 / 添加文件夹」把要处理的内容加进来，右侧会自动列出可用转换动作",
+            "也可以直接把文件拖进窗口，右侧会自动列出可用转换动作",
+            action=empty_action,
         )
         self._empty.setMaximumHeight(240)
         left_layout.addWidget(self._empty)

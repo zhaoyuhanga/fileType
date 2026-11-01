@@ -154,6 +154,13 @@ class MusicLibraryPage(QWidget):
         self._search_debounce = Debouncer(self, self.reload)
         self._keyword.textChanged.connect(lambda _text: self._search_debounce.trigger())
         self._keyword.returnPressed.connect(self._search_debounce.flush)
+
+        # 通用快捷键：Ctrl+F 找、F5 刷新
+        from modu_workbench.ui_kit.shortcuts import install_board_shortcuts
+
+        self._shortcuts = install_board_shortcuts(
+            self, search=self._keyword, refresh=self.reload
+        )
         self._artist = QComboBox()
         self._artist.currentIndexChanged.connect(lambda _i: self.reload())
         self._category = QComboBox()

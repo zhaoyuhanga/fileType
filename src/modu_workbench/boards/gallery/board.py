@@ -53,6 +53,7 @@ from . import context as app_context
 from modu_workbench.core.platform.logging import swallow
 from modu_workbench.ui_kit.toast import Toaster
 from modu_workbench.ui_kit.components import EmptyState, TaskBar
+from modu_workbench.ui_kit.components import primary_button
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
 from .nav_tree import CategoryNavTree
@@ -352,9 +353,12 @@ class GalleryBoardPage(QWidget):
         holder_layout = QVBoxLayout(self._grid_holder)
         holder_layout.setContentsMargins(0, 0, 0, 0)
         holder_layout.setSpacing(8)
+        empty_action = primary_button("导入图片")
+        empty_action.clicked.connect(self._import_files)
         self._empty = EmptyState(
             "🖼", "图库还是空的",
-            "用「导入图片…」把本地图片加进来，或「扫描文件夹…」批量导入已有目录",
+            "也可以把图片或文件夹直接拖进窗口",
+            action=empty_action,
         )
         holder_layout.addWidget(self._empty)
         holder_layout.addWidget(self._grid)
@@ -471,6 +475,11 @@ class GalleryBoardPage(QWidget):
         import_button.setObjectName("primaryButton")
         import_button.setToolTip("选择一个或多个图片文件")
         import_button.clicked.connect(self._import_files)
+
+        # 通用快捷键：Ctrl+F 找、F5 刷新
+        from modu_workbench.ui_kit.shortcuts import install_board_shortcuts
+
+        self._shortcuts = install_board_shortcuts(self, search=self._search, refresh=self.reload)
 
         # 拖拽导入：图片或文件夹直接拖进来
         from modu_workbench.core.gallery.models import IMAGE_EXTENSIONS
