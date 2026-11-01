@@ -288,18 +288,39 @@ jobs:
 
       # 失败诊断：test 作业有同名步骤，但失败也可能发生在 build 作业
       # （例如"安装包没产出"），所以这里也要一份。
-      - name: 失败时把日志推到 ci-logs 分支（build）
-        if: failure()
+      # 每次运行都留一份"产物清单"到 ci-logs 分支：
+      # 这样不登录也能确认真实产物（安装包到底有没有产出来、多大），
+      # 而不是只看徽章的绿/红。
+      - name: 把产物清单推到 ci-logs 分支（build）
+        if: always()
         shell: pwsh
         run: |
           $dest = "ci-last-failure.log"
+          $status = if ("${{ job.status }}" -eq "success") { "SUCCESS" } else { "FAILURE" }
           @(
-            "job: build   run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
-            "--- dist 目录 ---"
+            "job: build   status: $status   run: $env:GITHUB_RUN_ID   sha: $env:GITHUB_SHA",
+            "",
+            "--- dist 顶层 ---"
           ) | Set-Content -Path $dest -Encoding UTF8
           Get-ChildItem dist -ErrorAction SilentlyContinue |
             ForEach-Object { "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" } |
             Add-Content $dest -Encoding UTF8
+          "--- 安装包 ---" | Add-Content $dest -Encoding UTF8
+          $setup = Get-ChildItem dist -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue
+          if ($setup) {
+            $setup | ForEach-Object { "$($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" } |
+              Add-Content $dest -Encoding UTF8
+          } else {
+            "（没有安装包）" | Add-Content $dest -Encoding UTF8
+          }
+          "--- onedir ---" | Add-Content $dest -Encoding UTF8
+          $exe = "dist\ModuWorkbench\ModuWorkbench.exe"
+          if (Test-Path $exe) {
+            "ModuWorkbench.exe  $([math]::Round((Get-Item $exe).Length/1MB,1)) MB" |
+              Add-Content $dest -Encoding UTF8
+            "文件数：$((Get-ChildItem dist\ModuWorkbench -Recurse -File | Measure-Object).Count)" |
+              Add-Content $dest -Encoding UTF8
+          }
           "--- makensis ---" | Add-Content $dest -Encoding UTF8
           "PATH: $((Get-Command makensis.exe -ErrorAction SilentlyContinue).Source)" |
             Add-Content $dest -Encoding UTF8
