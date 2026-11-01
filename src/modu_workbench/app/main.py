@@ -7,6 +7,17 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 启动标记：**先把日志装配好**，这样后面任何一步出问题都有现场可查。
+    # （打包后是窗口程序，stderr 无处可去，只能靠文件日志。）
+    try:
+        from .. import __version__
+        from ..core.platform import logging as log_module
+        from ..core.platform import paths as config
+
+        log_module.note_startup(__version__, data_dir=str(config.app_data_dir()))
+    except Exception:  # noqa: BLE001  日志装配失败绝不能影响启动
+        pass
+
     # 统一数据入口：建库/迁移/导入旧版分库（失败不阻断启动）
     try:
         from .bootstrap import bootstrap_data

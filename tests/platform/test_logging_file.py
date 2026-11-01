@@ -122,3 +122,30 @@ def test_rotation_caps_file_size(fresh_logging) -> None:  # noqa: ANN001
     total = main_file.stat().st_size + sum(p.stat().st_size for p in rotated)
     limit = log_module.LOG_MAX_BYTES * (log_module.LOG_BACKUP_COUNT + 1) * 1.3
     assert total <= limit, f"日志总量 {total} 超过上限 {limit}"
+
+
+def test_startup_note_creates_log_immediately(fresh_logging) -> None:  # noqa: ANN001
+    """**启动即建日志**：一切正常时也要有文件。
+
+    原先是懒初始化（只有 `swallow` 被调用才装配处理器），结果是"一切正常就
+    不产生日志"——用户真遇到崩溃时可能一个字都没有。`note_startup()` 在启动
+    时先写一行，日志文件从第一次运行就存在，至少能回答
+    "什么时候启动过、哪个版本、数据目录在哪"。
+    """
+    log_module, paths = fresh_logging
+    log_module.note_startup("9.9.9", data_dir="D:/demo")
+
+    path = paths.log_file_path()
+    assert path.is_file(), "启动后没有立即生成日志文件"
+    text = path.read_text(encoding="utf-8")
+    assert "9.9.9" in text, "启动标记里没有版本号"
+    assert "D:/demo" in text, "启动标记里没有数据目录（排查时最需要的信息）"
+
+
+def test_startup_note_does_not_pollute_stderr(fresh_logging, capsys) -> None:  # noqa: ANN001
+    """启动标记只进文件，不该刷到终端（stderr 默认只收 WARNING）。"""
+    log_module, _paths = fresh_logging
+    log_module.note_startup("9.9.9", data_dir="D:/demo")
+    captured = capsys.readouterr()
+    assert "9.9.9" not in captured.err, "INFO 级启动标记泄漏到了 stderr"
+

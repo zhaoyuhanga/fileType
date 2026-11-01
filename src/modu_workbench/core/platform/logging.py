@@ -63,16 +63,24 @@ def _configure() -> logging.Logger:
     global _configured
     if _configured:
         return _logger
+    verbose = os.environ.get("MODU_LOG_LEVEL", "warning").lower() in ("debug", "trace")
+
     handler = logging.StreamHandler(stream=sys.stderr)
     handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
+    # stderr 默认只放 WARNING：包装成窗口程序时它本来就看不到，
+    # 而在开发终端里也不该被 INFO 噪音刷屏
+    handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
     _logger.addHandler(handler)
+
     file_handler = _file_handler()
     if file_handler is not None:
+        # 文件里留 INFO：启动标记（版本/数据目录）这类信息对排查很有用，
+        # 但它们不该出现在终端上
+        file_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
         _logger.addHandler(file_handler)
-    level = os.environ.get("MODU_LOG_LEVEL", "warning").lower()
-    _logger.setLevel(
-        logging.DEBUG if level in ("debug", "trace") else logging.WARNING
-    )
+
+    # logger 本身不设门槛，由各 handler 决定看到什么
+    _logger.setLevel(logging.DEBUG)
     _logger.propagate = False
     _configured = True
     return _logger
@@ -96,4 +104,30 @@ def debug(scope: str, error: BaseException | None = None) -> None:
     _logger.debug("忽略失败（%s）%s", scope, detail)
 
 
-__all__ = ["LOGGER_NAME", "LOG_BACKUP_COUNT", "LOG_MAX_BYTES", "debug", "swallow"]
+def note_startup(version: str, *, data_dir: str = "") -> None:
+    """启动时写一行标记（同时**确保日志文件被创建**）。
+
+    ## 为什么要"启动即建"
+
+    原先是懒初始化：只有 `swallow()` 被调用时才配置处理器。结果是
+    ——**一切正常时不产生任何日志**，等用户真遇到问题（尤其崩溃）时
+    可能一个字都没有。启动写一行之后，日志文件从第一次运行就存在，
+    里面至少有"什么时候启动过、哪个版本、数据目录在哪"。
+
+    这里用 INFO 级：文件处理器收 INFO，而 stderr 处理器默认只收 WARNING，
+    所以终端上不会多出噪音。
+    """
+    _configure()
+    _logger.info(
+        "启动 ModuWorkbench %s（数据目录：%s）", version, data_dir or "默认"
+    )
+
+
+__all__ = [
+    "LOGGER_NAME",
+    "LOG_BACKUP_COUNT",
+    "LOG_MAX_BYTES",
+    "debug",
+    "note_startup",
+    "swallow",
+]
