@@ -4,6 +4,57 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 32. CI 自动产出安装包 + 一次"把脚本写成空文件"的教训
+
+#### CI 补齐 NSIS 安装包
+
+CI 之前只产 onedir 的 zip，而用户真正下载的是 `Setup.exe`。现在 `build` 作业在
+PyInstaller 之后执行 `choco install nsis` → `build_installer.ps1`，
+安装包进入 SHA256 与产物上传。
+
+同时补强 `build_installer.ps1` 的 `makensis` 查找：原来只找 PATH 与
+electron-builder 缓存，**漏了 NSIS 官方/choco 的标准安装目录**
+（`Program Files (x86)\NSIS`）—— 而 CI 上 PATH 不一定立刻生效。
+
+#### 一次自伤：把 67 行脚本写成了 3 字节
+
+改脚本时踩了 Python 的运算符优先级：
+
+```python
+p.write_bytes(b"\xef\xbb\xbf" if bom else b"" + text.encode())   # 错
+```
+
+被解析成 `b"BOM" if bom else (b"" + text)` —— 对有 BOM 的文件**只写了 BOM**，
+`build_installer.ps1` 从 67 行变成 3 字节。
+
+**危害在于所有既有闸门都放行**：
+
+| 闸门 | 结果 |
+|---|---|
+| BOM 检查 | 通过（BOM 还在） |
+| PowerShell 语法检查 | 通过（空文件当然合法） |
+| 单元测试 | 通过（没有测试读它的内容） |
+
+是之后的行为异常（脚本跑完什么都没输出）才暴露出来。
+`git checkout` 恢复后，用括号写清并重做。
+
+#### 新增闸门：打包脚本不能是空壳
+
+`test_packaging_scripts_are_not_empty`：三个打包脚本必须 > 400 字符，
+且分别含关键标记（`PyInstaller`/`GUI`/`冒烟`、`makensis`/`installer.nsi`/
+`APP_VERSION`、`SOURCE_DIR`/`APP_VERSION`/`Section`）。
+**验证过**：把脚本清成只剩 BOM，闸门立刻失败。
+
+教训：**"文件存在"和"BOM 正确"都不等于"文件内容还在"**。凡是靠脚本改脚本
+（或程序生成文件）的地方，都该有一条"内容还在"的检查。
+
+### 验证
+
+- `ruff check src tests`：All checks passed；
+- 全量 pytest：**通过**，**1209 个用例**（此前 1208）；
+- 工作流 YAML 复核：build 作业 10 步，顺序正确。
+
+
 ### 31. 日志落盘：窗口程序终于有了可提供的现场
 
 #### 问题

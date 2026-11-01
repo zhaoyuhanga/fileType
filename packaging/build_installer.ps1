@@ -31,17 +31,28 @@ $version = (& $python -c "import modu_workbench; print(modu_workbench.__version_
 if (-not $version) { throw "无法读取版本号" }
 Write-Host "版本：$version"
 
-# 2) makensis：参数 > PATH > electron-builder 缓存
+# 2) makensis：参数 > PATH > 标准安装目录 > electron-builder 缓存
 if (-not $Makensis) {
     $cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
-    if ($cmd) {
-        $Makensis = $cmd.Source
-    } else {
-        $cached = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "electron-builder\Cache\nsis") `
-            -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($cached) { $Makensis = $cached.FullName }
+    if ($cmd) { $Makensis = $cmd.Source }
+}
+if (-not $Makensis) {
+    # NSIS 官方安装包与 choco 都装到这里。CI（GitHub Actions + choco install nsis）
+    # 上 PATH 不一定立刻生效，按标准路径找更可靠。
+    $roots = @(
+        (Join-Path ${env:ProgramFiles(x86)} "NSIS"),
+        (Join-Path $env:ProgramFiles "NSIS")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    foreach ($root in $roots) {
+        $candidate = Join-Path $root "makensis.exe"
+        if (Test-Path $candidate) { $Makensis = $candidate; break }
     }
+}
+if (-not $Makensis) {
+    $cached = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "electron-builder\Cache\nsis") `
+        -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($cached) { $Makensis = $cached.FullName }
 }
 if (-not $Makensis -or -not (Test-Path $Makensis)) {
     throw "未找到 makensis.exe，请安装 NSIS 或用 -Makensis 指定路径"

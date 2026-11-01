@@ -170,6 +170,17 @@ jobs:
       - name: PyInstaller 打包（onedir）
         run: python -m PyInstaller workbench.spec --noconfirm --clean
 
+      - name: 生成 NSIS 安装包
+        shell: pwsh
+        run: |
+          "== NSIS 安装包 ==" | Out-File -FilePath $env:CI_LOG -Append -Encoding UTF8
+          # choco 的 nsis 包会把 makensis 装到 Program Files (x86)\NSIS；
+          # build_installer.ps1 已支持按该路径查找（PATH 在 CI 上不一定立刻生效）
+          choco install nsis --no-progress -y 2>&1 | Tee-Object -FilePath $env:CI_LOG -Append
+          powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1 2>&1 |
+            Tee-Object -FilePath $env:CI_LOG -Append
+          exit $LASTEXITCODE
+
       - name: 产物自检（无界面）
         shell: pwsh
         run: |
@@ -233,6 +244,10 @@ jobs:
           if (Test-Path $exe) {
             $lines += "$((Get-FileHash $exe -Algorithm SHA256).Hash.ToLower())  ModuWorkbench.exe"
           }
+          # NSIS 安装包（若已生成）
+          Get-ChildItem dist -Filter "*-Setup-*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+            $lines += "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          }
           # 用 .NET API 写 UTF-8 无 BOM：`-Encoding utf8NoBOM` 只有 PowerShell 7+ 支持，
           # 项目约定又是"无 BOM"，写死编码方式才能跨 PS 版本稳定
           $sumPath = "dist\SHA256SUMS.txt"
@@ -249,6 +264,7 @@ jobs:
           path: |
             dist/SHA256SUMS.txt
             dist/*.zip
+            dist/*-Setup-*.exe
           if-no-files-found: warn
           retention-days: 14
 

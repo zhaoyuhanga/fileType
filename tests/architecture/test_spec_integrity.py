@@ -108,3 +108,25 @@ def test_packaging_scripts_keep_utf8_bom(relative: str) -> None:
     text = data.decode("utf-8")
     assert text[0] == "\ufeff", "解码后首字符应当是 BOM"
     assert not text[1:].startswith("\ufeff"), f"{relative} 正文开头仍残留 U+FEFF 字符"
+
+
+@pytest.mark.parametrize(
+    "relative,markers",
+    [
+        # 只查 BOM 是抓不到"文件被整体覆盖成空"的：BOM 还在，内容没了。
+        # 这一条是本仓库真实踩过的坑（一次脚本改写把 build_installer.ps1
+        # 写成了只有 3 字节的 BOM，而 BOM 闸门照样通过）。
+        ("packaging/build_app.ps1", ["PyInstaller", "GUI", "冒烟"]),
+        ("packaging/build_installer.ps1", ["makensis", "installer.nsi", "APP_VERSION"]),
+        ("packaging/installer.nsi", ["SOURCE_DIR", "APP_VERSION", "Section"]),
+    ],
+)
+def test_packaging_scripts_are_not_empty(relative: str, markers: list[str]) -> None:
+    """打包脚本不能是空壳：关键内容必须还在。"""
+    path = REPO_ROOT / relative
+    assert path.is_file(), f"缺少 {relative}"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    assert len(text) > 400, f"{relative} 只有 {len(text)} 字符，疑似被整体覆盖成空"
+    for marker in markers:
+        assert marker in text, f"{relative} 缺少关键内容：{marker}"
+
