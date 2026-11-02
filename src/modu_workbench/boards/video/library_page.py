@@ -133,6 +133,13 @@ class VideoLibraryPage(QWidget):
 
         remember_table_layout(self._table, "video/library_columns")
 
+        # Delete 删除选中条目（_delete_videos 自带确认对话框，不会误删文件）
+        from modu_workbench.ui_kit.shortcuts import install_delete_shortcut
+
+        self._delete_shortcuts = install_delete_shortcut(
+            self._table, self._delete_videos
+        )
+
         # 拖拽导入：视频文件或文件夹直接拖进影视库
         from modu_workbench.ui_kit.dnd import FileDropController
 

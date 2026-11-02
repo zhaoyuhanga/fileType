@@ -104,6 +104,9 @@ class ConvertBoardPage(QWidget):
         add_files.clicked.connect(self._pick_files)
         add_folder = QPushButton("添加文件夹")
         add_folder.clicked.connect(self._pick_folder)
+        remove_selected = QPushButton("移除选中")
+        remove_selected.setToolTip("只移除选中的文件（快捷键 Delete），不动磁盘文件")
+        remove_selected.clicked.connect(self._remove_selected_rows)
         clear = QPushButton("清空列表")
         clear.clicked.connect(self._clear_rows)
         self._out_input = QLineEdit(self._output_dir)
@@ -115,6 +118,7 @@ class ConvertBoardPage(QWidget):
         open_out.clicked.connect(lambda: self._reveal_output(""))
         toolbar.addWidget(add_files)
         toolbar.addWidget(add_folder)
+        toolbar.addWidget(remove_selected)
         toolbar.addWidget(clear)
         toolbar.addSpacing(8)
         toolbar.addWidget(QLabel("输出："))
@@ -131,6 +135,11 @@ class ConvertBoardPage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._table = QTableWidget(0, 6)
+
+        # Delete 只在这张表有焦点时生效（在搜索框里按 Delete 只删文字）
+        from modu_workbench.ui_kit.shortcuts import install_delete_shortcut
+
+        self._delete_shortcuts = install_delete_shortcut(self._table, self._remove_selected_rows)
         self._table.setHorizontalHeaderLabels(["选中", "文件名", "格式", "状态", "输出", "查看"])
         # 列宽策略：文件名吃掉剩余宽度（反馈里"文件名和详情挤在一起看不清"就是第 0/1 列
         # 都按默认宽度画、而富余宽度给了别处导致的），固定列按内容自适应，
@@ -305,6 +314,26 @@ class ConvertBoardPage(QWidget):
             self._toaster.success(f"已添加 {added} 个文件")
         else:
             self._toaster.info("没有新增文件")
+
+    def _remove_selected_rows(self) -> None:
+        """把表格里选中的行从待转换列表移除（不动磁盘文件）。
+
+        此前只有「清空列表」—— 加错一个文件就只能全清再加，
+        或者关掉板块重来。这里补上"只移除选中"，并接 Delete 键。
+        """
+        if self._worker is not None:
+            self._toaster.info("正在转换中，先等这一批完成")
+            return
+        rows = sorted({index.row() for index in self._table.selectedIndexes()}, reverse=True)
+        if not rows:
+            self._toaster.info("请先选择要移除的行")
+            return
+        for index in rows:
+            if 0 <= index < len(self._rows):
+                del self._rows[index]
+        self._rebuild_table()
+        self._rebuild_action_list()
+        self._toaster.success(f"已移除 {len(rows)} 个文件")
 
     def _clear_rows(self) -> None:
         if self._worker is not None:

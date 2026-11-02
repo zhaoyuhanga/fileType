@@ -343,6 +343,11 @@ class GalleryBoardPage(QWidget):
         self._splitter.addWidget(side_holder)
 
         self._grid = ThumbnailGrid(self._library)
+
+        # Delete 删除选中图片（_delete_selected 自带确认对话框）
+        from modu_workbench.ui_kit.shortcuts import install_delete_shortcut
+
+        self._delete_shortcuts = install_delete_shortcut(self._grid, self._delete_selected)
         self._grid.setMinimumWidth(260)
         self._grid.itemActivated.connect(self._open_viewer)
         self._grid.selectionChangedItems.connect(self._on_selection_changed)

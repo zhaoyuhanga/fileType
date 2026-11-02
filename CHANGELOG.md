@@ -4,6 +4,54 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 37. 功能打磨（四）：Delete 删除选中 + 转换板块「移除选中」
+
+#### 1. Delete 键（此前一处都没绑）
+
+桌面应用里 `Delete` 删选中项是肌肉记忆，但打磨前**全仓没有一处绑它**。
+
+关键是**作用域**：
+
+| 做法 | 后果 |
+|---|---|
+| 窗口级（`WindowShortcut`） | 用户在搜索框里删字，顺手把选中的数据删了 ❌ |
+| **控件级（`WidgetWithChildrenShortcut`）** | 只在列表有焦点时触发，搜索框里 Delete 只删文字 ✅ |
+
+实现的 `install_delete_shortcut(target, handler)` 一律用控件级，并同时绑
+`Backspace`（不少笔记本没有独立 Delete 键）。
+
+接线范围**刻意不同**：
+
+| 板块 | 是否绑 Delete | 理由 |
+|---|---|---|
+| 影视库 | ✅ | `_delete_videos` 本来就有确认对话框（含"是否删文件"） |
+| 图库 | ✅ | `_delete_selected` 同样有确认 |
+| 转换 | ✅ | 只从待转列表移除，**不动磁盘文件**，且是本次新加的能力 |
+| **乐库** | ❌ **刻意不绑** | 它的"从曲库移除"**没有确认对话框**，误按即丢记录 |
+
+乐库那条还写成了测试（`test_music_library_has_no_delete_key`）：将来若有人顺手
+给它加上 Delete，这条会失败，逼他先想清楚要不要先补确认。
+
+#### 2. 转换板块：补上「移除选中」
+
+原来只有「清空列表」—— 加错一个文件就只能全清再加，或者关掉板块重来。
+新增 `_remove_selected_rows()`：按选中行倒序删除、刷新表格与动作列表，
+并提示"已移除 N 个文件"。工具条加了「移除选中」按钮，同时接 Delete 键。
+
+#### 3. 一个 Qt 细节：`Delete` 的显示是 `Del`
+
+`QKeySequence("Delete").toString()` 返回 **"Del"**（Windows 标准写法）。
+测试里直接跟字面量 `"Delete"` 比较会误判成"没绑定"。已改为
+`QKeySequence(k).toString()` 归一化后比较。
+
+### 验证
+
+- `ruff check src tests`：All checks passed；
+- 全量 pytest 连跑两次：**exit=0**，**1244 个用例**（此前 1237）、96 文件；
+- 新增 7 条测试：键位、控件级作用域、异常吞掉、移除选中（只删选中/不动文件/
+  无选中不删）、转换的 Delete、**乐库不绑 Delete 的证据**。
+
+
 ### 36. 功能打磨（三）：列宽记忆 + 测试的 QSettings 隔离
 
 #### 1. 列表列宽会被记住

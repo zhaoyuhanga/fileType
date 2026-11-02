@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QLineEdit, QWidget
 
@@ -100,4 +101,52 @@ def focus_search(search: QLineEdit) -> None:
         swallow("聚焦搜索框", error)
 
 
-__all__ = ["REFRESH_KEYS", "SEARCH_KEYS", "focus_search", "install_board_shortcuts"]
+#: 删除选中项可用的键（Backspace 照顾笔记本键盘）
+DELETE_KEYS = ("Delete", "Backspace")
+
+
+def install_delete_shortcut(
+    target: QWidget,
+    handler: Callable[[], None],
+    *,
+    keys: tuple[str, ...] = DELETE_KEYS,
+) -> list[QShortcut]:
+    """给**列表控件本身**装删除快捷键。
+
+    ## 为什么用 `WidgetWithChildrenShortcut` 而不是窗口级
+
+    窗口级（`WindowShortcut`）会带来一类很危险的事故：用户正在搜索框里删字，
+    按 Delete 却把选中的数据删了。`WidgetWithChildrenShortcut` 只在
+    **该控件（及其子控件）有焦点**时才触发 —— 焦点在搜索框里时 Delete
+    只删文字。
+
+    ## 为什么单独一个函数
+
+    `install_board_shortcuts` 装的是"板块级"快捷键（Ctrl+F / F5），
+    而删除是**控件级**的：一个板块里可能有多张表，各自删各自的东西。
+    """
+    shortcuts: list[QShortcut] = []
+
+    def _delete() -> None:
+        try:
+            handler()
+        except Exception as error:  # noqa: BLE001  删除失败不该让界面崩
+            swallow("快捷键删除", error)
+
+    for key in keys:
+        shortcut = QShortcut(QKeySequence(key), target)
+        shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(_delete)
+        shortcuts.append(shortcut)
+
+    return shortcuts
+
+
+__all__ = [
+    "DELETE_KEYS",
+    "REFRESH_KEYS",
+    "SEARCH_KEYS",
+    "focus_search",
+    "install_board_shortcuts",
+    "install_delete_shortcut",
+]
