@@ -1,0 +1,70 @@
+job: build   status: SUCCESS   run: 41453284600   sha: 48ce703e729f662c21b0ce1a6ef6f8680aa41179
+
+--- dist 顶层 ---
+ModuWorkbench  0 MB
+ModuWorkbench-48ce703e729f662c21b0ce1a6ef6f8680aa41179.zip  155.1 MB
+SHA256SUMS.txt  0 MB
+墨软工作台-Setup-2.2.0.exe  155 MB
+--- 安装包 ---
+墨软工作台-Setup-2.2.0.exe  155 MB
+--- onedir ---
+ModuWorkbench.exe  12.3 MB
+文件数：250
+--- makensis ---
+PATH: 
+C:\Program Files (x86)\NSIS 存在: True
+C:\Program Files\NSIS 存在: False
+--- 步骤日志（尾部 400 行）---
+== NSIS 安装包 ==
+Chocolatey v2.7.4
+Installing the following packages:
+nsis
+By installing, you accept licenses for the packages.
+Downloading package from source 'https://community.chocolatey.org/api/v2/'
+
+nsis.install v3.13.0 [Approved]
+nsis.install package files install completed. Performing other installation steps.
+Installing nsis.install...
+nsis.install has been installed.
+  nsis.install can be automatically uninstalled.
+ The install of nsis.install was successful.
+  Deployed to 'C:\Program Files (x86)\NSIS'
+Downloading package from source 'https://community.chocolatey.org/api/v2/'
+
+nsis v3.13.0 [Approved]
+nsis package files install completed. Performing other installation steps.
+ The install of nsis was successful.
+  Deployed to 'C:\ProgramData\chocolatey\lib\nsis'
+
+Chocolatey installed 2/2 packages. 
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+
+Did you know the proceeds of Pro (and some proceeds from other
+ licensed editions) go into bettering the community infrastructure?
+ Your support ensures an active community, keeps Chocolatey tip-top,
+ plus it nets you some awesome features!
+ https://chocolatey.org/compare
+版本：2.2.0
+makensis：C:\Program Files (x86)\NSIS\makensis.exe
+Command line defined: "APP_VERSION=2.2.0"
+Command line defined: "SOURCE_DIR=D:\a\fileType\fileType\dist\ModuWorkbench"
+Processing config: C:\Program Files (x86)\NSIS\nsisconf.nsh
+Processing script file: "D:\a\fileType\fileType\packaging\installer.nsi" (UTF8)
+
+Processed 1 file, writing output (x86-unicode):
+
+Output: "D:\a\fileType\fileType\dist\?????-Setup-2.2.0.exe"
+Install: 4 pages (256 bytes), 1 section (2072 bytes), 703 instructions (19684 bytes), 488 strings (21108 bytes), 1 language table (298 bytes).
+Uninstall: 2 pages (192 bytes), 1 section (2072 bytes), 75 instructions (2100 bytes), 104 strings (1920 bytes), 1 language table (254 bytes).
+Datablock optimizer saved 11642 bytes (~0.0%).
+
+Using zlib compression.
+
+EXE header size:               59392 / 39936 bytes
+Install code:                   8226 / 43882 bytes
+Install data:              162439190 / 408892950 bytes
+Uninstall code+data:           23361 / 23774 bytes
+CRC (0xC343DE09):                  4 / 4 bytes
+
+Total size:                162530173 / 409000546 bytes (39.7%)
+完成：D:\a\fileType\fileType\dist\墨软工作台-Setup-2.2.0.exe（155 MB）
