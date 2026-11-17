@@ -83,8 +83,22 @@ class VideoSurface(QWidget):
 
     # ---------------------------------------------------------------- 场景尺寸
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """窗口重新显示时补一次贴合。
+
+        播放器切换「小窗 / 正常 / 全屏」会改窗口标志并先隐藏再显示；隐藏期间的
+        resize 不一定每次都触发 `resizeEvent`，画面就会停在旧尺寸上（表现为
+        小窗里只看到视频左上角一块）。这里在每次显示时无条件重算一次。
+        """
+        super().showEvent(event)
+        self._fit()
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._fit()
+
+    def refit(self) -> None:
+        """按当前 viewport 重新贴合画面（窗口尺寸/标志变化后手动调用）。"""
         self._fit()
 
     def _fit(self) -> None:
@@ -147,6 +161,10 @@ class WidgetSurface(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def native_size_changed(self, size) -> None:  # noqa: ANN001
+        return None
+
+    def refit(self) -> None:
+        """`QVideoWidget` 自带缩放，无需手动贴合（保留同名方法给播放器统一调用）。"""
         return None
 
     @property

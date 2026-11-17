@@ -561,6 +561,11 @@ QWidget#viewerHeader {{
     background: #ffffff;
     border-bottom: 1px solid {t.border};
 }}
+/* 播放器小窗模式的顶栏：窄、深色一点，兼作拖动把手 */
+QWidget#miniBar {{
+    background: {t.surface};
+    border-bottom: 1px solid {t.border};
+}}
 QWidget#viewerMeta {{
     background: {t.surface_2};
     border-bottom: 1px solid {t.border};

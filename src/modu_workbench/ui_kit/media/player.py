@@ -25,7 +25,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPen
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -48,6 +48,13 @@ from .surface import VideoSurface, make_surface, read_render_path
 from modu_workbench.core.platform.logging import swallow
 
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+
+#: 小窗模式（浮窗置顶）的窗口尺寸：16:9 画面 + 顶部拖动条
+MINI_WIDTH = 400
+MINI_VIDEO_HEIGHT = 225
+MINI_BAR_HEIGHT = 28
+#: 解除固定尺寸时的"无上限"（Qt 的 QWIDGETSIZE_MAX，PySide6 未导出这个常量）
+MAX_WIDGET_SIZE = 16777215
 
 #: 起播三段自愈的阈值（毫秒）：3s 降档 → 8s 换源 → 20s 建议先下后播
 SELF_HEAL_DOWNGRADE_MS = 3000
@@ -107,6 +114,77 @@ class _Overlay:
         return list(self._in_use)
 
 
+class _MiniBar(QWidget):
+    """小窗模式顶部的条：标题 + 播放/还原/关闭，兼作无边框窗口的拖动把手。
+
+    无边框窗口没有系统标题栏，所以"拖动"必须自己实现：按住这条的任何空白处
+    都能把窗口拖着走（按下时记住光标相对窗口左上角的偏移，移动时按偏移跟着走）。
+    """
+
+    def __init__(self, player: "VideoPlayerDialog") -> None:
+        super().__init__(player)
+        self._player = player
+        self._drag_offset = None
+        self.setObjectName("miniBar")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 2, 6, 2)
+        row.setSpacing(4)
+
+        self._title = QLabel("小窗播放")
+        self._title.setObjectName("viewerHint")
+        row.addWidget(self._title, 1)
+
+        self._play_button = QPushButton("▶")
+        self._play_button.setObjectName("playerButton")
+        self._play_button.setFixedWidth(30)
+        self._play_button.setToolTip("播放 / 暂停（空格）")
+        self._play_button.clicked.connect(player.toggle_pause)
+        row.addWidget(self._play_button)
+
+        restore = QPushButton("⤢")
+        restore.setObjectName("playerButton")
+        restore.setFixedWidth(30)
+        restore.setToolTip("还原窗口（Esc / 双击画面 / M）")
+        restore.clicked.connect(player.exit_mini)
+        row.addWidget(restore)
+
+        close = QPushButton("✕")
+        close.setObjectName("playerButton")
+        close.setFixedWidth(30)
+        close.setToolTip("关闭播放器")
+        close.clicked.connect(player.close)
+        row.addWidget(close)
+
+    # ---- 拖动 ---------------------------------------------------------
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = event.globalPosition().toPoint() - self._player.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self._player.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        """双击顶栏 = 还原（和系统标题栏的习惯一致）。"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._player.exit_mini()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class VideoPlayerDialog(QDialog):
     """视频播放窗口（影视 / 动漫共用）。
 
@@ -149,6 +227,11 @@ class VideoPlayerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title or "墨软影视 · 播放")
         self.resize(1120, 700)
+        # 小窗模式：记住进入前的窗口标志与几何，退出时原样还原
+        self._mini = False
+        self._normal_flags = self.windowFlags()
+        self._restore_geometry = None
+        self._mini_saved_mins: list[tuple[QWidget, int]] = []
         self._toaster = Toaster(self)
         self._url = url
         self._is_hls = bool(is_hls)
@@ -207,6 +290,7 @@ class VideoPlayerDialog(QDialog):
         layout.setSpacing(0)
 
         header = QWidget()
+        self._header = header
         header.setObjectName("viewerHeader")
         header_row = QHBoxLayout(header)
         header_row.setContentsMargins(14, 8, 14, 8)
@@ -219,6 +303,11 @@ class VideoPlayerDialog(QDialog):
         header_row.addWidget(self._engine_label)
         layout.addWidget(header)
 
+        # 小窗模式专用顶栏（平时隐藏）：既是控制条，也是无边框窗口的拖动把手
+        self._mini_bar = _MiniBar(self)
+        self._mini_bar.hide()
+        layout.addWidget(self._mini_bar)
+
         self._stack = QStackedWidget()
         layout.addWidget(self._stack, 1)
 
@@ -229,6 +318,7 @@ class VideoPlayerDialog(QDialog):
         layout.addWidget(self._status)
 
         controls = QWidget()
+        self._controls = controls
         controls.setObjectName("bottomBar")
         row = QHBoxLayout(controls)
         row.setContentsMargins(14, 8, 14, 10)
@@ -312,6 +402,12 @@ class VideoPlayerDialog(QDialog):
         self._volume.setFixedWidth(90)
         self._volume.valueChanged.connect(self._on_volume_changed)
         row.addWidget(self._volume)
+
+        self._mini_button = QPushButton("小窗")
+        self._mini_button.setObjectName("playerButton")
+        self._mini_button.setToolTip("小窗播放：缩成置顶浮窗继续播，可边看边做别的（M）")
+        self._mini_button.clicked.connect(self.toggle_mini)
+        row.addWidget(self._mini_button)
 
         self._fullscreen_button = QPushButton("⛶")
         self._fullscreen_button.setObjectName("playerButton")
@@ -521,10 +617,122 @@ class VideoPlayerDialog(QDialog):
             self.qualityRequested.emit(label)
 
     def toggle_fullscreen(self) -> None:
+        if self._mini:
+            # 小窗里双击画面/按 F11 的直觉是「放大」：先还原成正常窗口
+            self.exit_mini()
+            return
         if self.isFullScreen():
             self.showNormal()
         else:
             self.showFullScreen()
+
+    # ------------------------------------------------------------------ 小窗
+
+    def is_mini(self) -> bool:
+        """当前是否处在小窗（浮窗置顶）模式。"""
+        return self._mini
+
+    def toggle_mini(self) -> None:
+        """在「正常播放窗口」与「置顶小窗」之间切换（M）。"""
+        if self._mini:
+            self.exit_mini()
+        else:
+            self.enter_mini()
+
+    def enter_mini(self) -> None:
+        """缩成置顶小窗：画面与声音照旧，只留一条窄控制栏。
+
+        小窗是给「边看边做别的事」用的：窗口置顶、无边框、固定 16:9，
+        首次进入停在屏幕右下角；之后可以按住顶栏拖动。
+        """
+        if self._mini:
+            return
+        if self.isFullScreen():
+            self.showNormal()
+        self._restore_geometry = self.geometry()
+        self._mini = True
+        self._relax_height_limits()
+        self._header.hide()
+        self._status.hide()
+        self._controls.hide()
+        self._mini_bar.show()
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        # 小窗是固定尺寸的浮窗：显式钉死，免得内容的最小尺寸把窗口顶大
+        self.setFixedSize(MINI_WIDTH, MINI_VIDEO_HEIGHT + MINI_BAR_HEIGHT)
+        self._place_mini_window()
+        self.show()
+        self._refit_surface()
+        self.raise_()
+        self.activateWindow()
+
+    def exit_mini(self) -> None:
+        """还原成正常播放窗口（Esc / 双击画面 / M / 小窗里的还原按钮）。"""
+        if not self._mini:
+            return
+        self._mini = False
+        self._mini_bar.hide()
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(MAX_WIDGET_SIZE, MAX_WIDGET_SIZE)
+        self._restore_height_limits()
+        self._header.show()
+        self._status.show()
+        self._controls.show()
+        self.setWindowFlags(self._normal_flags)
+        if self._restore_geometry is not None:
+            self.setGeometry(self._restore_geometry)
+        self.show()
+        self._refit_surface()
+        self.raise_()
+        self.activateWindow()
+
+    def _relax_height_limits(self) -> None:
+        """小窗只有 253px 高，先放开会顶住它的最小高度（退出时还原）。
+
+        `QVideoWidget` 回退路径自带 `setMinimumHeight(320)`，`QStackedWidget`
+        的最小尺寸也来自子控件；不放开的话小窗会被撑到 348px，16:9 就变形了。
+        """
+        self._mini_saved_mins = []
+        candidates = [self._stack, self._surface, getattr(self._surface, "widget", None)]
+        for widget in candidates:
+            if widget is None:
+                continue
+            self._mini_saved_mins.append((widget, widget.minimumHeight()))
+            widget.setMinimumHeight(0)
+
+    def _restore_height_limits(self) -> None:
+        for widget, height in self._mini_saved_mins:
+            try:
+                widget.setMinimumHeight(height)
+            except RuntimeError:  # 对象已被销毁（换过渲染路径）时忽略
+                continue
+        self._mini_saved_mins = []
+
+    def _refit_surface(self) -> None:
+        """窗口尺寸/标志变化后让画面重新贴合（小窗里否则会只显示视频一角）。"""
+        surface = self._surface
+        refit = getattr(surface, "refit", None)
+        if callable(refit):
+            refit()
+        # 布局在本次事件里还没走完，下一轮事件循环再补一次（拿到最终 viewport 尺寸）
+        QTimer.singleShot(0, self._refit_surface_deferred)
+
+    def _refit_surface_deferred(self) -> None:
+        surface = self._surface
+        refit = getattr(surface, "refit", None)
+        if callable(refit):
+            refit()
+
+    def _place_mini_window(self) -> None:
+        """首次进入小窗时停到当前屏幕右下角（离任务栏留一点空隙）。"""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        self.move(area.right() - self.width() - 24, area.bottom() - self.height() - 48)
 
     # ------------------------------------------------------------------ 快捷键
 
@@ -539,6 +747,10 @@ class VideoPlayerDialog(QDialog):
             self.seek_ms(self._position_ms + 10_000)
         elif key in (Qt.Key.Key_F11, Qt.Key.Key_F):
             self.toggle_fullscreen()
+        elif key == Qt.Key.Key_M:
+            self.toggle_mini()
+        elif key == Qt.Key.Key_Escape and self._mini:
+            self.exit_mini()
         elif key == Qt.Key.Key_Escape and self.isFullScreen():
             self.showNormal()
         elif key == Qt.Key.Key_F12:
@@ -586,8 +798,10 @@ class VideoPlayerDialog(QDialog):
 
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self._play_button.setText("⏸")
+            self._mini_bar._play_button.setText("⏸")  # noqa: SLF001  小窗里同一个"播放/暂停"
         else:
             self._play_button.setText("▶")
+            self._mini_bar._play_button.setText("▶")  # noqa: SLF001
 
     def _on_native_status(self, status) -> None:  # noqa: ANN001
         import time
