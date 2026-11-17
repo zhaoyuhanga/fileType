@@ -88,6 +88,34 @@ def install_board_shortcuts(
     return shortcuts
 
 
+# ---------------------------------------------------------------- 播放器：小窗
+
+#: 小窗相关快捷键的设置键（「设置 → 影视 → 播放器快捷键」可改）
+MINI_TOGGLE_SETTING = "video/shortcut_mini"
+MINI_MINIMIZE_SETTING = "video/shortcut_mini_minimize"
+#: 默认键位：M 进/出小窗，Ctrl+M 把小窗收进任务栏
+DEFAULT_MINI_TOGGLE = "M"
+DEFAULT_MINI_MINIMIZE = "Ctrl+M"
+
+
+def load_player_shortcuts() -> tuple[str, str]:
+    """读取「小窗切换 / 小窗最小化」两个快捷键。
+
+    返回 `(切换, 最小化)`；**空值回落到默认**（用户在设置里清空了输入框、
+    或旧版本没有这两个键时，不该变成"没有快捷键"）。
+    """
+    from PySide6.QtCore import QSettings
+
+    from modu_workbench.core.platform.paths import SETTINGS_APP, SETTINGS_ORG
+
+    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    toggle = str(settings.value(MINI_TOGGLE_SETTING, DEFAULT_MINI_TOGGLE, type=str) or "").strip()
+    minimize = str(
+        settings.value(MINI_MINIMIZE_SETTING, DEFAULT_MINI_MINIMIZE, type=str) or ""
+    ).strip()
+    return toggle or DEFAULT_MINI_TOGGLE, minimize or DEFAULT_MINI_MINIMIZE
+
+
 def focus_search(search: QLineEdit) -> None:
     """把焦点移到搜索框并全选（`Ctrl+F` 再按一次就相当于"改搜索词"）。"""
     try:
@@ -143,10 +171,15 @@ def install_delete_shortcut(
 
 
 __all__ = [
+    "DEFAULT_MINI_MINIMIZE",
+    "DEFAULT_MINI_TOGGLE",
     "DELETE_KEYS",
+    "MINI_MINIMIZE_SETTING",
+    "MINI_TOGGLE_SETTING",
     "REFRESH_KEYS",
     "SEARCH_KEYS",
     "focus_search",
     "install_board_shortcuts",
     "install_delete_shortcut",
+    "load_player_shortcuts",
 ]

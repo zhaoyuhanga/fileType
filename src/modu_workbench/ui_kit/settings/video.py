@@ -13,12 +13,14 @@ v1.1.0 新增三组（对应 docs/VIDEO_PLAN.md 3.4 的设置键）：
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QKeySequenceEdit,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -29,6 +31,13 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.app import context as app_context
 from modu_workbench.core.platform import paths as config
+from modu_workbench.ui_kit.shortcuts import (
+    DEFAULT_MINI_MINIMIZE,
+    DEFAULT_MINI_TOGGLE,
+    MINI_MINIMIZE_SETTING,
+    MINI_TOGGLE_SETTING,
+    load_player_shortcuts,
+)
 
 from .base import SettingsPage, app_settings
 from modu_workbench.core.platform.logging import swallow
@@ -174,6 +183,30 @@ class VideoSettingsPage(SettingsPage):
         self._auto_next = QCheckBox("播放结束自动连播下一集")
         play_form.addRow("连播", self._auto_next)
         layout.addLayout(play_form)
+
+        # v2.2.x：小窗快捷键可改 —— 有人习惯 M，有人用笔记本没有独立键，键位不该写死
+        layout.addWidget(self._section("播放器快捷键（小窗）"))
+        shortcut_form = QFormLayout()
+        shortcut_form.setSpacing(10)
+
+        self._shortcut_mini = QKeySequenceEdit()
+        self._shortcut_mini.setMaximumSequenceLength(1)
+        self._shortcut_mini.setFixedWidth(180)
+        self._shortcut_mini.setToolTip(
+            "播放器里按这个键在「正常窗口 / 置顶小窗」之间切换（默认 M）。"
+            "改完重新打开播放器生效；清空则回到默认。"
+        )
+        shortcut_form.addRow("小窗切换", self._shortcut_mini)
+
+        self._shortcut_mini_minimize = QKeySequenceEdit()
+        self._shortcut_mini_minimize.setMaximumSequenceLength(1)
+        self._shortcut_mini_minimize.setFixedWidth(180)
+        self._shortcut_mini_minimize.setToolTip(
+            "把小窗收进任务栏、声音继续（默认 Ctrl+M）。"
+            "两个小窗快捷键配成同一个键时，以「小窗切换」为准。"
+        )
+        shortcut_form.addRow("小窗最小化", self._shortcut_mini_minimize)
+        layout.addLayout(shortcut_form)
 
         layout.addWidget(self._section("缓存与网络（代理/下载）"))
         cache_form = QFormLayout()
@@ -385,6 +418,11 @@ class VideoSettingsPage(SettingsPage):
         self._auto_upgrade.setChecked(self._settings.value("video/auto_upgrade", False, type=bool))
         self._auto_next.setChecked(self._settings.value("video/auto_next", True, type=bool))
 
+        # ---- 播放器快捷键（小窗）----
+        toggle_key, minimize_key = load_player_shortcuts()
+        self._shortcut_mini.setKeySequence(QKeySequence(toggle_key))
+        self._shortcut_mini_minimize.setKeySequence(QKeySequence(minimize_key))
+
         # ---- 缓存与网络 ----
         self._select_data(
             self._buffer_mode, self._settings.value("video/buffer_mode", "balanced", type=str)
@@ -452,6 +490,17 @@ class VideoSettingsPage(SettingsPage):
         self._settings.setValue("video/auto_upgrade", self._auto_upgrade.isChecked())
         self._settings.setValue("video/auto_next", self._auto_next.isChecked())
 
+        # ---- 播放器快捷键（小窗）----
+        portable = QKeySequence.SequenceFormat.PortableText
+        self._settings.setValue(
+            MINI_TOGGLE_SETTING,
+            self._shortcut_mini.keySequence().toString(portable) or DEFAULT_MINI_TOGGLE,
+        )
+        self._settings.setValue(
+            MINI_MINIMIZE_SETTING,
+            self._shortcut_mini_minimize.keySequence().toString(portable) or DEFAULT_MINI_MINIMIZE,
+        )
+
         # ---- 缓存与网络 ----
         self._settings.setValue("video/buffer_mode", self._buffer_mode.currentData())
         self._settings.setValue("video/cache_quota_mb", self._cache_quota.value())
@@ -496,6 +545,7 @@ class VideoSettingsPage(SettingsPage):
         return (
             "解码后端/硬解是**进程级**环境变量：改动后需重开播放窗口（必要时重启应用）生效。"
             "缓冲档位同时决定磁盘缓存配额与预取深度；分片缓存可随时清空，会自动重建。"
+            "小窗快捷键改完重开播放器生效；两个小窗键配成同一个键时，以「小窗切换」为准。"
         )
 
 

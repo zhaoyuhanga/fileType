@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QSettings
+from PySide6.QtGui import QKeySequence
 
 from modu_workbench.ui_kit.settings.video import VideoSettingsPage
 
@@ -48,10 +49,12 @@ EXPECTED_DEFAULTS: dict[str, object] = {
 def temp_settings(tmp_path, monkeypatch, qapp):  # noqa: ANN001
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
-    for key in EXPECTED_DEFAULTS:
+    # 小窗快捷键不在 EXPECTED_DEFAULTS 里（它存的是字符串而不是控件值），单独清一遍
+    extra_keys = ("video/shortcut_mini", "video/shortcut_mini_minimize")
+    for key in list(EXPECTED_DEFAULTS) + list(extra_keys):
         QSettings(ORG, APP).remove(key)
     yield QSettings(ORG, APP)
-    for key in EXPECTED_DEFAULTS:
+    for key in list(EXPECTED_DEFAULTS) + list(extra_keys):
         QSettings(ORG, APP).remove(key)
 
 
@@ -192,3 +195,47 @@ def test_clear_cache_reports_without_error(temp_settings) -> None:  # noqa: ANN0
         assert "MB" in page._cache_usage.text() or page._cache_usage.text() == ""
     finally:
         page.deleteLater()
+
+
+def test_mini_shortcut_defaults(temp_settings) -> None:  # noqa: ANN001
+    """小窗快捷键默认 M / Ctrl+M（用户没改过时不该是空键）。"""
+    page = _page()
+    try:
+        assert page._shortcut_mini.keySequence().toString() == "M"
+        assert page._shortcut_mini_minimize.keySequence().toString() == "Ctrl+M"
+    finally:
+        page.deleteLater()
+
+
+def test_mini_shortcut_roundtrip(temp_settings) -> None:  # noqa: ANN001
+    """改完键位保存后：设置页读到的、播放器读到的必须是同一份。"""
+    page = _page()
+    page._shortcut_mini.setKeySequence(QKeySequence("K"))
+    page._shortcut_mini_minimize.setKeySequence(QKeySequence("Ctrl+Shift+K"))
+    page.save()
+    page.deleteLater()
+
+    again = _page()
+    try:
+        assert again._shortcut_mini.keySequence().toString() == "K"
+        assert again._shortcut_mini_minimize.keySequence().toString() == "Ctrl+Shift+K"
+    finally:
+        again.deleteLater()
+
+    from modu_workbench.ui_kit.shortcuts import load_player_shortcuts
+
+    assert load_player_shortcuts() == ("K", "Ctrl+Shift+K"), "播放器读到的键位与设置页不一致"
+
+
+def test_empty_shortcut_falls_back_to_default(temp_settings) -> None:  # noqa: ANN001
+    """把输入框清空后保存：回落到默认键，而不是变成"没有快捷键"。"""
+    page = _page()
+    page._shortcut_mini.clear()
+    page.save()
+    page.deleteLater()
+
+    again = _page()
+    try:
+        assert again._shortcut_mini.keySequence().toString() == "M"
+    finally:
+        again.deleteLater()

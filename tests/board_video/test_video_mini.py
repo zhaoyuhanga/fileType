@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from modu_workbench.ui_kit.media.player import (
     MINI_BAR_HEIGHT,
@@ -102,20 +102,45 @@ def test_escape_restores_from_mini(qapp: QApplication) -> None:
         dialog.close()
 
 
-def test_m_key_toggles_mini(qapp: QApplication) -> None:
-    """`M` 一键进出小窗。"""
+def test_default_shortcuts_toggle_mini(qapp: QApplication) -> None:
+    """默认键位：``M`` 进出小窗、``Ctrl+M`` 最小化（可在设置里改）。"""
+    from PySide6.QtGui import QKeySequence
+
     dialog = _dialog()
     try:
-        dialog.keyPressEvent(
-            QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_M, Qt.KeyboardModifier.NoModifier)
-        )
+        assert dialog._mini_shortcut is not None                       # noqa: SLF001
+        assert dialog._mini_shortcut.key() == QKeySequence("M")        # noqa: SLF001
+        assert dialog._mini_minimize_shortcut.key() == QKeySequence("Ctrl+M")  # noqa: SLF001
+
+        dialog._mini_shortcut.activated.emit()                         # noqa: SLF001
         assert dialog.is_mini() is True
-        dialog.keyPressEvent(
-            QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_M, Qt.KeyboardModifier.NoModifier)
-        )
+        dialog._mini_shortcut.activated.emit()                         # noqa: SLF001
         assert dialog.is_mini() is False
     finally:
         dialog.close()
+
+
+def test_shortcuts_can_be_reconfigured(qapp: QApplication) -> None:
+    """设置里的键位真的会被播放器读到（不是只存在页面上）。"""
+    from PySide6.QtCore import QSettings
+
+    from modu_workbench.ui_kit.media.player import VideoPlayerDialog
+
+    settings = QSettings("ModuWorkbench", "modu-workbench")
+    settings.setValue("video/shortcut_mini", "K")
+    settings.setValue("video/shortcut_mini_minimize", "Ctrl+Shift+K")
+    dialog = VideoPlayerDialog(title="t", url="", render_path="graphics")
+    try:
+        from PySide6.QtGui import QKeySequence
+
+        assert dialog._mini_shortcut.key() == QKeySequence("K")                      # noqa: SLF001
+        assert dialog._mini_minimize_shortcut.key() == QKeySequence("Ctrl+Shift+K")  # noqa: SLF001
+        dialog._mini_shortcut.activated.emit()                                       # noqa: SLF001
+        assert dialog.is_mini() is True
+    finally:
+        dialog.close()
+        settings.remove("video/shortcut_mini")
+        settings.remove("video/shortcut_mini_minimize")
 
 
 def test_double_click_in_mini_restores_instead_of_fullscreen(qapp: QApplication) -> None:
@@ -247,6 +272,58 @@ def test_mini_refits_video_surface(qapp: QApplication) -> None:
         assert abs(scene.width() - viewport.width()) <= 1, "画面宽度没跟上小窗"
         assert abs(scene.height() - viewport.height()) <= 1, "画面高度没跟上小窗"
     finally:
+        dialog.close()
+
+
+def test_mini_window_is_independent_of_main_window(qapp: QApplication) -> None:
+    """小窗与主窗口解除从属：主窗口最小化时它不会被系统一起收走。"""
+    parent = QWidget()
+    parent.resize(600, 400)
+    dialog = VideoPlayerDialog(parent, title="t", url="", render_path="graphics")
+    try:
+        assert dialog.parentWidget() is parent
+        dialog.enter_mini()
+        assert dialog.parentWidget() is None, (
+            "小窗仍从属于主窗口，主窗口一最小化它就会被一起收走"
+        )
+        dialog.exit_mini()
+        assert dialog.parentWidget() is parent, "退出小窗后没有恢复从属关系"
+    finally:
+        dialog.close()
+        parent.close()
+
+
+def test_mini_minimize_button_and_shortcut(qapp: QApplication) -> None:
+    """「—」和最小化快捷键都只是收进任务栏，窗口状态仍是小窗。"""
+    dialog = _dialog()
+    try:
+        dialog.enter_mini()
+        dialog._mini_bar._minimize_button.click()        # noqa: SLF001
+        assert dialog.isMinimized() is True
+        assert dialog.is_mini() is True
+
+        dialog.showNormal()
+        assert dialog.is_mini() is True, "从任务栏恢复后应仍是小窗"
+        assert dialog._mini_bar.isHidden() is False      # noqa: SLF001
+
+        dialog._mini_minimize_shortcut.activated.emit()  # noqa: SLF001
+        assert dialog.isMinimized() is True
+        assert dialog.is_mini() is True
+    finally:
+        dialog.showNormal()
+        dialog.close()
+
+
+def test_minimize_shortcut_enters_mini_first(qapp: QApplication) -> None:
+    """在正常窗口直接按最小化键：先变小窗再收进任务栏（恢复后是小窗）。"""
+    dialog = _dialog()
+    try:
+        dialog.show()
+        dialog._mini_minimize_shortcut.activated.emit()  # noqa: SLF001
+        assert dialog.is_mini() is True
+        assert dialog.isMinimized() is True
+    finally:
+        dialog.showNormal()
         dialog.close()
 
 

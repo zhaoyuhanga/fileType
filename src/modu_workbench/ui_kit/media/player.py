@@ -25,7 +25,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QKeySequence, QPen, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.services import media_proxy as proxy
+from modu_workbench.ui_kit.shortcuts import load_player_shortcuts
 from modu_workbench.ui_kit.toast import Toaster
 
 from . import danmaku as danmaku_ops
@@ -143,12 +144,19 @@ class _MiniBar(QWidget):
         self._play_button.clicked.connect(player.toggle_pause)
         row.addWidget(self._play_button)
 
-        restore = QPushButton("⤢")
-        restore.setObjectName("playerButton")
-        restore.setFixedWidth(30)
-        restore.setToolTip("还原窗口（Esc / 双击画面 / M）")
-        restore.clicked.connect(player.exit_mini)
-        row.addWidget(restore)
+        self._minimize_button = QPushButton("—")
+        self._minimize_button.setObjectName("playerButton")
+        self._minimize_button.setFixedWidth(30)
+        self._minimize_button.setToolTip("最小化小窗（收进任务栏，声音继续）")
+        self._minimize_button.clicked.connect(player.minimize_mini)
+        row.addWidget(self._minimize_button)
+
+        self._restore_button = QPushButton("⤢")
+        self._restore_button.setObjectName("playerButton")
+        self._restore_button.setFixedWidth(30)
+        self._restore_button.setToolTip("还原窗口（Esc / 双击画面）")
+        self._restore_button.clicked.connect(player.exit_mini)
+        row.addWidget(self._restore_button)
 
         close = QPushButton("✕")
         close.setObjectName("playerButton")
@@ -156,6 +164,11 @@ class _MiniBar(QWidget):
         close.setToolTip("关闭播放器")
         close.clicked.connect(player.close)
         row.addWidget(close)
+
+    def update_shortcut_hints(self, toggle: str, minimize: str) -> None:
+        """按钮提示跟着用户配置的键位走（否则提示里写着 Ctrl+M，实际却不是）。"""
+        self._minimize_button.setToolTip(f"最小化小窗（{minimize}，可在 设置 → 影视 改）")
+        self._restore_button.setToolTip(f"还原窗口（{toggle} / Esc / 双击画面）")
 
     # ---- 拖动 ---------------------------------------------------------
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -232,6 +245,11 @@ class VideoPlayerDialog(QDialog):
         self._normal_flags = self.windowFlags()
         self._restore_geometry = None
         self._mini_saved_mins: list[tuple[QWidget, int]] = []
+        # 小窗是独立窗口：进入时与主窗口解除"从属"，主窗口最小化不会把它一起带走
+        self._mini_owner: QWidget | None = None
+        self._player_shortcuts: list[QShortcut] = []
+        self._mini_shortcut: QShortcut | None = None
+        self._mini_minimize_shortcut: QShortcut | None = None
         self._toaster = Toaster(self)
         self._url = url
         self._is_hls = bool(is_hls)
@@ -271,6 +289,7 @@ class VideoPlayerDialog(QDialog):
         self._native_holder = None
 
         self._build_ui(qualities or [], current_quality, episode_label, has_prev, has_next)
+        self.reload_shortcuts()
         if subtitle_path:
             self.load_subtitle(subtitle_path)
         self._load(url, is_hls, referer)
@@ -633,11 +652,56 @@ class VideoPlayerDialog(QDialog):
         return self._mini
 
     def toggle_mini(self) -> None:
-        """在「正常播放窗口」与「置顶小窗」之间切换（M）。"""
+        """在「正常播放窗口」与「置顶小窗」之间切换（默认 M，可在设置里改）。"""
         if self._mini:
             self.exit_mini()
         else:
             self.enter_mini()
+
+    def minimize_mini(self) -> None:
+        """把小窗收进任务栏（声音继续；从任务栏点回来仍在原位、仍是小窗）。
+
+        不是小窗时先切成小窗再最小化 —— 这个快捷键的语义是"我要它别挡路"，
+        用户不该先按一次小窗再按一次最小化。
+        """
+        if not self._mini:
+            self.enter_mini()
+        self.showMinimized()
+
+    def reload_shortcuts(self) -> None:
+        """按设置（`设置 → 影视 → 播放器快捷键`）重装小窗快捷键。
+
+        键位改完不必重启应用：设置保存后再打开播放器就是新键位；
+        已经开着的播放器也可以调用本方法即时生效。
+        """
+        for shortcut in self._player_shortcuts:
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
+        self._player_shortcuts = []
+
+        toggle, minimize = load_player_shortcuts()
+        self._mini_shortcut = self._make_shortcut(toggle, self.toggle_mini)
+        # 两个键配成一样时 Qt 会报 ambiguous，两个都不触发；这里保证切换键优先
+        if minimize != toggle:
+            self._mini_minimize_shortcut = self._make_shortcut(minimize, self.minimize_mini)
+        else:
+            self._mini_minimize_shortcut = None
+
+        self._mini_button.setToolTip(
+            f"小窗播放：缩成置顶浮窗继续播，可边看边做别的（{toggle or '无快捷键'}）"
+        )
+        self._mini_bar.update_shortcut_hints(toggle, minimize)
+
+    def _make_shortcut(self, sequence: str, handler) -> QShortcut | None:  # noqa: ANN001
+        text = (sequence or "").strip()
+        if not text:
+            return None
+        shortcut = QShortcut(QKeySequence(text), self)
+        # 控件级：焦点在播放器里（含子控件）才生效，不会抢主窗口/其它窗口的键
+        shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(handler)
+        self._player_shortcuts.append(shortcut)
+        return shortcut
 
     def enter_mini(self) -> None:
         """缩成置顶小窗：画面与声音照旧，只留一条窄控制栏。
@@ -651,6 +715,10 @@ class VideoPlayerDialog(QDialog):
             self.showNormal()
         self._restore_geometry = self.geometry()
         self._mini = True
+        # 解除与主窗口的从属关系：否则主窗口一最小化，小窗会被系统一起收走
+        self._mini_owner = self.parentWidget()
+        if self._mini_owner is not None:
+            self.setParent(None)
         self._relax_height_limits()
         self._header.hide()
         self._status.hide()
@@ -678,6 +746,14 @@ class VideoPlayerDialog(QDialog):
         self.setMinimumSize(0, 0)
         self.setMaximumSize(MAX_WIDGET_SIZE, MAX_WIDGET_SIZE)
         self._restore_height_limits()
+        # 还原从属关系（父窗口可能已经销毁，例如应用退出流程里）
+        owner = self._mini_owner
+        self._mini_owner = None
+        if owner is not None:
+            try:
+                self.setParent(owner)
+            except RuntimeError:  # 父对象已被销毁
+                pass
         self._header.show()
         self._status.show()
         self._controls.show()
@@ -734,6 +810,12 @@ class VideoPlayerDialog(QDialog):
         area = screen.availableGeometry()
         self.move(area.right() - self.width() - 24, area.bottom() - self.height() - 48)
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """小窗从任务栏点回来时重新贴合画面（最小化期间 viewport 尺寸可能变过）。"""
+        super().showEvent(event)
+        if self._mini:
+            self._refit_surface()
+
     # ------------------------------------------------------------------ 快捷键
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
@@ -747,8 +829,6 @@ class VideoPlayerDialog(QDialog):
             self.seek_ms(self._position_ms + 10_000)
         elif key in (Qt.Key.Key_F11, Qt.Key.Key_F):
             self.toggle_fullscreen()
-        elif key == Qt.Key.Key_M:
-            self.toggle_mini()
         elif key == Qt.Key.Key_Escape and self._mini:
             self.exit_mini()
         elif key == Qt.Key.Key_Escape and self.isFullScreen():
