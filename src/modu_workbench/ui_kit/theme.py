@@ -561,11 +561,12 @@ QWidget#viewerHeader {{
     background: #ffffff;
     border-bottom: 1px solid {t.border};
 }}
-/* 播放器小窗模式的顶栏：窄、深色一点，兼作拖动把手 */
+/* 播放器小窗：无边框，控制条悬浮在画面上，平时藏起来 */
 QWidget#miniBar {{
-    background: {t.surface};
-    border-bottom: 1px solid {t.border};
+    background: rgba(16, 16, 16, 190);
+    border: none;
 }}
+QLabel#miniTitle {{ color: #f4f4f4; font-size: 12px; }}
 QWidget#viewerMeta {{
     background: {t.surface_2};
     border-bottom: 1px solid {t.border};

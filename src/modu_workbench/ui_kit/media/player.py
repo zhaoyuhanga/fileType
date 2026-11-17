@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QKeySequence, QPen, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -50,10 +50,15 @@ from modu_workbench.core.platform.logging import swallow
 
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 
-#: 小窗模式（浮窗置顶）的窗口尺寸：16:9 画面 + 顶部拖动条
+#: 小窗模式（浮窗置顶）的窗口尺寸：只有 16:9 画面，控制条悬浮在画面上、不占高度
 MINI_WIDTH = 400
 MINI_VIDEO_HEIGHT = 225
 MINI_BAR_HEIGHT = 28
+#: 拖边能缩到的下限（再小按钮和画面都没法看）
+MINI_MIN_WIDTH = 200
+MINI_MIN_HEIGHT = 112
+#: 无边框窗口没有系统缩放热区，自己留一圈这么宽的边
+MINI_RESIZE_MARGIN = 6
 #: 解除固定尺寸时的"无上限"（Qt 的 QWIDGETSIZE_MAX，PySide6 未导出这个常量）
 MAX_WIDGET_SIZE = 16777215
 
@@ -116,10 +121,10 @@ class _Overlay:
 
 
 class _MiniBar(QWidget):
-    """小窗模式顶部的条：标题 + 播放/还原/关闭，兼作无边框窗口的拖动把手。
+    """小窗悬浮条：标题 + 暂停 / 最小化 / 最大化还原 / 关闭。
 
-    无边框窗口没有系统标题栏，所以"拖动"必须自己实现：按住这条的任何空白处
-    都能把窗口拖着走（按下时记住光标相对窗口左上角的偏移，移动时按偏移跟着走）。
+    平时藏起来，鼠标移进小窗才浮在画面上（不占窗口高度）。无边框窗口没有
+    系统标题栏，按住这条的空白处可以拖动窗口。
     """
 
     def __init__(self, player: "VideoPlayerDialog") -> None:
@@ -127,6 +132,7 @@ class _MiniBar(QWidget):
         self._player = player
         self._drag_offset = None
         self.setObjectName("miniBar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
         row = QHBoxLayout(self)
@@ -134,7 +140,7 @@ class _MiniBar(QWidget):
         row.setSpacing(4)
 
         self._title = QLabel("小窗播放")
-        self._title.setObjectName("viewerHint")
+        self._title.setObjectName("miniTitle")
         row.addWidget(self._title, 1)
 
         self._play_button = QPushButton("▶")
@@ -154,21 +160,21 @@ class _MiniBar(QWidget):
         self._restore_button = QPushButton("⤢")
         self._restore_button.setObjectName("playerButton")
         self._restore_button.setFixedWidth(30)
-        self._restore_button.setToolTip("还原窗口（Esc / 双击画面）")
+        self._restore_button.setToolTip("最大化还原（Esc / 双击画面）")
         self._restore_button.clicked.connect(player.exit_mini)
         row.addWidget(self._restore_button)
 
-        close = QPushButton("✕")
-        close.setObjectName("playerButton")
-        close.setFixedWidth(30)
-        close.setToolTip("关闭播放器")
-        close.clicked.connect(player.close)
-        row.addWidget(close)
+        self._close_button = QPushButton("✕")
+        self._close_button.setObjectName("playerButton")
+        self._close_button.setFixedWidth(30)
+        self._close_button.setToolTip("关闭播放器")
+        self._close_button.clicked.connect(player.close)
+        row.addWidget(self._close_button)
 
     def update_shortcut_hints(self, toggle: str, minimize: str) -> None:
         """按钮提示跟着用户配置的键位走（否则提示里写着 Ctrl+M，实际却不是）。"""
         self._minimize_button.setToolTip(f"最小化小窗（{minimize}，可在 设置 → 影视 改）")
-        self._restore_button.setToolTip(f"还原窗口（{toggle} / Esc / 双击画面）")
+        self._restore_button.setToolTip(f"最大化还原（{toggle} / Esc / 双击画面）")
 
     # ---- 拖动 ---------------------------------------------------------
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -244,9 +250,20 @@ class VideoPlayerDialog(QDialog):
         self._mini = False
         self._normal_flags = self.windowFlags()
         self._restore_geometry = None
-        self._mini_saved_mins: list[tuple[QWidget, int]] = []
+        self._mini_saved_mins: list[tuple[QWidget, int, int]] = []
         # 小窗是独立窗口：进入时与主窗口解除"从属"，主窗口最小化不会把它一起带走
         self._mini_owner: QWidget | None = None
+        # 无边框小窗的拖动 / 拖边缩放（系统边框没了，得自己做）
+        self._mini_dragging = False
+        self._mini_press_pending = False
+        self._mini_resize_edges = Qt.Edge(0)
+        self._mini_press_global: QPoint | None = None
+        self._mini_press_geom: QRect | None = None
+        self._mini_press_pos: QPoint | None = None
+        # Esc 会走 QDialog.reject（只隐藏、不发 closeEvent）。关窗必须先把声音放掉，
+        # 否则旧窗口还在播，再开一个就是两路声音。
+        self._closing = False
+        self._playback_released = False
         self._player_shortcuts: list[QShortcut] = []
         self._mini_shortcut: QShortcut | None = None
         self._mini_minimize_shortcut: QShortcut | None = None
@@ -322,10 +339,9 @@ class VideoPlayerDialog(QDialog):
         header_row.addWidget(self._engine_label)
         layout.addWidget(header)
 
-        # 小窗模式专用顶栏（平时隐藏）：既是控制条，也是无边框窗口的拖动把手
+        # 小窗控制条浮在画面上，不进布局（进了布局就会把 16:9 的高度吃掉一截）
         self._mini_bar = _MiniBar(self)
         self._mini_bar.hide()
-        layout.addWidget(self._mini_bar)
 
         self._stack = QStackedWidget()
         layout.addWidget(self._stack, 1)
@@ -443,6 +459,7 @@ class VideoPlayerDialog(QDialog):
         layout.addWidget(controls)
 
         self._build_native_surface()
+        self._install_pointer_filters()
 
         # 播放中每 2s 更新一次"该预取哪一段"（交给会话层用）
         self._prefetch_timer = QTimer(self)
@@ -462,7 +479,7 @@ class VideoPlayerDialog(QDialog):
         self._surface = surface
         self._stack.addWidget(surface)
         self._native_holder = surface
-        surface.clicked.connect(self.toggle_pause)
+        surface.clicked.connect(self._on_surface_clicked)
         surface.doubleClicked.connect(self.toggle_fullscreen)
         if isinstance(surface, VideoSurface):
             self._overlay = _Overlay(surface)
@@ -552,6 +569,8 @@ class VideoPlayerDialog(QDialog):
 
     def _self_heal(self, stage: str) -> None:
         """起播三段自愈：3s 降档 / 8s 换源 / 20s 建议先下后播。"""
+        if self._closing or self._playback_released:
+            return
         if self._native_ok or self._progressing() or stage in self._healed:
             return
         self._healed[stage] = True
@@ -583,6 +602,12 @@ class VideoPlayerDialog(QDialog):
         self._status.setText("⚠ 该地址未能起播。可尝试切换清晰度/换源，或先下载到本地再播放。")
 
     # ------------------------------------------------------------------ 控制
+
+    def _on_surface_clicked(self) -> None:
+        """点画面暂停。小窗里点画面是拖动，暂停交给悬浮按钮和空格。"""
+        if self._mini:
+            return
+        self.toggle_pause()
 
     def toggle_pause(self) -> None:
         if self._player is None:
@@ -704,10 +729,10 @@ class VideoPlayerDialog(QDialog):
         return shortcut
 
     def enter_mini(self) -> None:
-        """缩成置顶小窗：画面与声音照旧，只留一条窄控制栏。
+        """缩成置顶小窗：只有画面，控制按钮鼠标移上来才出现。
 
-        小窗是给「边看边做别的事」用的：窗口置顶、无边框、固定 16:9，
-        首次进入停在屏幕右下角；之后可以按住顶栏拖动。
+        小窗是给「边看边做别的事」用的：窗口置顶、无边框，默认 16:9。
+        首次进入停在屏幕右下角；按住画面或悬浮条可拖动，贴着边拖可改大小。
         """
         if self._mini:
             return
@@ -723,15 +748,16 @@ class VideoPlayerDialog(QDialog):
         self._header.hide()
         self._status.hide()
         self._controls.hide()
-        self._mini_bar.show()
+        self._set_mini_chrome(False)
         self.setWindowFlags(
             Qt.WindowType.Window
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        # 小窗是固定尺寸的浮窗：显式钉死，免得内容的最小尺寸把窗口顶大
-        self.setFixedSize(MINI_WIDTH, MINI_VIDEO_HEIGHT + MINI_BAR_HEIGHT)
+        # 钉住当前尺寸，免得子控件的最小尺寸把窗口顶大；拖边时改的就是这个钉
+        self.setFixedSize(MINI_WIDTH, MINI_VIDEO_HEIGHT)
         self._place_mini_window()
+        self._place_mini_chrome()
         self.show()
         self._refit_surface()
         self.raise_()
@@ -741,8 +767,10 @@ class VideoPlayerDialog(QDialog):
         """还原成正常播放窗口（Esc / 双击画面 / M / 小窗里的还原按钮）。"""
         if not self._mini:
             return
+        self._end_mini_gesture()
         self._mini = False
         self._mini_bar.hide()
+        self.unsetCursor()
         self.setMinimumSize(0, 0)
         self.setMaximumSize(MAX_WIDGET_SIZE, MAX_WIDGET_SIZE)
         self._restore_height_limits()
@@ -766,23 +794,23 @@ class VideoPlayerDialog(QDialog):
         self.activateWindow()
 
     def _relax_height_limits(self) -> None:
-        """小窗只有 253px 高，先放开会顶住它的最小高度（退出时还原）。
+        """小窗默认只有 225px 高，先放开子控件的最小尺寸（退出时还原）。
 
         `QVideoWidget` 回退路径自带 `setMinimumHeight(320)`，`QStackedWidget`
-        的最小尺寸也来自子控件；不放开的话小窗会被撑到 348px，16:9 就变形了。
+        的最小尺寸也来自子控件；不放开的话小窗会被撑高，16:9 就变形了。
         """
         self._mini_saved_mins = []
         candidates = [self._stack, self._surface, getattr(self._surface, "widget", None)]
         for widget in candidates:
             if widget is None:
                 continue
-            self._mini_saved_mins.append((widget, widget.minimumHeight()))
-            widget.setMinimumHeight(0)
+            self._mini_saved_mins.append((widget, widget.minimumWidth(), widget.minimumHeight()))
+            widget.setMinimumSize(0, 0)
 
     def _restore_height_limits(self) -> None:
-        for widget, height in self._mini_saved_mins:
+        for widget, width, height in self._mini_saved_mins:
             try:
-                widget.setMinimumHeight(height)
+                widget.setMinimumSize(width, height)
             except RuntimeError:  # 对象已被销毁（换过渲染路径）时忽略
                 continue
         self._mini_saved_mins = []
@@ -814,7 +842,211 @@ class VideoPlayerDialog(QDialog):
         """小窗从任务栏点回来时重新贴合画面（最小化期间 viewport 尺寸可能变过）。"""
         super().showEvent(event)
         if self._mini:
+            self._place_mini_chrome()
             self._refit_surface()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._mini:
+            self._place_mini_chrome()
+            self._refit_surface()
+
+    # ------------------------------------------------------------------ 小窗：悬浮控件 / 拖动 / 拖边
+
+    def _install_pointer_filters(self) -> None:
+        """小窗的鼠标事件发生在画面子控件上，对话框自己收不到，得挂过滤器。"""
+        targets: list[QWidget | None] = [self, self._stack, self._mini_bar, self._surface]
+        surface = self._surface
+        if surface is not None:
+            targets.append(getattr(surface, "view", None))
+            targets.append(getattr(surface, "widget", None))
+        seen: set[int] = set()
+        for widget in targets:
+            if widget is None or id(widget) in seen:
+                continue
+            seen.add(id(widget))
+            widget.installEventFilter(self)
+            widget.setMouseTracking(True)
+        self.setMouseTracking(True)
+
+    def _set_mini_chrome(self, visible: bool) -> None:
+        """暂停 / 最小化 / 最大化 / 关闭：只有鼠标在小窗里才显示。"""
+        if not self._mini:
+            self._mini_bar.hide()
+            return
+        if visible:
+            self._place_mini_chrome()
+            self._mini_bar.show()
+            self._mini_bar.raise_()
+        else:
+            self._mini_bar.hide()
+
+    def _place_mini_chrome(self) -> None:
+        self._mini_bar.setGeometry(0, 0, max(1, self.width()), MINI_BAR_HEIGHT)
+
+    def _mini_edges_at(self, pos: QPoint) -> Qt.Edge:
+        """光标贴着哪条边（贴角时两条都算）。不在边上返回 0。"""
+        margin = MINI_RESIZE_MARGIN
+        edges = Qt.Edge(0)
+        if pos.x() <= margin:
+            edges |= Qt.Edge.LeftEdge
+        elif pos.x() >= self.width() - margin:
+            edges |= Qt.Edge.RightEdge
+        if pos.y() <= margin:
+            edges |= Qt.Edge.TopEdge
+        elif pos.y() >= self.height() - margin:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    @staticmethod
+    def _cursor_for_edges(edges: Qt.Edge) -> Qt.CursorShape:
+        left = bool(edges & Qt.Edge.LeftEdge)
+        right = bool(edges & Qt.Edge.RightEdge)
+        top = bool(edges & Qt.Edge.TopEdge)
+        bottom = bool(edges & Qt.Edge.BottomEdge)
+        if (left and top) or (right and bottom):
+            return Qt.CursorShape.SizeFDiagCursor
+        if (right and top) or (left and bottom):
+            return Qt.CursorShape.SizeBDiagCursor
+        if left or right:
+            return Qt.CursorShape.SizeHorCursor
+        if top or bottom:
+            return Qt.CursorShape.SizeVerCursor
+        return Qt.CursorShape.ArrowCursor
+
+    def _pointer_in_dialog(self, watched: QWidget, event) -> QPoint:  # noqa: ANN001
+        if watched is self and hasattr(event, "position"):
+            return event.position().toPoint()
+        if hasattr(event, "globalPosition"):
+            return self.mapFromGlobal(event.globalPosition().toPoint())
+        return QPoint(0, 0)
+
+    def _arm_mini_press(self, global_pos: QPoint) -> None:
+        self._mini_press_global = QPoint(global_pos)
+        self._mini_press_geom = QRect(self.geometry())
+        self._mini_press_pos = QPoint(self.pos())
+
+    def _end_mini_gesture(self) -> None:
+        self._mini_dragging = False
+        self._mini_press_pending = False
+        self._mini_resize_edges = Qt.Edge(0)
+        self._mini_press_global = None
+        self._mini_press_geom = None
+        self._mini_press_pos = None
+        if self.mouseGrabber() is self:
+            self.releaseMouse()
+        if self._mini:
+            self.unsetCursor()
+
+    def _apply_mini_resize(self, global_pos: QPoint) -> None:
+        origin = self._mini_press_geom
+        anchor = self._mini_press_global
+        if origin is None or anchor is None:
+            return
+        dx = global_pos.x() - anchor.x()
+        dy = global_pos.y() - anchor.y()
+        edges = self._mini_resize_edges
+        left = origin.left()
+        top = origin.top()
+        width = origin.width()
+        height = origin.height()
+        if edges & Qt.Edge.LeftEdge:
+            left = origin.left() + dx
+            width = origin.width() - dx
+        elif edges & Qt.Edge.RightEdge:
+            width = origin.width() + dx
+        if edges & Qt.Edge.TopEdge:
+            top = origin.top() + dy
+            height = origin.height() - dy
+        elif edges & Qt.Edge.BottomEdge:
+            height = origin.height() + dy
+        if width < MINI_MIN_WIDTH:
+            if edges & Qt.Edge.LeftEdge:
+                left -= MINI_MIN_WIDTH - width
+            width = MINI_MIN_WIDTH
+        if height < MINI_MIN_HEIGHT:
+            if edges & Qt.Edge.TopEdge:
+                top -= MINI_MIN_HEIGHT - height
+            height = MINI_MIN_HEIGHT
+        self.setFixedSize(width, height)
+        self.move(left, top)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, ANN001
+        if self._mini and not self._closing and self._filter_mini_pointer(watched, event):
+            return True
+        return super().eventFilter(watched, event)
+
+    def _filter_mini_pointer(self, watched, event) -> bool:  # noqa: ANN001
+        """小窗指针：移入显示按钮，贴边拖改大小，其余区域拖动窗口。"""
+        etype = event.type()
+        if etype == QEvent.Type.Enter:
+            self._set_mini_chrome(True)
+            return False
+        if etype == QEvent.Type.Leave and watched is self:
+            self._set_mini_chrome(False)
+            self.unsetCursor()
+            return False
+        if etype == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+            local = self._pointer_in_dialog(watched, event)
+            if not self._mini_edges_at(local) and watched is not self._mini_bar:
+                self.exit_mini()
+                return True
+            return False
+        if etype == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            local = self._pointer_in_dialog(watched, event)
+            edges = self._mini_edges_at(local)
+            # 悬浮条的空白处仍走它自己的拖动；贴边则优先缩放
+            if watched is self._mini_bar and not edges:
+                return False
+            self._arm_mini_press(event.globalPosition().toPoint())
+            if edges:
+                self._mini_resize_edges = edges
+                self._mini_dragging = False
+                self._mini_press_pending = False
+                self.setCursor(self._cursor_for_edges(edges))
+                if self.mouseGrabber() is None:
+                    self.grabMouse()
+                return True
+            # 先不吃掉点击，好让双击还原还能送到画面；真的拖动了再接手
+            self._mini_press_pending = True
+            return False
+        if etype == QEvent.Type.MouseMove and hasattr(event, "globalPosition"):
+            global_pos = event.globalPosition().toPoint()
+            if self._mini_resize_edges:
+                self._apply_mini_resize(global_pos)
+                return True
+            if (
+                self._mini_press_pending
+                and self._mini_press_global is not None
+                and event.buttons() & Qt.MouseButton.LeftButton
+            ):
+                delta = global_pos - self._mini_press_global
+                if abs(delta.x()) + abs(delta.y()) >= 4:
+                    self._mini_press_pending = False
+                    self._mini_dragging = True
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    if self.mouseGrabber() is None:
+                        self.grabMouse()
+            if self._mini_dragging and self._mini_press_global is not None:
+                delta = global_pos - self._mini_press_global
+                self.move(self._mini_press_pos + delta)
+                return True
+            local = self._pointer_in_dialog(watched, event)
+            edges = self._mini_edges_at(local)
+            if edges:
+                self.setCursor(self._cursor_for_edges(edges))
+            elif watched is not self._mini_bar:
+                self.unsetCursor()
+            if not self._mini_bar.isVisible():
+                self._set_mini_chrome(True)
+            return False
+        if etype == QEvent.Type.MouseButtonRelease and (
+            self._mini_dragging or self._mini_resize_edges or self._mini_press_pending
+        ):
+            consumed = bool(self._mini_dragging or self._mini_resize_edges)
+            self._end_mini_gesture()
+            return consumed
+        return False
 
     # ------------------------------------------------------------------ 快捷键
 
@@ -833,6 +1065,9 @@ class VideoPlayerDialog(QDialog):
             self.exit_mini()
         elif key == Qt.Key.Key_Escape and self.isFullScreen():
             self.showNormal()
+        elif key == Qt.Key.Key_Escape:
+            # 不能交给 QDialog：它的 Esc 走 reject()，只隐藏窗口，closeEvent 不跑，声音还在
+            self.close()
         elif key == Qt.Key.Key_F12:
             self.toggle_diagnostics()
         elif key == Qt.Key.Key_N:
@@ -934,6 +1169,8 @@ class VideoPlayerDialog(QDialog):
         self._tick_countdown()
 
     def _tick_countdown(self) -> None:
+        if self._closing or self._playback_released:
+            return
         if self._countdown <= 0:
             self.episodeRequested.emit(1)
             return
@@ -1231,21 +1468,64 @@ class VideoPlayerDialog(QDialog):
         self._load(url, is_hls, referer)
         self.set_status(status or "正在切换播放地址…")
 
-    def closeEvent(self, event) -> None:  # noqa: N802
-        self._position_ms = self.current_position_ms()
-        self._prefetch_timer.stop()
-        if self._player is not None:
+    def _release_playback(self) -> None:
+        """停掉解码和音频设备。只 stop() 在 Windows 上经常停不干净，关窗后还有声音。"""
+        if self._playback_released:
+            return
+        self._playback_released = True
+        self._countdown = 0
+        try:
+            self._prefetch_timer.stop()
+        except Exception as error:  # noqa: BLE001
+            swallow("player 中的可选步骤", error)
+        audio = self._audio
+        player = self._player
+        if audio is not None:
             try:
-                self._player.stop()
-            except Exception as error:  # noqa: BLE001  可忽略但必须留痕
+                audio.setMuted(True)
+                audio.setVolume(0.0)
+            except Exception as error:  # noqa: BLE001
                 swallow("player 中的可选步骤", error)
-        self.closed.emit(int(self._position_ms))
+        if player is None:
+            return
+        try:
+            player.pause()
+        except Exception as error:  # noqa: BLE001
+            swallow("player 中的可选步骤", error)
+        try:
+            player.setAudioOutput(None)
+        except Exception as error:  # noqa: BLE001
+            swallow("player 中的可选步骤", error)
+        try:
+            player.stop()
+        except Exception as error:  # noqa: BLE001
+            swallow("player 中的可选步骤", error)
+        try:
+            player.setSource(QUrl())
+        except Exception as error:  # noqa: BLE001
+            swallow("player 中的可选步骤", error)
+
+    def reject(self) -> None:  # noqa: N802
+        """Esc / reject 也要走关闭：QDialog.reject 默认不发 closeEvent，声音会留在后台。"""
+        if not self._closing:
+            self.close()
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if not self._closing:
+            self._closing = True
+            self._end_mini_gesture()
+            # 先记下进度再拆音频，stop 之后 position 可能变成 0
+            self._position_ms = self.current_position_ms()
+            self._release_playback()
+            self.closed.emit(int(self._position_ms))
         super().closeEvent(event)
 
     def current_position_ms(self) -> int:
-        if self._player is not None:
-            return int(self._player.position())
-        return int(self._position_ms)
+        if self._playback_released or self._player is None:
+            return int(self._position_ms)
+        return int(self._player.position())
 
     def duration_ms(self) -> int:
         return int(self._duration_ms)

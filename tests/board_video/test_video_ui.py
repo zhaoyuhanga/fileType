@@ -409,6 +409,58 @@ def test_player_quality_signal_emitted(qapp: QApplication) -> None:
         dialog.close()
 
 
+def test_escape_releases_audio_before_next_playback(qapp: QApplication) -> None:
+    """Esc 关闭必须拆掉音频。否则窗口藏了声音还在，再点播放就是两路声音。"""
+    pytest.importorskip("PySide6.QtMultimedia")
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    first = VideoPlayerDialog(title="第一路", url="", render_path="graphics")
+    closed: list[int] = []
+    finished: list[int] = []
+    first.closed.connect(closed.append)
+    first.finished.connect(finished.append)
+    try:
+        first.show()
+        QApplication.sendEvent(
+            first,
+            QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+        )
+        assert first._playback_released                      # noqa: SLF001
+        assert closed, "Esc 没有走关闭，进度不会被记下来"
+        assert finished, "Esc 没有结束对话框，板块会以为播放器还在"
+        assert not first.isVisible()
+        player = first._player                               # noqa: SLF001
+        assert player is not None
+        assert player.audioOutput() is None
+        assert player.source().isEmpty()
+        assert player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+        assert first._audio.isMuted()                        # noqa: SLF001
+
+        # 再开一个：旧的那路已经静音且没有音源，不会和它叠在一起
+        second = VideoPlayerDialog(title="第二路", url="", render_path="graphics")
+        try:
+            assert second._player is not player              # noqa: SLF001
+            assert player.audioOutput() is None
+            assert player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+        finally:
+            second.close()
+    finally:
+        first.close()
+
+
+def test_reject_releases_audio(qapp: QApplication) -> None:
+    """直接 reject（QDialog 对 Esc 的默认路径）也要停声。"""
+    pytest.importorskip("PySide6.QtMultimedia")
+
+    dialog = VideoPlayerDialog(title="片", url="", render_path="graphics")
+    dialog.reject()
+    assert dialog._playback_released                         # noqa: SLF001
+    assert dialog._player.source().isEmpty()                 # noqa: SLF001
+    assert dialog._audio.isMuted()                           # noqa: SLF001
+
+
 def test_player_episode_signal_emitted(qapp: QApplication) -> None:
     dialog = VideoPlayerDialog(title="片", url="http://127.0.0.1:9/m.mp4", is_hls=False,
                                has_prev=True, has_next=True)

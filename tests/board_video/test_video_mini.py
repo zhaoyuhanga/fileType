@@ -6,8 +6,8 @@
 （还挡在别的窗口后面），要么来回 Alt+Tab。这轮补上第三档「小窗」：
 
 - 置顶（``WindowStaysOnTopHint``）+ 无边框，盖在别的窗口上面继续播；
-- 只留一条窄控制栏（播放 / 暂停、还原、关闭），画面保持 16:9；
-- 按住顶栏可拖动，首次进入停在屏幕右下角；
+- 窗口只有画面（16:9），暂停 / 最小化 / 最大化 / 关闭鼠标移入才浮出来；
+- 按住画面或悬浮条可拖动，贴着边拖可改大小，首次进入停在屏幕右下角；
 - ``M`` 切换，``Esc`` / 双击画面 / 还原按钮退出，退出后几何与控件原样还原。
 
 这里守两类约束：
@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtGui import QEnterEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
 from modu_workbench.ui_kit.media.player import (
-    MINI_BAR_HEIGHT,
+    MINI_MIN_HEIGHT,
+    MINI_MIN_WIDTH,
     MINI_VIDEO_HEIGHT,
     MINI_WIDTH,
     VideoPlayerDialog,
@@ -50,19 +51,20 @@ def test_mini_button_present(qapp: QApplication) -> None:
 
 
 def test_enter_mini_is_topmost_frameless_and_compact(qapp: QApplication) -> None:
-    """小窗 = 置顶 + 无边框 + 只留一条控制栏。"""
+    """小窗 = 置顶 + 无边框 + 只有画面（控制条不占高度）。"""
     dialog = _dialog()
     try:
         dialog.enter_mini()
+        dialog._set_mini_chrome(False)                       # noqa: SLF001
         flags = dialog.windowFlags()
         assert flags & Qt.WindowType.WindowStaysOnTopHint, "小窗没有置顶，会藏在别的窗口后面"
         assert flags & Qt.WindowType.FramelessWindowHint, "小窗还有系统标题栏，不够紧凑"
         assert dialog._header.isHidden()                     # noqa: SLF001
         assert dialog._controls.isHidden()                   # noqa: SLF001
         assert dialog._status.isHidden()                     # noqa: SLF001
-        assert dialog._mini_bar.isHidden() is False          # noqa: SLF001
+        assert dialog._mini_bar.isHidden()                   # noqa: SLF001
         assert dialog.width() == MINI_WIDTH
-        assert dialog.height() == MINI_VIDEO_HEIGHT + MINI_BAR_HEIGHT
+        assert dialog.height() == MINI_VIDEO_HEIGHT
     finally:
         dialog.close()
 
@@ -304,6 +306,7 @@ def test_mini_minimize_button_and_shortcut(qapp: QApplication) -> None:
 
         dialog.showNormal()
         assert dialog.is_mini() is True, "从任务栏恢复后应仍是小窗"
+        dialog._set_mini_chrome(True)                    # noqa: SLF001
         assert dialog._mini_bar.isHidden() is False      # noqa: SLF001
 
         dialog._mini_minimize_shortcut.activated.emit()  # noqa: SLF001
@@ -335,3 +338,117 @@ def test_close_in_mini_reports_position(qapp: QApplication) -> None:
     dialog.enter_mini()
     dialog.close()
     assert positions and positions[0] >= 0, "关闭小窗没有上报进度"
+
+
+def _mouse(local: QPoint, screen: QPoint, kind: QEvent.Type,
+           button: Qt.MouseButton, buttons: Qt.MouseButton) -> QMouseEvent:
+    """local 决定「算不算贴边」，screen 决定拖了多少（不经过 DPI 换算）。"""
+    return QMouseEvent(
+        kind,
+        QPointF(local),
+        QPointF(screen),
+        button,
+        buttons,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_mini_chrome_shows_only_while_hovered(qapp: QApplication) -> None:
+    """暂停 / 最小化 / 最大化 / 关闭默认藏着，鼠标移入才出现，移出又藏起来。"""
+    dialog = _dialog()
+    try:
+        dialog.enter_mini()
+        dialog._set_mini_chrome(False)                       # noqa: SLF001
+        assert dialog._mini_bar.isHidden()                   # noqa: SLF001
+
+        QApplication.sendEvent(
+            dialog,
+            QEnterEvent(QPointF(24, 24), QPointF(24, 24), QPointF(dialog.mapToGlobal(QPoint(24, 24)))),
+        )
+        assert dialog._mini_bar.isVisible()                  # noqa: SLF001
+        bar = dialog._mini_bar                                # noqa: SLF001
+        assert bar._play_button.text() in {"▶", "⏸"}
+        assert bar._minimize_button.text() == "—"
+        assert bar._restore_button.toolTip().startswith("最大化还原")
+        assert bar._close_button.text() == "✕"
+
+        QApplication.sendEvent(dialog, QEvent(QEvent.Type.Leave))
+        assert dialog._mini_bar.isHidden()                   # noqa: SLF001
+    finally:
+        dialog.close()
+
+
+def test_mini_edge_drag_resizes_and_respects_minimum(qapp: QApplication) -> None:
+    """贴着边拖可以改大小，缩到下限就停住。"""
+    dialog = _dialog()
+    try:
+        dialog.enter_mini()
+        QApplication.processEvents()
+        start = dialog.size()
+        corner = QPoint(dialog.width() - 2, dialog.height() - 2)
+        anchor = QPoint(400, 300)
+        QApplication.sendEvent(
+            dialog,
+            _mouse(corner, anchor, QEvent.Type.MouseButtonPress,
+                   Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton),
+        )
+        QApplication.sendEvent(
+            dialog,
+            _mouse(corner + QPoint(80, 36), anchor + QPoint(80, 36), QEvent.Type.MouseMove,
+                   Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton),
+        )
+        assert dialog.width() == start.width() + 80
+        assert dialog.height() == start.height() + 36
+
+        QApplication.sendEvent(
+            dialog,
+            _mouse(corner, anchor, QEvent.Type.MouseButtonRelease,
+                   Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton),
+        )
+
+        # 从右下角往里拖过下限：停在最小尺寸，而不是被内容撑回去或缩没
+        origin = QPoint(dialog.width() - 2, dialog.height() - 2)
+        anchor = QPoint(400, 300)
+        QApplication.sendEvent(
+            dialog,
+            _mouse(origin, anchor, QEvent.Type.MouseButtonPress,
+                   Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton),
+        )
+        QApplication.sendEvent(
+            dialog,
+            _mouse(origin + QPoint(-1000, -1000), anchor + QPoint(-1000, -1000),
+                   QEvent.Type.MouseMove, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton),
+        )
+        assert dialog.width() == MINI_MIN_WIDTH
+        assert dialog.height() == MINI_MIN_HEIGHT
+    finally:
+        dialog._end_mini_gesture()                            # noqa: SLF001
+        dialog.close()
+
+
+def test_mini_video_drag_moves_window(qapp: QApplication) -> None:
+    """按住画面（不是悬浮条）拖动，窗口跟着走。"""
+    dialog = _dialog()
+    try:
+        dialog.enter_mini()
+        QApplication.processEvents()
+        start = dialog.pos()
+        origin = QPoint(dialog.width() // 2, dialog.height() // 2)
+        anchor = dialog.mapToGlobal(origin)
+        view = getattr(dialog._surface, "view", None)             # noqa: SLF001
+        if view is None:
+            pytest.skip("当前环境没有图形画面，无法在画面上拖动")
+        QApplication.sendEvent(
+            view,
+            _mouse(origin, anchor, QEvent.Type.MouseButtonPress,
+                   Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton),
+        )
+        QApplication.sendEvent(
+            view,
+            _mouse(origin + QPoint(48, 20), anchor + QPoint(48, 20), QEvent.Type.MouseMove,
+                   Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton),
+        )
+        assert dialog.pos() - start == QPoint(48, 20)
+    finally:
+        dialog._end_mini_gesture()                                # noqa: SLF001
+        dialog.close()

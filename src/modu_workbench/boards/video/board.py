@@ -732,7 +732,11 @@ class VideoBoardPage(QWidget):
         self._task_bar.idle("已关闭播放器。")
 
     def _on_player_finished(self) -> None:
+        # 关掉的播放器如果留着，QMediaPlayer 还占着声卡；再开一个就是两路声音
+        player = self._player
         self._player = None
+        if player is not None:
+            player.deleteLater()
 
     # ------------------------------------------------------------------ 本地库播放
 
