@@ -105,14 +105,29 @@ try {
 
     if (-not $NoVerify) {
         Write-Step "复核远端"
-        $remoteSha = (& git -c "http.proxy=$proxyUrl" -c 'http.version=HTTP/1.1' ls-remote origin "refs/heads/$branch" 2>$null)
-        if ($remoteSha) {
-            $remoteSha = ($remoteSha -split '\s+')[0]
+        $remoteSha = ""
+        for ($round = 1; $round -le 3; $round++) {
+            # ls-remote 的 stderr 在 PS 5.1 下会变成 NativeCommandError，
+            # 这里临时放开 ErrorActionPreference 并吃掉落错，避免"复核失败"把成功推送判死
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $line = & git -c "http.proxy=$proxyUrl" -c 'http.version=HTTP/1.1' ls-remote origin "refs/heads/$branch" 2>$null
+                $code = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previous
+            }
+            if ($code -eq 0 -and $line) { $remoteSha = ($line -split '\s+')[0]; break }
+            Write-Warn2 "复核请求失败（第 $round 轮），5 秒后重试"
+            Start-Sleep -Seconds 5
         }
-        if ($remoteSha -ne $head) {
+        if (-not $remoteSha) {
+            Write-Warn2 "无法复核远端（网络抖动），但 push 已返回成功；可用 -NoVerify 跳过这一步"
+        } elseif ($remoteSha -ne $head) {
             throw "远端 SHA（$remoteSha）与本地 HEAD（$head）不一致，推送可能没真正落库"
+        } else {
+            Write-Ok "远端 $branch = $head"
         }
-        Write-Ok "远端 $branch = $head"
     }
 
     Write-Step "完成"
