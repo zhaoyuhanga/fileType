@@ -281,3 +281,44 @@ def test_source_dialog_marks_auto_disabled_and_can_restore(qapp) -> None:  # noq
     finally:
         dialog.deleteLater()
 
+
+def test_source_dialog_has_select_all_and_none(qapp) -> None:  # noqa: ANN001
+    """一键全选/全不选：13 个源不该靠手点，全选还要能解除自动停用。"""
+    from modu_workbench.boards.video import sources as sources_ui
+
+    dialog = sources_ui.VideoSourceDialog()
+    registry = dialog._registry  # noqa: SLF001
+    original = [key for key in registry.order if registry.is_enabled(key)]
+    try:
+        dialog._set_all_enabled(False)  # noqa: SLF001
+        assert [key for key in registry.order if registry.is_enabled(key)] == []
+        assert dialog._registry.auto_disabled_keys() == []
+
+        key = registry.order[0]
+        registry._auto_disabled.add(key)  # noqa: SLF001
+        dialog._set_all_enabled(True)  # noqa: SLF001
+        assert all(registry.is_enabled(item) for item in registry.order)
+        assert registry.is_auto_disabled(key) is False, "全选没有解除自动停用"
+    finally:
+        for key in registry.order:
+            registry.set_enabled(key, key in original)
+        dialog.deleteLater()
+
+
+def test_checkbox_click_also_selects_row(qapp) -> None:  # noqa: ANN001
+    """点勾选框要顺带选中该行 —— 否则「测试选中源」永远提示没选中。"""
+    from PySide6.QtCore import Qt
+
+    from modu_workbench.boards.video import sources as sources_ui
+
+    dialog = sources_ui.VideoSourceDialog()
+    try:
+        dialog._table.setCurrentCell(dialog._table.rowCount() - 1, 0)  # noqa: SLF001
+        item = dialog._table.item(0, sources_ui.COLUMN_ENABLED)  # noqa: SLF001
+        # 必须真的改变勾选状态才会发 itemChanged（默认第一行就是 Checked）
+        item.setCheckState(Qt.CheckState.Unchecked)
+        assert dialog._table.currentRow() == 0  # noqa: SLF001
+        item.setCheckState(Qt.CheckState.Checked)  # 复原，别影响后续用例
+    finally:
+        dialog.deleteLater()
+

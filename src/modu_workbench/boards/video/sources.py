@@ -192,6 +192,12 @@ class VideoSourceDialog(QDialog):
         up.clicked.connect(lambda: self._move(-1))
         down = QPushButton("↓ 下移")
         down.clicked.connect(lambda: self._move(1))
+        select_all = QPushButton("全选")
+        select_all.setToolTip("启用全部数据源（含之前被体检自动停用的）")
+        select_all.clicked.connect(lambda: self._set_all_enabled(True))
+        select_none = QPushButton("全不选")
+        select_none.setToolTip("停用全部数据源（只影响搜索/换源，不删除任何配置）")
+        select_none.clicked.connect(lambda: self._set_all_enabled(False))
         probe = QPushButton("测试选中源")
         probe.setObjectName("primaryButton")
         probe.clicked.connect(self._probe_selected)
@@ -202,7 +208,7 @@ class VideoSourceDialog(QDialog):
         detail.clicked.connect(self._edit_url)
         reset = QPushButton("恢复默认顺序")
         reset.clicked.connect(self._reset)
-        for widget in (up, down, probe, probe_all, detail, reset):
+        for widget in (up, down, select_all, select_none, probe, probe_all, detail, reset):
             actions.addWidget(widget)
         actions.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -315,11 +321,20 @@ class VideoSourceDialog(QDialog):
         item = self._table.item(row, COLUMN_ENABLED)
         return str(item.data(Qt.ItemDataRole.UserRole)) if item else ""
 
+    def _set_all_enabled(self, enabled: bool) -> None:
+        """一键全选 / 全不选（全选同时解除体检自动停用）。"""
+        for provider in self._registry.providers(enabled_only=False):
+            self._registry.set_enabled(provider.key, enabled)
+        self._reload()
+        self._toaster.info("已启用全部数据源" if enabled else "已停用全部数据源")
+
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() == COLUMN_ENABLED:
             key = self._key_at(item.row())
             if key:
                 self._registry.set_enabled(key, item.checkState() == Qt.CheckState.Checked)
+                # 勾选/取消顺便把这一行设为当前行：否则「测试选中源」会一直提示"没选中"
+                self._table.setCurrentCell(item.row(), COLUMN_SOURCE)
                 self._table.blockSignals(True)
                 status = self._table.item(item.row(), COLUMN_STATUS)
                 if status is not None:
@@ -443,7 +458,7 @@ class VideoSourceDialog(QDialog):
     def _probe_selected(self) -> None:
         row = self._table.currentRow()
         if row < 0:
-            self._toaster.info("请先选中要测试的源")
+            self._toaster.info("请先在表格里点一行（或点「测试全部」）")
             return
         key = self._key_at(row)
         if not key:

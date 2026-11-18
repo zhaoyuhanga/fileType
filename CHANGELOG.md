@@ -4,6 +4,34 @@
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
 ## 未发版 — 代码优化与缺陷修复
+### 42. 影视源设置：全选/全不选 + 勾选即选中 + 系统代理与 CA 证书兜底
+
+用户反馈「没有全选、点测试说没选中、全部源都不可用」，三件事分别是：
+
+| 问题 | 原因 | 修法 |
+|---|---|---|
+| 没有全选 | 只有逐行勾选 | 加「全选 / 全不选」；全选会同时解除体检自动停用 |
+| 「测试选中源」总提示没选中 | 点勾选框不会把该行设为当前行 | 勾选时同步 `setCurrentCell`；提示改成「先点一行（或点测试全部）」 |
+| **所有源一起不可用** | ① 打包不完整缺 `certifi/cacert.pem`；② `requests` 不读 Windows 系统代理 | ① CA 缺失时回退系统证书，仍缺则明确报「安装包不完整」；② 无环境变量代理时回退 **Windows 系统代理**，本机地址不走代理 |
+
+细节：
+
+- 系统代理读 `HKCU\...\Internet Settings` 的 `ProxyEnable`/`ProxyServer`，支持
+  `127.0.0.1:7890` 与 `http=...;https=...;socks=...` 两种写法；只作为**兜底**，
+  用户设了 `HTTP_PROXY/HTTPS_PROXY` 就完全交给 requests；
+- 127.0.0.1 / localhost 永不走代理（媒体代理与本地测试服务都在本机，
+  走代理会把自己绕死）；
+- CA：`ca_bundle()` 依次找 certifi → 系统证书 → `REQUESTS_CA_BUNDLE`；
+  请求层同时捕获 `OSError`，避免这类环境错误直接冒到界面；
+- **本次事故复盘**：本地 `dist` 被一次中断的打包删掉一半（`_internal` 缺文件），
+  用户运行的正是这份残缺产物，所以每个 https 源都报
+  `Could not find a suitable TLS CA certificate bundle`。已重新完整打包，并核实
+  `_internal/certifi/cacert.pem`（240KB）存在、产物自检 17/17。
+
+验证：新增 `tests/test_platform_http.py` **9 条**（代理串解析、系统代理兜底、
+环境变量优先、本机地址绕过、CA 回退与错误文案）；`test_video_health.py` 增加
+全选/全不选、勾选即选中 2 条。
+
 ### 41. 墨软影视：数据源体检（四段定位）+ 连续失败自动停用 + 跨重启保留
 
 「下载失败」以前只有一个结果，没有原因：不知道是搜索挂了、详情解析不出来，

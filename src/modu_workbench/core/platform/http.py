@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import os
+import ssl
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -32,6 +34,36 @@ MEDIA_URL_SUFFIXES = (
 
 class SourceError(RuntimeError):
     """数据源不可用、抓取失败或内容受限（音源/视频源/模型接口通用）。"""
+
+
+def ca_bundle() -> str | bool:
+    """HTTPS 校验用的 CA 路径：优先 certifi，缺失时回退系统证书。
+
+    ## 为什么要在运行时找一遍
+
+    打包漏掉 `certifi/cacert.pem` 时，`requests` 会抛
+    `Could not find a suitable TLS CA certificate bundle, invalid path: ...`，
+    结果是**所有 https 源一起报"不可用"**（用户看到的是"全部数据源失效"，
+    很难联想到是安装包缺文件）。这里先找一份能用的 bundle；实在没有才交给
+    requests 报错（错误文案在 `describe_network_error` 里单独翻译成"安装包不完整"）。
+    """
+    candidates: list[str] = []
+    try:
+        import certifi
+
+        candidates.append(certifi.where())
+    except Exception:  # noqa: BLE001  certifi 不在（极简环境）时继续找系统证书
+        pass
+    try:
+        paths = ssl.get_default_verify_paths()
+        candidates.extend([paths.cafile or "", paths.openssl_cafile or ""])
+    except Exception:  # noqa: BLE001
+        pass
+    candidates.append(os.environ.get("REQUESTS_CA_BUNDLE", ""))
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return True
 
 
 def host_of(url: str) -> str:
@@ -78,6 +110,11 @@ def describe_network_error(error: Exception | None, host: str = "", *, hint: str
     tail = f"。{hint}" if hint else ""
     if "getaddrinfo" in lowered or "name or service not known" in lowered or "nodename" in lowered:
         return f"无法解析 {name} 的域名（DNS/网络问题）{tail}"
+    if "ca certificate bundle" in lowered or "tls ca" in lowered:
+        return (
+            f"HTTPS 证书链缺失（本机安装包不完整，缺 certifi/cacert.pem）——"
+            f"所有源都会一起失败，请重新安装完整安装包{tail}"
+        )
     if "certificate" in lowered or "ssl" in lowered:
         return f"{name} 的 HTTPS 证书校验失败（可能被网络中间设备拦截）{tail}"
     if "timed out" in lowered or "timeout" in lowered:
@@ -89,6 +126,75 @@ def describe_network_error(error: Exception | None, host: str = "", *, hint: str
     if "connection" in lowered or "max retries" in lowered:
         return f"无法连接 {name}（连接被重置/拒绝）{tail}"
     return f"{name} 请求失败：{text[:200]}"
+
+
+def parse_proxy_server(server: str) -> dict[str, str] | None:
+    """把 Windows 的 `ProxyServer` 串解析成 requests 的 `proxies` 字典。
+
+    两种格式都要支持：
+
+    - `127.0.0.1:7890`（http/https 共用一个端口）；
+    - `http=127.0.0.1:7890;https=127.0.0.1:7890`（分协议）。
+    """
+    text = (server or "").strip()
+    if not text:
+        return None
+
+    def _with_scheme(value: str, scheme: str = "http") -> str:
+        value = value.strip()
+        if "://" in value:
+            return value
+        return f"{scheme}://{value}"
+
+    if "=" not in text:
+        url = _with_scheme(text)
+        return {"http": url, "https": url}
+    mapping: dict[str, str] = {}
+    for part in text.split(";"):
+        if "=" not in part:
+            continue
+        scheme, value = part.split("=", 1)
+        scheme = scheme.strip().lower()
+        # `socks=` / `socks5=` 要保留协议，否则 requests 会把 socks 代理当 http 用
+        default = "socks5" if scheme.startswith("socks") else "http"
+        mapping[scheme] = _with_scheme(value, default)
+    return mapping or None
+
+
+def system_proxy() -> dict[str, str] | None:
+    """读 Windows「系统代理」（设置 → 网络 → 代理）。
+
+    ## 为什么必须读它
+
+    `requests` 只认 `HTTP_PROXY/HTTPS_PROXY` 环境变量，**不读 Windows 系统代理**。
+    而国内用户几乎都是用 Clash/v2ray 开「系统代理」，于是应用里所有源都连不上，
+    表现就是"全部数据源不可用"——但浏览器却一切正常。这里在没设环境变量时
+    回退到系统代理，并尊重 `ProxyEnable=0`（用户明确关了就不代理）。
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as key:
+            enabled = int(winreg.QueryValueEx(key, "ProxyEnable")[0] or 0)
+            if not enabled:
+                return None
+            server = str(winreg.QueryValueEx(key, "ProxyServer")[0] or "")
+    except (OSError, ValueError):
+        return None
+    return parse_proxy_server(server)
+
+
+def env_proxy_configured() -> bool:
+    """环境变量里有没有代理配置（有的话交给 requests 自己处理）。"""
+    return any(
+        os.environ.get(name)
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+    )
 
 
 class HttpClient:
@@ -103,8 +209,16 @@ class HttpClient:
         self.backoff = backoff
         self.verify = verify
         self.hint = hint
+        # 系统代理只在"没设环境变量代理"时兜底，避免盖掉用户显式配置
+        self.proxies = None if env_proxy_configured() else system_proxy()
 
     # ---------- 基础请求 ----------
+
+    def _proxies_for(self, url: str) -> dict[str, str] | None:
+        """本机地址不走代理；其余按环境变量/系统代理处理。"""
+        if host_of(url) in ("127.0.0.1", "localhost", "::1"):
+            return None
+        return self.proxies
 
     def request(self, method: str, url: str, *, headers: dict | None = None,
                 timeout: float | None = None, referer: str = "", **kwargs) -> requests.Response:
@@ -112,15 +226,19 @@ class HttpClient:
         if referer:
             merged.setdefault("Referer", referer)
         last: Exception | None = None
+        verify = ca_bundle() if self.verify is True else self.verify
+        # 本机地址绝不走代理：媒体代理、测试用的本地 HTTP 服务都在 127.0.0.1 上，
+        # 走系统代理会把它们也转发出去（等于自己把自己绕死）。
+        proxies = self._proxies_for(url)
         for attempt in range(1, self.attempts + 1):
             try:
                 response = requests.request(
                     method, url, headers=merged, timeout=timeout or self.timeout,
-                    verify=self.verify, **kwargs,
+                    verify=verify, proxies=proxies, **kwargs,
                 )
                 response.raise_for_status()
                 return response
-            except requests.RequestException as error:
+            except (requests.RequestException, OSError) as error:
                 last = error
                 if attempt < self.attempts:
                     time.sleep(self.backoff * attempt)
