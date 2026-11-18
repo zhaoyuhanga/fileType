@@ -37,6 +37,7 @@ SETTING_ENABLED = "sources/enabled"
 SETTING_ORDER = "sources/priority"
 SETTING_SOURCE_URLS = "sources/urls"  # 用户覆盖的采集接口地址 {key: url}
 SETTING_VERSION = "sources/version"  # 源清单版本（升级时迁移用户的启用/排序设置）
+SETTING_HEALTH = "sources/health"  # 体检结果 + 自动停用名单（跨重启保留）
 
 # 测速参数（计划 3.3.5：并发 3、最多测 20 个源 = 权重最高的前 5 + 剩余随机 15）
 SPEED_TEST_CONCURRENCY = 3
@@ -63,6 +64,10 @@ SOURCES_VERSION = 3
 DEGRADE_AFTER = 3
 DEGRADE_SECONDS = 120.0
 
+# 体检自动停用：**连续**这么多次体检失败（搜索/详情/取流/首片任一阶段）就自动停用该源，
+# 成功后立刻恢复。阈值比熔断高，避免一次网络抖动就把用户的源关掉。
+AUTO_DISABLE_AFTER = 3
+
 # 权重刻度：顺序第 1 位 = 100 分，之后每往后一位减 `WEIGHT_MAX / (n-1)`，
 # 最后一位正好 0 分。借打分公式里 `weight` 的 0–100 语义
 # （`1 + (weight - 50) * 0.005`），50 分对应"排在正中间"的源。
@@ -87,6 +92,29 @@ class SpeedResult:
     weight: float = 50.0
     score: float = 0.0
     error: str = ""
+    #: 走到的最远阶段 / 卡住的阶段（见 `probe.STAGE_ORDER`）
+    stage: str = ""
+    failed_stage: str = ""
+
+    @property
+    def healthy(self) -> bool:
+        """四段全部走通才算健康；`ok` 只表示"源有响应"。"""
+        return bool(self.ok and not self.failed_stage)
+
+    @property
+    def stage_text(self) -> str:
+        """体检摘要，例如 `搜索✓ 详情✓ 取流✓ 首片✗`。"""
+        from .probe import STAGE_LABELS, STAGE_ORDER
+
+        if not self.stage and not self.failed_stage:
+            return ""
+        reached = list(STAGE_ORDER[: STAGE_ORDER.index(self.stage) + 1]) if self.stage in STAGE_ORDER else []
+        if self.failed_stage and self.failed_stage not in reached:
+            reached.append(self.failed_stage)
+        return " ".join(
+            f"{STAGE_LABELS.get(name, name)}{'✗' if name == self.failed_stage else '✓'}"
+            for name in reached
+        )
 
     @property
     def speed_mbytes(self) -> float:
@@ -120,6 +148,14 @@ class VideoRegistry:
         self._order: list[str] = []
         self._health: dict[str, SourceHealth] = {}
         self._health_lock = threading.Lock()
+        # 体检连续失败被**自动停用**的源：与用户手动停用区分开，
+        # 成功一次或手动重新勾选即恢复（用户意图不丢）。
+        self._auto_disabled: set[str] = set()
+        # 连续"体检未通过"次数（四段里任一段失败）+ 最近一次卡住的原因。
+        # 与 `SourceHealth.consecutive_failures` 分开：后者统计网络错误，
+        # 而"搜索通了、分片 403"在健康度里算成功，却是用户真正下载不了的场景。
+        self._unhealthy_streak: dict[str, int] = {}
+        self._probe_issue: dict[str, str] = {}
         # 「按测速结果排序」开关的运行时状态：由设置页/源设置对话框同步进来
         # （核心层不读 QSettings，保持可离线测试）。默认关，行为与旧版完全一致。
         self._sort_by_speed = False
@@ -169,7 +205,7 @@ class VideoRegistry:
         """
         keys = self.order
         if enabled_only:
-            keys = [key for key in keys if key in self._enabled]
+            keys = [key for key in keys if self.is_enabled(key)]
         if not by_speed:
             return list(keys)
         weights = self._weights(keys)
@@ -202,7 +238,7 @@ class VideoRegistry:
     def providers(self, *, enabled_only: bool = True) -> list[VideoSource]:
         items = [self._providers[key] for key in self.order if key in self._providers]
         if enabled_only:
-            items = [item for item in items if item.key in self._enabled]
+            items = [item for item in items if self.is_enabled(item.key)]
         return items
 
     def get(self, key: str) -> VideoSource | None:
@@ -215,17 +251,36 @@ class VideoRegistry:
         return provider
 
     def is_enabled(self, key: str) -> bool:
-        return key in self._enabled
+        """用户启用 + 未被体检自动停用（自动停用不算用户意图，成功即恢复）。"""
+        return key in self._enabled and key not in self._auto_disabled
+
+    def is_auto_disabled(self, key: str) -> bool:
+        return key in self._auto_disabled
+
+    def auto_disabled_keys(self) -> list[str]:
+        return [key for key in self.order if key in self._auto_disabled]
+
+    def restore_source(self, key: str) -> None:
+        """解除自动停用并重新启用（用户点「恢复」或体检成功后调用）。"""
+        self._auto_disabled.discard(key)
+        self._unhealthy_streak.pop(key, None)
+        self._probe_issue.pop(key, None)
+        self._enabled.add(key)
 
     def set_enabled(self, key: str, enabled: bool) -> None:
         if enabled:
             self._enabled.add(key)
+            # 手动勾选 = 明确要恢复：清掉自动停用与连败计数
+            self._auto_disabled.discard(key)
+            self._unhealthy_streak.pop(key, None)
+            self._probe_issue.pop(key, None)
         else:
             self._enabled.discard(key)
 
     def set_enabled_keys(self, keys: Iterable[str]) -> None:
         """整体替换启用集合（「恢复默认」用）。"""
         self._enabled = {key for key in keys if key in self._providers}
+        self._auto_disabled.clear()
 
     def set_order(self, keys: Iterable[str]) -> None:
         keys = [key for key in keys if key in self._providers]
@@ -241,6 +296,11 @@ class VideoRegistry:
         provider = self._providers.get(key)
         if provider is None:
             return "未知"
+        if key in self._auto_disabled:
+            streak = self._unhealthy_streak.get(key, 0)
+            issue = self._probe_issue.get(key, "")
+            detail = f"：{issue}" if issue else ""
+            return f"疑似失效（连续 {streak} 次体检未通过，已自动停用{detail}）"
         if not self.is_enabled(key):
             return "已停用"
         if not provider.available():
@@ -404,6 +464,18 @@ class VideoRegistry:
                 health.note_failure(probe.error or "测速失败")
                 if health.consecutive_failures >= DEGRADE_AFTER:
                     health.degraded_until = time.time() + DEGRADE_SECONDS
+            # 四段体检结果决定自动停用（与上面"源有没有响应"是两件事：
+            # 搜索通了但分片 403，健康度算成功，用户却真的下不了）
+            if probe.healthy:
+                self._unhealthy_streak.pop(key, None)
+                self._probe_issue.pop(key, None)
+                self._auto_disabled.discard(key)
+            else:
+                streak = self._unhealthy_streak.get(key, 0) + 1
+                self._unhealthy_streak[key] = streak
+                self._probe_issue[key] = (probe.error or probe.stage_text or "体检未通过")[:120]
+                if streak >= AUTO_DISABLE_AFTER:
+                    self._auto_disabled.add(key)
             health.measured_height = probe.height or health.measured_height
             score = health.health_score(weight=weight)
         return SpeedResult(
@@ -417,6 +489,8 @@ class VideoRegistry:
             weight=weight,
             score=score,
             error=probe.error,
+            stage=probe.stage,
+            failed_stage=probe.failed_stage,
         )
 
     @staticmethod
@@ -804,6 +878,37 @@ class VideoRegistry:
                 provider = self._providers.get(key)
                 if provider is not None and isinstance(value, str) and value.strip():
                     provider.set_credential(value)
+        # 体检结果 + 自动停用名单：跨重启保留，否则"疑似失效"的红标过一晚就没了
+        raw_health = storage.get_setting(SETTING_HEALTH, "")
+        if raw_health:
+            try:
+                snapshot = json.loads(raw_health)
+            except ValueError:
+                snapshot = {}
+            if isinstance(snapshot, dict):
+                self._auto_disabled = {
+                    key for key in snapshot.get("auto_disabled", []) if key in self._providers
+                }
+                self._unhealthy_streak = {
+                    key: int(value or 0)
+                    for key, value in (snapshot.get("streak") or {}).items()
+                    if key in self._providers
+                }
+                self._probe_issue = {
+                    key: str(value or "")[:120]
+                    for key, value in (snapshot.get("issue") or {}).items()
+                    if key in self._providers
+                }
+                for key, item in (snapshot.get("health") or {}).items():
+                    if key not in self._providers or not isinstance(item, dict):
+                        continue
+                    health = self.health(key)
+                    health.successes = int(item.get("successes", 0) or 0)
+                    health.failures = int(item.get("failures", 0) or 0)
+                    health.consecutive_failures = int(item.get("consecutive_failures", 0) or 0)
+                    health.last_error = str(item.get("last_error", "") or "")[:200]
+                    health.last_ok_at = float(item.get("last_ok_at", 0) or 0)
+                    health.measured_at = float(item.get("measured_at", 0) or 0)
 
     def save_settings(self, storage) -> None:  # noqa: ANN001  VideoStorage
         storage.set_setting(SETTING_ENABLED, ",".join(sorted(self._enabled)))
@@ -815,6 +920,25 @@ class VideoRegistry:
             if provider.info.editable and provider.credential
         }
         storage.set_setting(SETTING_SOURCE_URLS, json.dumps(urls, ensure_ascii=False))
+        # 体检快照：只存"有动静"的源，避免设置表里堆一堆全 0 的记录
+        health_snapshot = {
+            "auto_disabled": sorted(self._auto_disabled),
+            "streak": dict(self._unhealthy_streak),
+            "issue": dict(self._probe_issue),
+            "health": {
+                key: {
+                    "successes": self.health(key).successes,
+                    "failures": self.health(key).failures,
+                    "consecutive_failures": self.health(key).consecutive_failures,
+                    "last_error": self.health(key).last_error,
+                    "last_ok_at": self.health(key).last_ok_at,
+                    "measured_at": self.health(key).measured_at,
+                }
+                for key in self.order
+                if self.health(key).successes or self.health(key).failures
+            },
+        }
+        storage.set_setting(SETTING_HEALTH, json.dumps(health_snapshot, ensure_ascii=False))
 
 
 def looks_like_hls(url: str) -> bool:

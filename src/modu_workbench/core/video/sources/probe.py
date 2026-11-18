@@ -38,6 +38,10 @@ DEFAULT_PROBE_KEYWORD = "电影"
 #: 每个源最多看多少条搜索结果（只用来挑第一条，多了纯浪费时间）。
 PROBE_SEARCH_LIMIT = 5
 
+#: 体检的阶段顺序（越往后越接近"能不能真的下载"）
+STAGE_ORDER = ("search", "detail", "resolve", "segment")
+STAGE_LABELS = {"search": "搜索", "detail": "详情", "resolve": "取流", "segment": "首片"}
+
 
 @dataclass
 class ProbeResult:
@@ -65,6 +69,28 @@ class ProbeResult:
     segments: int = 0
     elapsed: float = 0.0
     extra: dict = field(default_factory=dict)
+    #: 走到的最远阶段（search / detail / resolve / segment）
+    stage: str = ""
+    #: 卡在哪个阶段（空 = 没失败）
+    failed_stage: str = ""
+
+    @property
+    def healthy(self) -> bool:
+        """四个阶段全部走通才算健康（`ok` 只表示"源有响应"，不等于能下载）。"""
+        return bool(self.ok and not self.failed_stage)
+
+    @property
+    def stage_text(self) -> str:
+        """三段式体检摘要，例如 `搜索✓ 详情✓ 首片✗`。"""
+        if not self.stage and not self.failed_stage:
+            return ""
+        reached = list(STAGE_ORDER[: STAGE_ORDER.index(self.stage) + 1]) if self.stage in STAGE_ORDER else []
+        if self.failed_stage and self.failed_stage not in reached:
+            reached.append(self.failed_stage)
+        return " ".join(
+            f"{STAGE_LABELS.get(name, name)}{'✗' if name == self.failed_stage else '✓'}"
+            for name in reached
+        )
 
     @property
     def speed_mbps(self) -> float:
@@ -157,11 +183,17 @@ def _probe_inner(
     """真正干活的分支：返回错误说明（空串 = 一切顺利）。"""
     # ---- 阶段 1：搜索（这就是延迟样本）----
     phase_started = time.monotonic()
-    videos = provider.search(keyword, kind="all", limit=PROBE_SEARCH_LIMIT)
+    try:
+        videos = provider.search(keyword, kind="all", limit=PROBE_SEARCH_LIMIT)
+    except Exception as error:  # noqa: BLE001  接口挂了要归到「搜索」，不能让外层只说"失败"
+        result.failed_stage = "search"
+        return f"搜索失败：{error}"
     result.latency_ms = max(0.0, (time.monotonic() - phase_started) * 1000.0)
+    result.stage = "search"
 
     first = videos[0] if videos else None
     if first is None:
+        result.failed_stage = "search"
         return "搜索没有返回结果，无法定位分片"
     result.resolution = _resolution_text(first)
     result.height = _resolution_height(first)
@@ -169,20 +201,51 @@ def _probe_inner(
     if _cancelled(cancel):
         return "已取消"
 
-    url = _episode_url(provider, first)
+    url = ""
+    episodes = getattr(first, "episodes", None) or []
+    if episodes:
+        try:
+            url = str(provider.play_url(first, episodes[0], None) or "")
+        except Exception as error:  # noqa: BLE001  取流失败要归到"取流"这一阶段
+            result.failed_stage = "resolve"
+            return f"取流失败：{error}"
     if not url:
-        # 边界情况（直链源、结果不带剧集的源）：只测到延迟就收工，
-        # 不为了凑速度分再拉一次详情 —— 那会吃掉 3–4 秒预算的一大块。
-        return "首条结果没有分集地址（只测到延迟）"
+        # ---- 阶段 2：详情 ----
+        # 有些源的搜索结果只有标题/ID，分集要再拉一次详情；体检时必须走到这一步，
+        # 否则"详情接口坏了"会被误报成"没有分集地址"（用户看到的是"能搜不能播"）。
+        detail = getattr(provider, "detail", None)
+        if callable(detail):
+            try:
+                detailed = _call_with_timeout(detail, first, timeout=phase_timeout(deadline))
+            except Exception as error:  # noqa: BLE001  第三方边界：详情失败也要给出阶段
+                result.failed_stage = "detail"
+                return f"详情解析失败：{error}"
+            result.stage = "detail"
+            if detailed is not None:
+                first = detailed
+                result.resolution = _resolution_text(first)
+                result.height = _resolution_height(first)
+            episodes = getattr(first, "episodes", None) or []
+            if episodes:
+                try:
+                    url = str(provider.play_url(first, episodes[0], None) or "")
+                except Exception as error:  # noqa: BLE001
+                    result.failed_stage = "resolve"
+                    return f"取流失败：{error}"
+        if not url:
+            # 直链源/单文件源本来就没有分集：只测到延迟，不算失败
+            return "首条结果没有分集地址（只测到延迟）"
 
+    result.stage = "resolve"
     referer = _referer_for(provider, first, url)
 
-    # ---- 阶段 2：HEAD 探活（失败静默：很多站点对 HEAD 返 405/403）----
+    # ---- 阶段 3：HEAD 探活（失败静默：很多站点对 HEAD 返 405/403）----
     _head(client, url, referer=referer, timeout=phase_timeout(deadline))
     if _cancelled(cancel):
         return "已取消"
 
-    # ---- 阶段 3：首个分片吞吐 ----
+    # ---- 阶段 4：首个分片吞吐 ----
+    result.stage = "segment"
     mbit, note = _measure_first_segment(
         provider,
         client,
@@ -194,6 +257,10 @@ def _probe_inner(
     if mbit > 0:
         result.mbit_per_s = mbit
         result.segments = 1  # 提前停止：只取了这一个分片
+    elif note.startswith(("取清单失败", "取分片失败")):
+        # 只有"真的去取却失败"才算首片阶段坏了；
+        # 「不是 HLS 清单」是直链源本来就没有分片，不能误判成失效。
+        result.failed_stage = "segment"
     return note
 
 

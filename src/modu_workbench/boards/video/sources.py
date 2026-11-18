@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -164,6 +165,8 @@ class VideoSourceDialog(QDialog):
         hint = QLabel(
             "搜索与播放按此处的「启用 + 顺序」进行；某个源解析不出地址时会自动改用其他已启用源。"
             "采集类接口地址若失效，可直接在此改成新域名。"
+            "「测速」会跑一遍 搜索→详情→取流→首片 体检：连续失败 3 次的源会被自动停用（红字），"
+            "勾选「启用」或点「恢复自动停用」即可回来。"
         )
         hint.setObjectName("readerStatus")
         hint.setWordWrap(True)
@@ -212,7 +215,9 @@ class VideoSourceDialog(QDialog):
         speed_row = QHBoxLayout()
         self._speed_button = QPushButton("测速")
         self._speed_button.setToolTip(
-            "测每个源的延迟（搜索请求 P50）与速度（首个分片 bytes/耗时）；"
+            "体检 + 测速：对每个源跑「搜索 → 详情 → 取流 → 首片」，"
+            "告诉你坏在哪一步，并测延迟与首片速度；"
+            "连续 3 次体检失败的源会自动停用（红字，可恢复）。"
             "默认并发 3、最多测 20 个源（顺序最靠前的 5 个 + 其余随机 15 个）"
         )
         self._speed_button.clicked.connect(self._start_speed_test)
@@ -225,6 +230,11 @@ class VideoSourceDialog(QDialog):
         )
         self._sort_by_speed.setChecked(self._registry.sort_by_speed)
         self._sort_by_speed.toggled.connect(self._on_sort_toggled)
+        self._restore_auto_button = QPushButton("恢复自动停用")
+        self._restore_auto_button.setToolTip(
+            "把体检连续失败后被自动停用的源重新启用（改完接口地址再恢复更有效）"
+        )
+        self._restore_auto_button.clicked.connect(self._restore_auto_disabled)
         self._speed_concurrency = QSpinBox()
         self._speed_concurrency.setRange(1, 6)
         self._speed_concurrency.setSuffix(" 并发")
@@ -232,7 +242,7 @@ class VideoSourceDialog(QDialog):
         self._speed_concurrency.setValue(
             int(self._settings.value("video/speed_test_concurrency", 3) or 3))
         for widget in (self._speed_button, self._cancel_speed_button,
-                       self._sort_by_speed, self._speed_concurrency):
+                       self._restore_auto_button, self._sort_by_speed, self._speed_concurrency):
             speed_row.addWidget(widget)
         speed_row.addStretch(1)
         layout.addLayout(speed_row)
@@ -264,7 +274,15 @@ class VideoSourceDialog(QDialog):
 
             self._table.setItem(row, COLUMN_SOURCE, QTableWidgetItem(f"{info.label}（{info.key}）"))
             self._table.setItem(row, COLUMN_KIND, QTableWidgetItem(info.kind_label))
-            self._table.setItem(row, COLUMN_STATUS, QTableWidgetItem(self._registry.status_text(info.key)))
+            status_item = QTableWidgetItem(self._registry.status_text(info.key))
+            if self._registry.is_auto_disabled(info.key):
+                # 「疑似失效」必须一眼能看见：红色 + tooltip 说明怎么恢复
+                status_item.setForeground(QColor("#c0392b"))
+                status_item.setToolTip(
+                    "体检连续失败，已自动停用（不再参与搜索/换源）。\n"
+                    "勾选左侧「启用」即可恢复；先改接口地址再恢复通常更有效。"
+                )
+            self._table.setItem(row, COLUMN_STATUS, status_item)
 
             speed_item = QTableWidgetItem(self._registry.health(info.key).speed_text())
             speed_item.setToolTip(SPEED_COLUMN_HINT)
@@ -278,6 +296,8 @@ class VideoSourceDialog(QDialog):
             url_item.setToolTip(info.note)
             self._table.setItem(row, COLUMN_URL, url_item)
         self._table.blockSignals(False)
+        if hasattr(self, "_restore_auto_button"):
+            self._restore_auto_button.setEnabled(bool(self._registry.auto_disabled_keys()))
 
     def _ordered_providers(self) -> list:
         """表格里的显示顺序：默认用户顺序；勾了「按测速结果排序」就按评分降序。
@@ -341,12 +361,18 @@ class VideoSourceDialog(QDialog):
             self._status.setText("正在取消测速（已发出的请求会在单源超时后结束）…")
 
     def _on_speed_progress(self, result, done: int, total: int) -> None:  # noqa: ANN001
+        detail = result.stage_text
         speed_item = self._table.item(self._row_of(result.key), COLUMN_SPEED)
         if speed_item is not None:
             speed_item.setText(result.as_text())
+            tip = SPEED_COLUMN_HINT + (f"\n体检：{detail}" if detail else "")
             if result.error:
-                speed_item.setToolTip(f"{SPEED_COLUMN_HINT}\n{result.error}")
-        self._status.setText(f"测速中 {done}/{total}：{result.label or result.key} —— {result.as_text()}")
+                tip += f"\n{result.error}"
+            speed_item.setToolTip(tip)
+        suffix = f"（{detail}）" if detail else ""
+        self._status.setText(
+            f"测速中 {done}/{total}：{result.label or result.key} —— {result.as_text()}{suffix}"
+        )
 
     def _on_speed_finished(self, results) -> None:  # noqa: ANN001
         self._speed_button.setEnabled(True)
@@ -354,16 +380,34 @@ class VideoSourceDialog(QDialog):
         self._speed_worker = None
         usable = [item for item in results if item.ok]
         measured = [item for item in results if item.mbit_per_s > 0]
+        broken = [item for item in results if not item.ok and item.failed_stage]
         if not results:
             self._status.setText("测速已取消")
         else:
-            self._status.setText(
-                f"测速完成：{len(usable)}/{len(results)} 个源响应正常，"
-                f"其中 {len(measured)} 个测到了速度（速度按首个分片估算）"
-            )
+            if broken:
+                from modu_workbench.core.video.sources.probe import STAGE_LABELS
+
+                parts = [
+                    f"{item.label or item.key}（{STAGE_LABELS.get(item.failed_stage, item.failed_stage)}）"
+                    for item in broken[:4]
+                ]
+                detail = "、".join(parts) + ("…" if len(broken) > 4 else "")
+                self._status.setText(
+                    f"体检完成：{len(usable)}/{len(results)} 个源可用；坏在：{detail}"
+                )
+            else:
+                self._status.setText(
+                    f"体检完成：{len(usable)}/{len(results)} 个源可用，"
+                    f"其中 {len(measured)} 个测到了速度（速度按首个分片估算）"
+                )
         # 顺序按测速结果重排（开关打开时），并把新数字填进表格
         self._reload()
-        if results and len(measured) < len(results):
+        auto = self._registry.auto_disabled_keys()
+        if auto:
+            self._toaster.info(
+                f"已自动停用 {len(auto)} 个连续失败的源；勾选「启用」可恢复（建议先改接口地址）"
+            )
+        elif results and len(measured) < len(results):
             # 失败详情只在状态栏留一句话，不弹错误框 —— 测速本来就是"尽力而为"
             self._toaster.info("部分源没有测到速度（详情见「测速」列 tooltip）")
 
@@ -484,6 +528,17 @@ class VideoSourceDialog(QDialog):
         provider.set_credential((text or "").strip())
         self._reload()
         self._toaster.success("已更新接口地址（点确定后保存）")
+
+    def _restore_auto_disabled(self) -> None:
+        """把自动停用的源一次性恢复启用（用户确认改过地址/想再试一次时用）。"""
+        keys = self._registry.auto_disabled_keys()
+        if not keys:
+            self._toaster.info("没有被自动停用的源")
+            return
+        for key in keys:
+            self._registry.restore_source(key)
+        self._reload()
+        self._toaster.success(f"已恢复 {len(keys)} 个源；建议再点一次「测速」确认真的可用")
 
     def _reset(self) -> None:
         from modu_workbench.core.video.sources import DEFAULT_PROVIDER_ORDER
