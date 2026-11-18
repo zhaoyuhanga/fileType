@@ -78,7 +78,7 @@ try {
     if (-not $NoInstaller) { $buildArgs += '-Installer' }
     & $powershell @buildArgs
     $buildCode = $LASTEXITCODE
-    Write-Warn2 "build_app.ps1 退出码：$buildCode（PowerShell 5.1 下末尾固定为 1，以产物为准）"
+    Write-Warn2 "build_app.ps1 退出码：$buildCode（该退码在 PowerShell 5.1 下不稳定，成功与否以产物校验为准）"
 
     # ---- 4. 以产物为准校验 ----
     Write-Step "校验产物"
