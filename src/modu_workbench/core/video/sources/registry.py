@@ -23,7 +23,7 @@ from typing import Callable, Iterable, List
 from ..models import Episode, Quality, RemoteVideo
 from .base import ResolvedPlay, SourceHealth, SourceInfo, VideoSource
 from .http import SourceError, guess_referer
-from .matcher import best_match
+from .matcher import best_match, episode_number, episode_tail
 from .probe import (
     DEFAULT_PROBE_KEYWORD,
     PROBE_TIMEOUT,
@@ -820,23 +820,43 @@ class VideoRegistry:
         raise SourceError("；".join(reasons) or "所有视频源都无法解析该条目")
 
     def _pick_episode(self, wanted: Episode | None, matched: RemoteVideo) -> Episode | None:
-        """换源后定位到「同一集」：优先集序号，其次集名，最后退回首集。"""
+        """换源后定位到「同一集」。
+
+        顺序经过实测修正：**先按集名/集号，再按集序号**。原来的"序号优先"在
+        换源时是错的——不同站点的分集顺序可能相反（新的在前），第 1 集会被
+        映射成对方的最后一集；用户看到的就是"换源后集数对不上"。
+        """
         if not matched.episodes:
             return None
         if wanted is None:
             return matched.episodes[0]
-        for episode in matched.episodes:
+        episodes = matched.episodes
+        # 1) 集名完全相同
+        for episode in episodes:
+            if episode.name == wanted.name:
+                return episode
+        # 2) 去掉线路前缀后相同（"ffm3u8 · 第12集" vs "dytm3u8 · 第12集"）
+        wanted_tail = episode_tail(wanted.name)
+        if wanted_tail:
+            for episode in episodes:
+                if episode_tail(episode.name) == wanted_tail:
+                    return episode
+        # 3) 集号相同（第12集 / EP12 / 纯数字）——跨源时比序号可靠
+        wanted_number = episode_number(wanted.name)
+        if wanted_number:
+            for episode in episodes:
+                if episode_number(episode.name) == wanted_number:
+                    return episode
+        # 4) 集序号（双方都没有可识别集号时的兜底）
+        for episode in episodes:
             if episode.index == wanted.index:
                 return episode
-        wanted_name = (wanted.name or "").split(" · ")[-1]
-        if wanted_name:
-            for episode in matched.episodes:
-                if episode.name == wanted.name:
+        # 5) 子串（"第01集" 命中 "第01集（高清）"）
+        if wanted_tail:
+            for episode in episodes:
+                if wanted_tail in episode.name:
                     return episode
-            for episode in matched.episodes:
-                if wanted_name and wanted_name in episode.name:
-                    return episode
-        return matched.episodes[0]
+        return episodes[0]
 
     def _referer_of(self, provider: VideoSource, url: str) -> str:
         try:

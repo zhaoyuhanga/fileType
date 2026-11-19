@@ -365,11 +365,35 @@ class VideoSource:
 
     def play_url(self, video: RemoteVideo, episode: Episode,
                  quality: Quality | None = None) -> str:
-        """返回最终播放/下载地址。"""
+        """返回最终播放/下载地址。
+
+        ## `quality` 只在它**确实属于这一集**时才生效
+
+        详情页传给下载的是"当前预览那一集"的画质对象（`Quality` 自带 url），
+        批量下载时每一集都会拿到同一个 `quality.url`。旧实现无条件优先返回它，
+        实测后果是**整季下出来是同一集**（文件大小一模一样，只有文件名不同）。
+
+        所以顺序是：本集候选线路里按**标签**匹配 → 按 url 匹配 →
+        本集自己的 `episode.url` → 最后才退回 `quality.url`（给没有分集地址的直链源）。
+        """
+        if episode is not None:
+            label = str(getattr(quality, "label", "") or "") if quality is not None else ""
+            candidates = list(getattr(episode, "qualities", None) or [])
+            # 1) 跨集场景：按画质标签匹配（用户选了 1080P，每集都用它自己的 1080P）
+            if label:
+                for candidate in candidates:
+                    if candidate.label == label and candidate.url:
+                        return candidate.url
+            # 2) 同一集：按 url 精确匹配
+            if quality is not None and quality.url:
+                for candidate in candidates:
+                    if candidate.url == quality.url:
+                        return candidate.url
+            # 3) 都对不上：用本集自己的地址（这是批量下载正确的默认）
+            if episode.url:
+                return episode.url
         if quality is not None and quality.url:
             return quality.url
-        if episode is not None and episode.url:
-            return episode.url
         raise SourceError("该条目没有可用的播放地址")
 
     def supports_download(self) -> bool:

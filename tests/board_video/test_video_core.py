@@ -432,8 +432,8 @@ def test_cms_search_parses_list_and_metadata() -> None:
     assert first.description == "太阳危机"   # HTML 已清洗
     assert first.duration_ms == 173 * 60 * 1000
     assert first.series_key == "cms_360:71142"
-    # 多线路展开：2 个线路 × 集数
-    assert len(first.episodes) == 3
+    # 多线路合并：同一集的线路进 qualities，不再重复计集（2 条线路 = 仍是 2 集）
+    assert len(first.episodes) == 2
     assert all(episode.url.startswith("http") for episode in first.episodes)
 
 
@@ -447,14 +447,14 @@ def test_cms_episode_parsing_filters_audio_and_keeps_names() -> None:
     assert [episode.index for episode in second.episodes] == [0, 1]
 
 
-def test_cms_multi_route_names_include_route_label() -> None:
+def test_cms_multi_route_merges_episode_and_keeps_routes_as_qualities() -> None:
+    """多线路不再展开成重复分集：线路进 qualities（30 集的剧不会显示 60 集）。"""
     source = build_cms_source()
     first = source.search("x", limit=1)[0]
     names = [episode.name for episode in first.episodes]
-    assert "360zy · 正片" in names
-    assert "lzm3u8 · 正片" in names
-    # 提示线路画质（lzm3u8 不含画质线索，360zy 也不含 → 无画质标签，但不应报错）
-    assert isinstance(first.episodes[0].qualities, list)
+    assert names == ["正片", "预告"], f"多线路被展开成重复分集：{names}"
+    labels = {quality.label for quality in first.episodes[0].qualities}
+    assert {"360zy", "lzm3u8"} <= labels, f"线路没有进清晰度：{labels}"
 
 
 def test_cms_route_quality_hint() -> None:

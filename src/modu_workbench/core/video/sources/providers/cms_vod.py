@@ -12,8 +12,9 @@
 - 每个线路内部用 `#` 分隔分集，每集用 `$` 分隔「集名」与「地址」；
 - 线路名（如 `lzm3u8`/`1080p`）常含画质线索，分片清单里还有真实清晰度。
 
-因此「多线路」天然映射为「多清晰度选项」，本模块把每个线路都转成一个
-`Episode`，并尽力从线路名推断画质；真实 m3u8 主清单的画质由 `hls.py` 再细化。
+因此「多线路」是**同一集的多条线路**，不是更多集数：解析时按「集号 → 集名」
+合并，线路进 `Episode.qualities`（30 集的剧仍是 30 集），播放/下载仍可切线路；
+真实 m3u8 主清单的画质由 `hls.py` 再细化。
 
 **关于「分享页」**：不少采集站（非凡、电影天堂、U酷……）给的不是直链，而是形如
 `https://vip.xxx.com/share/<hash>` 的 HTML 播放页，真实地址写在页面脚本里。
@@ -29,6 +30,7 @@ from urllib.parse import urljoin, urlsplit
 from ...models import Episode, Quality, RemoteVideo, classify_kind, strip_html
 from ..base import KIND_FULL, SourceInfo, VideoSource
 from ..http import HttpClient, SourceError, host_of, looks_like_media_url, origin_of
+from ..matcher import episode_number, episode_tail
 
 # maccms 的 ac 参数
 AC_VIDEOLIST = "videolist"
@@ -70,22 +72,29 @@ def guess_quality_label(text: str) -> str:
 
 
 def parse_play_urls(play_url: str, play_from: str = "") -> list[Episode]:
-    """解析 `vod_play_url` 为分集列表（多线路时展开为「线路 · 集名」）。
+    """解析 `vod_play_url` 为分集列表（**同一集的多条线路合并**）。
 
-    单线路：集名保持原样（正片 / 第01集）；
-    多线路：集名前面加线路名，便于用户区分不同来源。
+    苹果 CMS 用 `$$$` 分隔线路、`#` 分隔分集。同一部剧的多条线路
+    （例如「非凡 / ffm3u8」）其实是**同样的 30 集**，只是线路不同；
+    旧实现把每条线路都展开成独立分集，于是 30 集的剧显示成 60 集。
+
+    现在按「集号 → 集名」合并：一集只出现一次，线路进 `episode.qualities`
+    （标签优先用线路名里的画质，其次线路名），播放/下载时仍可切线路。
     """
     if not play_url:
         return []
     routes = [item.strip() for item in str(play_url).split("$$$")]
     froms = [item.strip() for item in str(play_from or "").split("$$$") if item.strip()]
-    multi = len([r for r in routes if r]) > 1
-    episodes: list[Episode] = []
+    route_count = len([item for item in routes if item])
+    merged: dict[str, Episode] = {}
+    order: list[str] = []
     for route_index, route in enumerate(routes):
         if not route.strip():
             continue
         route_name = froms[route_index] if route_index < len(froms) else ""
-        quality = guess_quality_label(route_name)
+        hint = guess_quality_label(route_name)
+        # 单线路且线路名没有信息量时不造"线路1"这种假画质（保持旧行为）
+        record_route = route_count > 1 or bool(hint) or bool(route_name)
         for part in route.split("#"):
             part = part.strip()
             if not part:
@@ -95,18 +104,54 @@ def parse_play_urls(play_url: str, play_from: str = "") -> list[Episode]:
             if not url:
                 # 少数站点只给地址、用 $ 开头
                 name, url = "", name
-            if not url:
+            if not url or not _looks_playable(url):
                 continue
-            if not _looks_playable(url):
-                continue
-            label = name or f"第{len(episodes) + 1:02d}集"
-            if multi and route_name:
-                label = f"{route_name} · {label}"
-            episodes.append(Episode(
-                name=label, url=url, index=len(episodes), route=route_name,
-                qualities=([Quality(label=quality, url=url, source="")] if quality else []),
-            ))
+            label = name or f"第{len(order) + 1:02d}集"
+            key = _episode_key(label)
+            episode = merged.get(key)
+            if episode is None:
+                episode = Episode(
+                    name=label, url=url, index=len(order), route=route_name, qualities=[]
+                )
+                merged[key] = episode
+                order.append(key)
+            used = {quality.label for quality in episode.qualities}
+            if record_route:
+                episode.qualities.append(
+                    Quality(
+                        label=_route_label(route_name, hint, len(episode.qualities) + 1, used),
+                        url=url,
+                        source=route_name,
+                    )
+                )
+    episodes = [merged[key] for key in order]
+    # 有的站点按「新→旧」列分集；能识别出集号时按集号升序，序号同步重排
+    numbers = [episode_number(item.name) for item in episodes]
+    if episodes and all(numbers):
+        episodes = [item for _, item in sorted(zip(numbers, episodes), key=lambda pair: pair[0])]
+        for index, episode in enumerate(episodes):
+            episode.index = index
     return episodes
+
+
+def _episode_key(name: str) -> str:
+    """合并用的键：有集号按集号（第1集 / EP1 / 1 视为同一集），否则按集名。"""
+    number = episode_number(name)
+    if number:
+        return f"#{number}"
+    return episode_tail(name).lower()
+
+
+def _route_label(route_name: str, hint: str, position: int, used: set[str]) -> str:
+    """线路在「清晰度」下拉里的名字：画质 > 线路名 > 线路N（同集内不重复）。"""
+    for candidate in (hint, route_name):
+        if candidate and candidate not in used:
+            return candidate
+    base = route_name or hint or "线路"
+    label = f"{base} {position}"
+    while label in used:
+        label += "′"
+    return label
 
 
 def _looks_playable(url: str) -> bool:

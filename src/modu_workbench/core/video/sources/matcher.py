@@ -21,6 +21,33 @@ _NOISE = re.compile(
 )
 _PUNCT = re.compile(r"[\s\.\-_·:：,，、!！?？'\"“”‘’()（）\[\]【】]+")
 
+#: 集名里的集号写法（认不出就返回 0，调用方退回按序号匹配）
+_EPISODE_NUMBER_PATTERNS = (
+    r"第\s*(\d{1,4})\s*[集话話期]",
+    r"[Ee][Pp]?\s*(\d{1,4})\b",
+    r"^(\d{1,4})$",
+)
+
+
+def episode_tail(name: str) -> str:
+    """去掉线路前缀后的集名：`ffm3u8 · 第12集` → `第12集`。"""
+    return (name or "").split(" · ")[-1].strip()
+
+
+def episode_number(name: str) -> int:
+    """从集名里提取集号（`第12集` / `EP12` / 纯数字），认不出返回 0。
+
+    两个用途：换源时对齐"同一集"，以及合并同一部剧的多条线路。
+    """
+    text = (name or "").strip()
+    if not text:
+        return 0
+    for pattern in _EPISODE_NUMBER_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return int(match.group(1))
+    return 0
+
 
 def normalize_title(text: str) -> str:
     """归一化标题：去噪词、去标点、统一小写。"""
