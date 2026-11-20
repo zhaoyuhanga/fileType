@@ -32,7 +32,8 @@ param(
     [string]$Message = "",
     [string[]]$Include = @(),
     [string]$Proxy = "",
-    [switch]$NoVerify
+    [switch]$NoVerify,
+    [switch]$PushOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,75 +52,103 @@ try {
     Write-Ok "仓库：$repo"
 
     Write-Step "暂存改动"
-    & git add -u
-    if ($Include.Count -gt 0) {
-        & git add -- $Include
-        if ($LASTEXITCODE -ne 0) { throw "git add 失败：$($Include -join ', ')" }
-    }
-    $staged = (& git diff --cached --name-only).Trim()
-    if ([string]::IsNullOrWhiteSpace($staged)) {
-        Write-Warn2 "没有可提交的改动（未跟踪文件不会自动加入，请用 -Include 指定）"
-        exit 0
-    }
-    Write-Host $staged
-    if ([string]::IsNullOrWhiteSpace($Message)) {
-        throw "有改动但没有 -Message：请给出提交信息（如 'feat(video): ...'）"
-    }
+    if (-not $PushOnly) {
+        & git add -u
+        if ($Include.Count -gt 0) {
+            & git add -- $Include
+            if ($LASTEXITCODE -ne 0) { throw "git add 失败：$($Include -join ', ')" }
+        }
+        $staged = (& git diff --cached --name-only).Trim()
+        if ([string]::IsNullOrWhiteSpace($staged)) {
+            Write-Warn2 "没有可提交的改动（未跟踪文件请用 -Include 指定）；只推送已有提交请加 -PushOnly"
+            exit 0
+        }
+        Write-Host $staged
+        if ([string]::IsNullOrWhiteSpace($Message)) {
+            throw "有改动但没有 -Message：请给出提交信息（如 'feat(video): ...'）"
+        }
 
-    Write-Step "提交"
-    & git commit -m $Message
-    if ($LASTEXITCODE -ne 0) { throw "git commit 失败" }
+        Write-Step "提交"
+        & git commit -m $Message
+        if ($LASTEXITCODE -ne 0) { throw "git commit 失败" }
+    } else {
+        Write-Warn2 "PushOnly：跳过提交，直接推送当前 HEAD"
+    }
     $head = (& git rev-parse HEAD).Trim()
     Write-Ok "本地 HEAD：$head"
 
+    # 代理与直连都探一下：代理挂了但直连通时不应直接失败
     $proxyUrl = if ($Proxy) { $Proxy } else { Resolve-WorkingProxy }
-    if (-not $proxyUrl) { throw "找不到可用代理，无法推送（本地提交已保留）" }
-    Write-Ok "代理：$proxyUrl"
+    $direct = Test-GitHubDirect
+    if (-not $proxyUrl -and -not $direct) {
+        throw "代理与直连都不通，无法推送（本地提交已保留）"
+    }
+    if ($proxyUrl) { Write-Ok "代理：$proxyUrl" } else { Write-Warn2 "没有可用代理，走直连" }
+    if ($direct) { Write-Ok "直连：可用" }
+
+    $targets = @()
+    if ($proxyUrl) { $targets += $proxyUrl }
+    if ($direct) { $targets += "" }   # 空串 = 直连
 
     $branch = Get-CurrentBranch
+
+    Write-Step "同步远端"
+    $fetched = $false
+    foreach ($target in $targets) {
+        $label = if ($target) { $target } else { "直连" }
+        $code = Invoke-GitEither $target @('fetch', 'origin', $branch)
+        if ($code -eq 0) { Write-Ok "fetch 成功（$label）"; $fetched = $true; break }
+        Write-Warn2 "fetch 失败（$label，退出码 $code）"
+    }
+    if (-not $fetched) { Write-Warn2 "fetch 未成功，仍尝试推送" }
+
+    $behind = Get-BehindCount $branch
+    if ($behind -gt 0) {
+        Write-Warn2 "远端领先 $behind 个提交，先变基"
+        & git rebase "origin/$branch"
+        if ($LASTEXITCODE -ne 0) { throw "rebase 失败：请手动解决冲突后再跑" }
+        $head = (& git rev-parse HEAD).Trim()
+    }
+
     $pushed = $false
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        Write-Step "推送（第 $attempt 轮）"
-        if (-not (Test-ProxyUrl $proxyUrl)) {
-            Write-Warn2 "代理暂时不通，10 秒后重试"
-            Start-Sleep -Seconds 10
-            continue
+    for ($round = 1; $round -le 3 -and -not $pushed; $round++) {
+        foreach ($target in $targets) {
+            $label = if ($target) { $target } else { "直连" }
+            if ($target -and -not (Test-ProxyUrl $target)) { continue }
+            Write-Step "推送（$label，第 $round 轮）"
+            $code = Invoke-GitEither $target @('push', '--no-thin', 'origin', $branch)
+            if ($code -eq 0) { $pushed = $true; break }
+            Write-Warn2 "推送失败（$label，退出码 $code）"
         }
-        $code = Invoke-GitProxy $proxyUrl @('fetch', 'origin', $branch)
-        if ($code -ne 0) { Write-Warn2 "fetch 失败，10 秒后重试"; Start-Sleep -Seconds 10; continue }
-
-        $behind = Get-BehindCount $branch
-        if ($behind -gt 0) {
-            Write-Warn2 "远端领先 $behind 个提交，先变基"
-            & git rebase "origin/$branch"
-            if ($LASTEXITCODE -ne 0) { throw "rebase 失败：请手动解决冲突后再跑" }
-            $head = (& git rev-parse HEAD).Trim()
-        }
-
-        $code = Invoke-GitProxy $proxyUrl @('push', '--no-thin', 'origin', $branch)
-        if ($code -eq 0) { $pushed = $true; break }
-        Write-Warn2 "push 失败（退出码 $code），10 秒后重试"
-        Start-Sleep -Seconds 10
+        if (-not $pushed) { Start-Sleep -Seconds 8 }
     }
     if (-not $pushed) { throw "推送失败（本地提交已保留，可稍后重跑本脚本）" }
 
     if (-not $NoVerify) {
         Write-Step "复核远端"
         $remoteSha = ""
-        for ($round = 1; $round -le 3; $round++) {
-            # ls-remote 的 stderr 在 PS 5.1 下会变成 NativeCommandError，
-            # 这里临时放开 ErrorActionPreference 并吃掉落错，避免"复核失败"把成功推送判死
-            $previous = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $line = & git -c "http.proxy=$proxyUrl" -c 'http.version=HTTP/1.1' ls-remote origin "refs/heads/$branch" 2>$null
-                $code = $LASTEXITCODE
-            } finally {
-                $ErrorActionPreference = $previous
+        for ($round = 1; $round -le 3 -and -not $remoteSha; $round++) {
+            foreach ($target in $targets) {
+                # ls-remote 的 stderr 在 PS 5.1 下会变成 NativeCommandError，
+                # 临时放开 ErrorActionPreference 并吃掉落错，避免"复核失败"把成功推送判死
+                $previous = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    if ($target) {
+                        $line = & git -c "http.proxy=$target" -c 'http.version=HTTP/1.1' ls-remote origin "refs/heads/$branch" 2>$null
+                    } else {
+                        $line = & git ls-remote origin "refs/heads/$branch" 2>$null
+                    }
+                    $code = $LASTEXITCODE
+                } finally {
+                    $ErrorActionPreference = $previous
+                }
+                if ($code -eq 0 -and $line) { $remoteSha = ($line -split '\s+')[0]; break }
             }
-            if ($code -eq 0 -and $line) { $remoteSha = ($line -split '\s+')[0]; break }
-            Write-Warn2 "复核请求失败（第 $round 轮），5 秒后重试"
-            Start-Sleep -Seconds 5
+            if (-not $remoteSha) {
+                Write-Warn2 "复核请求失败（第 $round 轮），5 秒后重试"
+                Start-Sleep -Seconds 5
+            }
         }
         if (-not $remoteSha) {
             Write-Warn2 "无法复核远端（网络抖动），但 push 已返回成功；可用 -NoVerify 跳过这一步"

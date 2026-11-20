@@ -91,6 +91,22 @@ function Invoke-GitProxy {
     return $LASTEXITCODE
 }
 
+function Invoke-GitEither {
+    <# 有代理走代理，没有就直连（返回退出码）。 #>
+    param([string]$ProxyUrl, [string[]]$GitArgs)
+    if ($ProxyUrl) { return (Invoke-GitProxy $ProxyUrl $GitArgs) }
+    & git @GitArgs
+    return $LASTEXITCODE
+}
+
+function Test-GitHubDirect {
+    <# 直连 GitHub 是否可用：代理挂了但本机网络正常时走这条路。 #>
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if (-not $curl) { return $false }
+    $code = & $curl.Source -s -o NUL -w '%{http_code}' --max-time 8 https://github.com 2>$null
+    return ($code -eq '200')
+}
+
 function Get-CurrentBranch {
     return (& git rev-parse --abbrev-ref HEAD).Trim()
 }

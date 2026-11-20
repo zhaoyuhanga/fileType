@@ -33,14 +33,17 @@ try {
     Write-Ok "仓库：$repo"
 
     $proxyUrl = if ($Proxy) { $Proxy } else { Resolve-WorkingProxy }
-    if (-not $proxyUrl) {
-        throw "找不到可用代理（直连与 7890/7891/7892 都不通）—— 请检查代理软件是否在运行"
+    if ($proxyUrl) {
+        Write-Ok "代理：$proxyUrl"
+    } elseif (Test-GitHubDirect) {
+        Write-Warn2 "没有可用代理，改用直连"
+    } else {
+        throw "代理与直连都不通 —— 请检查网络或代理软件是否在运行"
     }
-    Write-Ok "代理：$proxyUrl"
 
     Write-Step "git fetch"
-    $code = Invoke-GitProxy $proxyUrl @('fetch', '--all', '--prune')
-    if ($code -ne 0) { throw "fetch 失败（退出码 $code），代理可能已失效" }
+    $code = Invoke-GitEither $proxyUrl @('fetch', '--all', '--prune')
+    if ($code -ne 0) { throw "fetch 失败（退出码 $code），网络或代理可能已失效" }
     Write-Ok "远端引用已更新"
 
     $branch = Get-CurrentBranch
