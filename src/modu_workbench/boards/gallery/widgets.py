@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -26,6 +27,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStyle,
     QStyledItemDelegate,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -880,7 +883,7 @@ class AnalyzeWorker(QThread):
 
 
 class DuplicateWorker(QThread):
-    """相似/重复图片检测（感知哈希聚类，图多时需要时间）。"""
+    """相似/重复图片检测（感知哈希聚类，图多时需要时间，可取消）。"""
 
     finishedGroups = Signal(object)
     failed = Signal(str)
@@ -889,10 +892,18 @@ class DuplicateWorker(QThread):
         super().__init__(parent)
         self._library = library
         self._max_distance = max_distance
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel.set()
 
     def run(self) -> None:  # noqa: D102
         try:
-            self.finishedGroups.emit(self._library.find_duplicates(max_distance=self._max_distance))
+            self.finishedGroups.emit(
+                self._library.find_duplicates(
+                    max_distance=self._max_distance, cancel=self._cancel.is_set
+                )
+            )
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
 
@@ -906,6 +917,106 @@ def ask_text(parent: QWidget | None, title: str, label: str, default: str = "") 
         return None
     text = (text or "").strip()
     return text or None
+
+
+class DuplicateGroupsDialog(QDialog):
+    """重复/相似图片分组：勾选要移除的图，默认保留每组第一张。
+
+    以前检测完只弹一个文本窗，关掉之后什么都没发生，用户还得自己去图库里
+    一张张找。这里把"查到 → 处置"接上：勾选即移除图库记录（**不动磁盘文件**），
+    每组默认保留第一张，避免一键把整组删光。
+    """
+
+    def __init__(self, groups: list[list[ImageItem]], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle(f"重复/相似图片（{len(groups)} 组）")
+        self.resize(860, 560)
+        self._groups = groups
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        hint = QLabel(
+            "勾选要**移出图库**的图片（每组默认保留第一张）。"\
+            "只删除图库记录与缩略图，磁盘上的原文件不会被删。"
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("readerStatus")
+        layout.addWidget(hint)
+
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(4)
+        self._tree.setHeaderLabels(["图片", "尺寸", "大小", "路径"])
+        self._tree.setAlternatingRowColors(True)
+        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._tree.setColumnWidth(0, 240)
+        for index, group in enumerate(groups, start=1):
+            top = QTreeWidgetItem([f"第 {index} 组 · {len(group)} 张", "", "", ""])
+            top.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self._tree.addTopLevelItem(top)
+            for position, item in enumerate(group):
+                child = QTreeWidgetItem([
+                    item.display(), item.resolution, item.size_text, item.path or "",
+                ])
+                child.setData(0, ITEM_ROLE, int(item.id))
+                child.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsSelectable
+                )
+                # 默认保留每组第一张，其余勾上待移除
+                child.setCheckState(
+                    0, Qt.CheckState.Unchecked if position == 0 else Qt.CheckState.Checked
+                )
+                top.addChild(child)
+            top.setExpanded(True)
+        self._tree.itemChanged.connect(lambda *_: self._update_count())
+        layout.addWidget(self._tree, 1)
+
+        row = QHBoxLayout()
+        self._count = QLabel("")
+        self._count.setObjectName("readerStatus")
+        row.addWidget(self._count)
+        row.addStretch(1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self._remove = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self._remove.setText("移除勾选的图片")
+        self._remove.setObjectName("dangerButton")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+        self._update_count()
+
+    def selected_ids(self) -> list[int]:
+        ids: list[int] = []
+        for top_index in range(self._tree.topLevelItemCount()):
+            top = self._tree.topLevelItem(top_index)
+            for child_index in range(top.childCount()):
+                child = top.child(child_index)
+                if child.checkState(0) == Qt.CheckState.Checked:
+                    image_id = child.data(0, ITEM_ROLE)
+                    if image_id is not None:
+                        ids.append(int(image_id))
+        return ids
+
+    def _update_count(self) -> None:
+        count = len(self.selected_ids())
+        self._count.setText(f"已勾选 {count} 张（保留 {sum(len(g) for g in self._groups) - count} 张）")
+
+    def _accept(self) -> None:
+        if not self.selected_ids():
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.information(self, "没有勾选", "先勾选要移出图库的图片。")
+            return
+        self.accept()
 
 
 class AlbumPicker(QDialog):
@@ -1012,6 +1123,7 @@ __all__ = [
     "ITEM_ROLE",
     "AlbumPicker",
     "AnalyzeWorker",
+    "DuplicateGroupsDialog",
     "DuplicateWorker",
     "EnhanceWorker",
     "ImageViewer",

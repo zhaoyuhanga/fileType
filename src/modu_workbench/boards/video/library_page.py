@@ -337,6 +337,7 @@ class VideoLibraryPage(QWidget):
         self._import_worker = worker
         worker.progressed.connect(self._on_import_progress)
         worker.finishedImport.connect(self._on_import_finished)
+        worker.cancelled.connect(self._on_import_cancelled)
         worker.failed.connect(self._on_import_failed)
         worker.finished.connect(lambda: setattr(self, "_import_worker", None))
         self._toaster.info(f"正在导入 {len(files)} 个文件（大文件复制需要一会儿）…")
@@ -352,7 +353,28 @@ class VideoLibraryPage(QWidget):
         """导入完成（在主线程执行，可以安全刷界面）。"""
         self.reload()
         self.libraryChanged.emit()
+        self._idle(f"已导入 {len(videos)} 个影片")
         self._toaster.success(f"已导入 {len(videos)} 个影片")
+
+    def _on_import_cancelled(self, imported: int) -> None:
+        self.reload()
+        self.libraryChanged.emit()
+        self._idle(f"已取消导入（已入库 {imported} 个影片）")
+        self._toaster.info(f"已取消导入（已入库 {imported} 个影片）")
+
+    def cancel_current(self) -> bool:
+        """取消本页正在跑的任务（导入优先，其次转换）。返回是否真的有任务。"""
+        import_worker = getattr(self, "_import_worker", None)
+        if import_worker is not None and import_worker.isRunning():
+            import_worker.cancel()
+            self._report("正在取消导入…")
+            return True
+        convert_worker = getattr(self, "_convert_worker", None)
+        if convert_worker is not None and convert_worker.isRunning():
+            convert_worker.cancel()
+            self._report("正在取消转换…")
+            return True
+        return False
 
     def _on_import_failed(self, reason: str) -> None:
         self._toaster.error(f"导入失败：{reason}")
@@ -607,8 +629,9 @@ class VideoLibraryPage(QWidget):
         save_table_layout(self._table, "video/library_columns")
 
     def shutdown(self) -> None:
-        worker = self._convert_worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            worker.wait(3000)
+        for worker in (self._convert_worker, getattr(self, "_import_worker", None),
+                       getattr(self, "_enhance_worker", None)):
+            if worker is not None and worker.isRunning():
+                worker.cancel()
+                worker.wait(3000)
         self._save_layout()

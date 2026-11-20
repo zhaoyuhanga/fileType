@@ -891,6 +891,7 @@ class ImportWorker(QThread):
 
     progressed = Signal(int, int, str)
     finishedImport = Signal(object)      # List[Video]
+    cancelled = Signal(int)              # 已导入数量
     failed = Signal(str)
 
     def __init__(self, library, paths, *, category: str = "", parent=None):  # noqa: ANN001
@@ -911,8 +912,12 @@ class ImportWorker(QThread):
                 on_progress=lambda done, total, message: self.progressed.emit(
                     done, total, message
                 ),
+                cancel=self._cancel.is_set,
             )
-            self.finishedImport.emit(videos)
+            if self._cancel.is_set():
+                self.cancelled.emit(len(videos))
+            else:
+                self.finishedImport.emit(videos)
         except Exception as error:  # noqa: BLE001  线程里不能让异常冒出去
             self.failed.emit(str(error))
 

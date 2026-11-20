@@ -959,6 +959,10 @@ class VideoBoardPage(QWidget):
         if self._download_queue:
             self._download_queue.clear()
             self._toaster.info("已取消排队中的下载任务")
+        # 没有下载任务时，任务条的「取消」应该落到当前可见的长任务（导入/转换），
+        # 否则在「我的视频」导入时点取消完全没反应。
+        if self._download_worker is None and self._stack.currentWidget() is self._library_page:
+            self._library_page.cancel_current()
 
     def _task_key(self, task) -> str:  # noqa: ANN001
         """任务的身份键（失败重试队列去重用）：源 + 条目 + 集。"""

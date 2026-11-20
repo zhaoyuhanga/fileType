@@ -50,6 +50,44 @@ from modu_workbench.core.platform.logging import swallow
 
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 
+#: 播放偏好：音量与倍速（上次调到 30 / 1.5x，下次打开还是它）
+VIDEO_VOLUME_KEY = "video/volume"
+VIDEO_SPEED_KEY = "video/speed"
+DEFAULT_VOLUME = 80
+
+
+def _video_settings():  # noqa: ANN202
+    from PySide6.QtCore import QSettings
+
+    from modu_workbench.core.platform.paths import SETTINGS_APP, SETTINGS_ORG
+
+    return QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+
+def load_playback_prefs() -> tuple[int, float]:
+    """读取 `(音量, 倍速)`；非法值回落到 80 / 1.0。"""
+    try:
+        settings = _video_settings()
+        volume = int(settings.value(VIDEO_VOLUME_KEY, DEFAULT_VOLUME) or DEFAULT_VOLUME)
+        speed = float(settings.value(VIDEO_SPEED_KEY, 1.0) or 1.0)
+    except (TypeError, ValueError):
+        return DEFAULT_VOLUME, 1.0
+    volume = max(0, min(100, volume))
+    if speed not in SPEEDS:
+        speed = 1.0
+    return volume, speed
+
+
+def save_playback_pref(key: str, value: int | float) -> None:
+    try:
+        settings = _video_settings()
+        settings.setValue(key, value)
+        settings.sync()
+    except Exception as error:  # noqa: BLE001  记不住偏好不该影响播放
+        from modu_workbench.core.platform.logging import swallow
+
+        swallow(f"保存播放偏好（{key}）", error)
+
 #: 小窗模式（浮窗置顶）的窗口尺寸：只有 16:9 画面，控制条悬浮在画面上、不占高度
 MINI_WIDTH = 400
 MINI_VIDEO_HEIGHT = 225
@@ -406,7 +444,8 @@ class VideoPlayerDialog(QDialog):
         self._speed_box = QComboBox()
         for speed in SPEEDS:
             self._speed_box.addItem(f"{speed:g}x", speed)
-        self._speed_box.setCurrentIndex(SPEEDS.index(1.0))
+        volume_pref, speed_pref = load_playback_prefs()
+        self._speed_box.setCurrentIndex(SPEEDS.index(speed_pref))
         self._speed_box.currentIndexChanged.connect(self._on_speed_changed)
         row.addWidget(self._speed_box)
 
@@ -433,7 +472,7 @@ class VideoPlayerDialog(QDialog):
 
         self._volume = QSlider(Qt.Orientation.Horizontal)
         self._volume.setRange(0, 100)
-        self._volume.setValue(80)
+        self._volume.setValue(volume_pref)
         self._volume.setFixedWidth(90)
         self._volume.valueChanged.connect(self._on_volume_changed)
         row.addWidget(self._volume)
@@ -647,14 +686,16 @@ class VideoPlayerDialog(QDialog):
         if self._audio is not None:
             self._audio.setVolume(value / 100)
         self._mute_button.setText("🔈" if value == 0 else "🔊")
+        save_playback_pref(VIDEO_VOLUME_KEY, int(value))
 
     def _toggle_mute(self) -> None:
-        self._volume.setValue(0 if self._volume.value() > 0 else 80)
+        self._volume.setValue(0 if self._volume.value() > 0 else DEFAULT_VOLUME)
 
     def _on_speed_changed(self) -> None:
         speed = float(self._speed_box.currentData() or 1.0)
         if self._player is not None and hasattr(self._player, "setPlaybackRate"):
             self._player.setPlaybackRate(speed)
+        save_playback_pref(VIDEO_SPEED_KEY, speed)
 
     def _on_quality_changed(self, label: str) -> None:
         if label:

@@ -56,6 +56,16 @@ def music_download_dir_pref() -> str:
     return stored or str(music_download_dir())
 
 
+def set_music_download_dir_pref(folder: str) -> None:
+    """记住搜索页选的下载目录：歌单页「下载待下载项」也读同一个键。"""
+    folder = str(folder or "").strip()
+    if not folder:
+        return
+    settings = music_settings()
+    settings.setValue("music/download_dir", folder)
+    settings.sync()
+
+
 def jamendo_client_id_pref() -> str:
     import os
 

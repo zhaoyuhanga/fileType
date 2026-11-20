@@ -310,16 +310,26 @@ class ImageLibrary:
     def preview(self, item: ImageItem, size: int = THUMB_LARGE) -> str | None:
         return self.thumbnail(item, size)
 
-    def find_duplicates(self, *, max_distance: int = 4) -> List[List[ImageItem]]:
-        """按感知哈希聚类出相似/重复图片分组（每组至少 2 张）。"""
+    def find_duplicates(
+        self, *, max_distance: int = 4, cancel: Callable[[], bool] | None = None
+    ) -> List[List[ImageItem]]:
+        """按感知哈希聚类出相似/重复图片分组（每组至少 2 张）。
+
+        `cancel` 返回 True 时提前结束并返回已找到的分组（图多时 O(n²) 很慢，
+        用户不该只能干等）。
+        """
         items = [item for item in self.storage.list_images(limit=50000) if item.dhash]
         used: set[int] = set()
         groups: list[list[ImageItem]] = []
         for index, base in enumerate(items):
+            if cancel is not None and cancel():
+                break
             if base.id in used:
                 continue
             group = [base]
-            for other in items[index + 1 :]:
+            for offset, other in enumerate(items[index + 1 :]):
+                if offset % 256 == 0 and cancel is not None and cancel():
+                    return groups
                 if other.id in used:
                     continue
                 distance = hamming_distance(base.dhash, other.dhash)

@@ -56,11 +56,12 @@ from modu_workbench.ui_kit.components import EmptyState, TaskBar
 from modu_workbench.ui_kit.components import primary_button
 from modu_workbench.ui_kit.widgets import make_nav_button, set_nav_active
 
-from .nav_tree import CategoryNavTree
+from .nav_tree import PAYLOAD_ROLE, CategoryNavTree
 from .widgets import (
     ITEM_ROLE,
     AlbumPicker,
     AnalyzeWorker,
+    DuplicateGroupsDialog,
     DuplicateWorker,
     EnhanceWorker,
     ImageViewer,
@@ -339,6 +340,8 @@ class GalleryBoardPage(QWidget):
         self._side = CategoryNavTree()
         self._side.setMinimumWidth(190)
         self._side.itemClicked.connect(self._on_side_clicked)
+        self._side.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._side.customContextMenuRequested.connect(self._on_side_menu)
         side_layout.addWidget(self._side, 1)
         self._side_hint = QLabel("")
         self._side_hint.setObjectName("readerStatus")
@@ -935,6 +938,110 @@ class GalleryBoardPage(QWidget):
     def _favorite_count(self) -> int:
         return len(self._library.storage.list_images(favorite_only=True, limit=100000))
 
+    # ------------------------------------------------------------------ 侧栏管理
+
+    def _on_side_menu(self, pos) -> None:  # noqa: ANN001
+        """相册 / 标签节点的右键菜单：重命名、删除（后端早就支持，界面一直没入口）。"""
+        item = self._side.itemAt(pos)
+        if item is None:
+            return
+        payload = item.data(0, PAYLOAD_ROLE)
+        if not isinstance(payload, dict):
+            return
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self._side)
+        if "album" in payload:
+            album_id = int(payload["album"])
+            menu.addAction("重命名相册…").triggered.connect(
+                lambda _checked=False, aid=album_id: self._rename_album(aid)
+            )
+            menu.addAction("删除相册…").triggered.connect(
+                lambda _checked=False, aid=album_id: self._delete_album(aid)
+            )
+        elif "tag" in payload:
+            name = str(payload["tag"])
+            menu.addAction("重命名标签…").triggered.connect(
+                lambda _checked=False, value=name: self._rename_tag(value)
+            )
+            menu.addAction("删除标签…").triggered.connect(
+                lambda _checked=False, value=name: self._delete_tag(value)
+            )
+        else:
+            return
+        menu.exec(self._side.viewport().mapToGlobal(pos))
+
+    def _rename_album(self, album_id: int) -> None:
+        album = self._library.storage.get_album(album_id)
+        if album is None:
+            return
+        new_name = ask_text(self, "重命名相册", "新名称：", album.name)
+        if not new_name or new_name == album.name:
+            return
+        if self._library.rename_album(album_id, new_name):
+            self._toaster.success(f"已重命名为「{new_name}」")
+            self._refresh_side()
+        else:
+            self._toaster.error("重命名失败（名称可能重复）")
+
+    def _delete_album(self, album_id: int) -> None:
+        album = self._library.storage.get_album(album_id)
+        if album is None:
+            return
+        from PySide6.QtWidgets import QMessageBox
+
+        answer = QMessageBox.question(
+            self, "删除相册",
+            f"确定删除相册「{album.name}」吗？\n\n只删除相册本身，里面的图片仍留在图库里。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self._library.delete_album(album_id):
+            if (self._active_filter or {}).get("album") == album_id:
+                self._active_filter = {"all": True}
+            self._toaster.success(f"已删除相册「{album.name}」")
+            self.reload()
+
+    def _find_tag(self, name: str):  # noqa: ANN202
+        return next((tag for tag in self._library.list_tags() if tag.name == name), None)
+
+    def _rename_tag(self, name: str) -> None:
+        tag = self._find_tag(name)
+        if tag is None:
+            return
+        new_name = ask_text(self, "重命名标签", "新名称：", tag.name)
+        if not new_name or new_name == tag.name:
+            return
+        if self._library.storage.rename_tag(tag.id, new_name):
+            if (self._active_filter or {}).get("tag") == tag.name:
+                self._active_filter = {"tag": new_name}
+            self._toaster.success(f"已重命名为「{new_name}」")
+            self.reload()
+        else:
+            self._toaster.error("重命名失败（名称可能重复）")
+
+    def _delete_tag(self, name: str) -> None:
+        tag = self._find_tag(name)
+        if tag is None:
+            return
+        from PySide6.QtWidgets import QMessageBox
+
+        answer = QMessageBox.question(
+            self, "删除标签",
+            f"确定删除标签「{tag.name}」吗？\n\n只会把标签从图片上移除，不会删除图片。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self._library.storage.delete_tag(tag.id):
+            if (self._active_filter or {}).get("tag") == tag.name:
+                self._active_filter = {"all": True}
+            self._toaster.success(f"已删除标签「{tag.name}」")
+            self.reload()
+
     def _source_counts(self) -> dict:
         counts: dict = {}
         for item in self._library.storage.list_images(limit=100000):
@@ -1297,10 +1404,13 @@ class GalleryBoardPage(QWidget):
 
         answer = QMessageBox.question(
             self, "删除图片",
-            f"将移除 {len(items)} 张图片的记录。\n是否同时删除本地文件？\n"
-            "（选择 No＝只移除记录，保留文件）",
+            f"将处理 {len(items)} 张图片。\n\n"
+            "「是」：同时删除本地文件（不可恢复，不进回收站）\n"
+            "「否」：只移除图库记录，保留磁盘文件\n"
+            "「取消」：什么都不做",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.No,
         )
         if answer == QMessageBox.StandardButton.Cancel:
             return
@@ -1404,32 +1514,41 @@ class GalleryBoardPage(QWidget):
     def _detect_duplicates(self) -> None:
         if self._duplicate_worker is not None and self._duplicate_worker.isRunning():
             return
-        self._report("正在检测重复/相似图片…")
+        self._report("正在检测重复/相似图片…（图多时需要一会儿，可取消）")
+        self._cancel_button.setEnabled(True)
         self._duplicate_worker = DuplicateWorker(self._library, parent=self)
         self._duplicate_worker.finishedGroups.connect(self._on_duplicates)
         self._duplicate_worker.failed.connect(self._on_task_failed)
+        self._duplicate_worker.finished.connect(self._on_worker_finished)
         self._duplicate_worker.start()
 
     def _on_duplicates(self, groups: list) -> None:
         self._duplicates = groups
         if not groups:
+            self._idle("重复检测完成：无重复")
             self._toaster.info("未发现重复或相似图片")
-            self._report("重复检测完成：无重复")
             return
         total = sum(len(group) for group in groups)
+        self._idle(f"发现 {len(groups)} 组相似图片（共 {total} 张），已勾选的会自动保留每组第一张")
         self._toaster.info(f"发现 {len(groups)} 组相似图片（共 {total} 张）")
-        self._report(f"发现 {len(groups)} 组相似图片，可在右键菜单里按组删除多余的")
-        self._show_duplicate_groups(groups)
+        dialog = DuplicateGroupsDialog(groups, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        ids = dialog.selected_ids()
+        if not ids:
+            return
+        removed = self._library.delete_images(ids, remove_file=False)
+        self._toaster.success(f"已移除 {removed} 张重复图片（仅图库记录，磁盘文件保留）")
+        self.reload()
 
     def _show_duplicate_groups(self, groups: list) -> None:
-        from PySide6.QtWidgets import QMessageBox
-
-        lines = []
-        for index, group in enumerate(groups[:12], start=1):
-            names = "、".join(item.display() for item in group[:4])
-            lines.append(f"{index}. {len(group)} 张：{names}")
-        QMessageBox.information(self, "重复/相似图片",
-                                "检测到以下分组（用感知哈希判定）：\n\n" + "\n".join(lines))
+        """兼容旧调用：统一走可处置的分组对话框。"""
+        dialog = DuplicateGroupsDialog(groups, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            ids = dialog.selected_ids()
+            if ids:
+                self._library.delete_images(ids, remove_file=False)
+                self.reload()
 
     # ------------------------------------------------------------------ 大图查看
 
@@ -1510,10 +1629,26 @@ class GalleryBoardPage(QWidget):
 
     def _cancel_tasks(self) -> None:
         for worker in (self._browse_worker, self._enhance_worker,
-                       self._analyze_worker):
+                       self._analyze_worker, self._duplicate_worker):
             if worker is not None and worker.isRunning():
                 worker.cancel()
         self._report("正在取消任务…")
+
+    def _remove_from_current_album(self, items: list) -> None:
+        album_id = int((self._active_filter or {}).get("album") or 0)
+        if not album_id or not items:
+            return
+        removed = self._library.remove_from_album(album_id, [item.id for item in items])
+        self._toaster.success(f"已从相册移出 {removed} 张（图片仍保留在图库）")
+        self.reload()
+
+    def _untag_current(self, items: list) -> None:
+        name = str((self._active_filter or {}).get("tag") or "")
+        if not name or not items:
+            return
+        removed = self._library.untag_images([item.id for item in items], name)
+        self._toaster.success(f"已移除标签「{name}」：{removed} 张")
+        self.reload()
 
     def _on_grid_menu(self, pos) -> None:  # noqa: ANN001
         # 右键落点即操作对象：默认右键不改选中项，会出现"菜单作用于上一张图"
@@ -1528,7 +1663,7 @@ class GalleryBoardPage(QWidget):
         from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self._grid)
-        actions = (
+        actions = [
             ("🔍 大图查看", lambda: self._open_viewer(items[0])),
             ("✏️ 编辑美化…", self._open_editor),
             ("✨ AI 优化…", self._open_enhance),
@@ -1538,7 +1673,11 @@ class GalleryBoardPage(QWidget):
             ("★ 收藏 / 取消", self._toggle_favorite),
             ("📂 打开所在文件夹", lambda: self._reveal(items[0])),
             ("🗑 删除…", self._delete_selected),
-        )
+        ]
+        if self._active_filter and self._active_filter.get("album"):
+            actions.insert(6, ("📤 从当前相册移出", lambda: self._remove_from_current_album(items)))
+        if self._active_filter and self._active_filter.get("tag"):
+            actions.insert(6, ("🏷 移除当前标签", lambda: self._untag_current(items)))
         for label, handler in actions:
             action = menu.addAction(label)
             action.triggered.connect(lambda _checked=False, fn=handler: fn())

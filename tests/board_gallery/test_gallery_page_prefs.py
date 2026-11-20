@@ -117,3 +117,99 @@ def test_editor_keeps_unsaved_steps_as_draft(
 
     steps = library.load_steps(item.id)
     assert steps and steps[-1].step == "adjust"
+
+
+def test_duplicate_dialog_keeps_first_of_each_group(qapp: QApplication) -> None:
+    """重复分组默认只勾「每组第一张以外」的图，避免一键把整组删光。"""
+    from modu_workbench.boards.gallery.widgets import DuplicateGroupsDialog
+    from modu_workbench.core.gallery import ImageItem
+
+    groups = [
+        [ImageItem(id=1, path="a.jpg", title="A"), ImageItem(id=2, path="a2.jpg", title="A2"),
+         ImageItem(id=3, path="a3.jpg", title="A3")],
+        [ImageItem(id=4, path="b.jpg", title="B"), ImageItem(id=5, path="b2.jpg", title="B2")],
+    ]
+    dialog = DuplicateGroupsDialog(groups)
+    try:
+        assert dialog.selected_ids() == [2, 3, 5]
+    finally:
+        dialog.close()
+
+
+def test_find_duplicates_can_be_cancelled(library: ImageLibrary) -> None:
+    from modu_workbench.core.gallery import ImageItem
+
+    library.storage.list_images = lambda **kwargs: [  # type: ignore[method-assign]
+        ImageItem(id=index, path=f"{index}.jpg", dhash="0000000000000000")
+        for index in range(1, 7)
+    ]
+    seen = {"n": 0}
+
+    def cancel() -> bool:
+        seen["n"] += 1
+        return seen["n"] > 1
+
+    groups = library.find_duplicates(cancel=cancel)
+    assert len(groups) < 2, "取消后不该继续把所有分组都算完"
+
+
+def test_album_can_be_renamed_and_deleted(
+    qapp: QApplication, library: ImageLibrary, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """相册重命名/删除以前只能改 SQLite；界面补上右键入口。"""
+    from PIL import Image as PILImage
+    from PySide6.QtWidgets import QMessageBox
+
+    from modu_workbench.boards.gallery import board as gallery_board
+
+    source = tmp_path / "相册图.jpg"
+    PILImage.new("RGB", (40, 40), (10, 20, 30)).save(source)
+    library.import_paths([str(source)])
+    album_id = library.create_album("旧相册")
+    assert album_id
+
+    page = _open(library)
+    try:
+        monkeypatch.setattr(gallery_board, "ask_text", lambda *args, **kwargs: "新相册")
+        page._rename_album(album_id)  # noqa: SLF001
+        assert library.storage.get_album(album_id).name == "新相册"
+
+        monkeypatch.setattr(
+            QMessageBox, "question",
+            lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        )
+        page._delete_album(album_id)  # noqa: SLF001
+        assert library.storage.get_album(album_id) is None
+    finally:
+        page.shutdown()
+        page.deleteLater()
+        qapp.processEvents()
+
+
+def test_tag_can_be_renamed_and_removed_from_images(
+    qapp: QApplication, library: ImageLibrary, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PIL import Image as PILImage
+
+    from modu_workbench.boards.gallery import board as gallery_board
+
+    source = tmp_path / "标签图.jpg"
+    PILImage.new("RGB", (40, 40), (90, 90, 90)).save(source)
+    library.import_paths([str(source)])
+    item = library.list_images()[0]
+    library.tag_images([item.id], "旧标签")
+
+    page = _open(library)
+    try:
+        monkeypatch.setattr(gallery_board, "ask_text", lambda *args, **kwargs: "新标签")
+        page._rename_tag("旧标签")  # noqa: SLF001
+        assert any(tag.name == "新标签" for tag in library.list_tags())
+
+        page._active_filter = {"tag": "新标签"}  # noqa: SLF001
+        page._untag_current([item])  # noqa: SLF001
+        counts = {tag.name: tag.use_count for tag in library.list_tags()}
+        assert counts.get("新标签", 0) == 0, "标签应已从图片上移除"
+    finally:
+        page.shutdown()
+        page.deleteLater()
+        qapp.processEvents()

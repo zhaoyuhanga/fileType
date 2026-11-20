@@ -49,6 +49,7 @@ from .widgets import (
     row_remote,
     select_all,
     set_hide_preview_pref,
+    set_music_download_dir_pref,
 )
 from PySide6.QtCore import QUrl, Signal
 from modu_workbench.core.platform.logging import swallow
@@ -562,6 +563,7 @@ class MusicSearchPage(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "选择音乐下载目录", self._dir.text())
         if folder:
             self._dir.setText(folder)
+            set_music_download_dir_pref(folder)
 
     def _open_dir(self) -> None:
         from PySide6.QtGui import QDesktopServices

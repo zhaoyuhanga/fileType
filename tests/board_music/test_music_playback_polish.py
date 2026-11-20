@@ -26,11 +26,11 @@ def qapp() -> QApplication:
 @pytest.fixture(autouse=True)
 def _clean_prefs():
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
-    for key in (MUSIC_VOLUME_KEY, MUSIC_MODE_KEY):
+    for key in (MUSIC_VOLUME_KEY, MUSIC_MODE_KEY, "music/download_dir"):
         settings.remove(key)
     settings.sync()
     yield
-    for key in (MUSIC_VOLUME_KEY, MUSIC_MODE_KEY):
+    for key in (MUSIC_VOLUME_KEY, MUSIC_MODE_KEY, "music/download_dir"):
         settings.remove(key)
     settings.sync()
 
@@ -198,3 +198,16 @@ def test_cancel_current_reaches_import_worker(qapp: QApplication, library: Music
         assert calls == [True], "任务条「取消」没有转给导入线程"
     finally:
         page.close()
+
+
+def test_download_dir_pref_round_trip(tmp_path: Path) -> None:
+    """搜索页选的下载目录要写回设置，歌单页「下载待下载项」才用同一个目录。"""
+    from modu_workbench.boards.music.widgets import (
+        music_download_dir_pref,
+        set_music_download_dir_pref,
+    )
+
+    target = tmp_path / "音乐下载"
+    target.mkdir()
+    set_music_download_dir_pref(str(target))
+    assert Path(music_download_dir_pref()) == target

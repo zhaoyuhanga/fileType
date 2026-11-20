@@ -185,16 +185,24 @@ class VideoLibrary:
         *,
         category: str = "",
         on_progress: ProgressFn | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> List[Video]:
-        """导入文件/文件夹到影视库，返回新增或更新的条目。"""
+        """导入文件/文件夹到影视库，返回新增或更新的条目。
+
+        `cancel` 返回 True 时在批次边界停下（已提交的批次保留）。
+        """
         files = scan_video_files(paths)
         videos: list[Video] = []
         # 分批提交（见 `BATCH_SIZE` 的注释）：逐条 fsync 太慢，
         # 一个大事务又会长时间持锁让界面查询卡住。
         total = len(files)
         for batch_start in range(0, total, BATCH_SIZE):
+            if cancel is not None and cancel():
+                break
             with self.storage.transaction():
                 for index in range(batch_start + 1, min(batch_start + BATCH_SIZE, total) + 1):
+                    if cancel is not None and cancel():
+                        break
                     video = self.build_video(files[index - 1], category=category)
                     video.id = self.storage.upsert_video(video)
                     videos.append(video)
@@ -210,10 +218,13 @@ class VideoLibrary:
         *,
         category: str = "",
         on_progress: ProgressFn | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> List[Video]:
         """把外部文件复制进影视库目录后再入库（便于统一管理）。"""
         copied: list[Path] = []
         for file_path in scan_video_files(paths):
+            if cancel is not None and cancel():
+                break
             source = Path(file_path)
             target = source
             try:
@@ -222,6 +233,8 @@ class VideoLibrary:
             except OSError:
                 target = source
             copied.append(target)
+        # 已经复制进来的文件仍要入库：否则取消后会在库目录留下"看得到文件、
+        # 库里没有记录"的孤儿副本。
         return self.import_paths(copied, category=category, on_progress=on_progress)
 
     # ---------- 在线条目入库 ----------
