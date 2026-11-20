@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from modu_workbench.core.book import Library
-from modu_workbench.core.book.online import NovelSource
+from modu_workbench.core.book.online import DownloadCancelled, NovelSource, unique_download_path
 from modu_workbench.ui_kit.toast import Toaster
 from PySide6.QtCore import Signal, QThread
 
@@ -34,12 +35,20 @@ _DOWN_PAGE_RE = re.compile(r"/txt/(\d+)/?", re.IGNORECASE)
 class _DownloadWorker(QThread):
     progressed = Signal(int, int, str)   # current, total, current_title
     completed = Signal(str)              # 保存路径
+    cancelled = Signal()
     failed = Signal(str)
 
     def __init__(self, novel_url: str, save_dir: str, parent=None):
         super().__init__(parent)
         self._url = novel_url
         self._save_dir = Path(save_dir)
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def _is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
     def run(self) -> None:  # noqa: D102
         source = NovelSource(base_url=DEFAULT_SOURCE_BASE)
@@ -55,15 +64,23 @@ class _DownloadWorker(QThread):
                 h1 = soup.find("h1")
                 title = h1.get_text(strip=True) if h1 else "novel"
                 safe = re.sub(r'[\\/:*?"<>|]', "_", title).strip() or "novel"
-                save_path = save_dir / f"{safe}.txt"
+                save_path = unique_download_path(save_dir / f"{safe}.txt")
                 book_id = direct.group(1)
                 parsed = urlsplit(DEFAULT_SOURCE_BASE)
                 download_url = f"{parsed.scheme}://down.{parsed.netloc}/modules/article/txtarticle.php?id={book_id}"
-                source.download_full_txt(download_url, save_path, on_progress=self._on_full_progress)
+                source.download_full_txt(
+                    download_url, save_path,
+                    on_progress=self._on_full_progress, cancel=self._is_cancelled,
+                )
             else:
-                path = source.download_novel(self._url, save_dir, on_progress=self._on_novel_progress)
+                path = source.download_novel(
+                    self._url, save_dir,
+                    on_progress=self._on_novel_progress, cancel=self._is_cancelled,
+                )
                 save_path = path
             self.completed.emit(str(save_path))
+        except DownloadCancelled:
+            self.cancelled.emit()
         except Exception as error:  # noqa: BLE001
             self.failed.emit(f"下载失败：{error}")
 
@@ -220,6 +237,7 @@ class OnlineDownloadPage(QWidget):
         self._worker = _DownloadWorker(url, self._dir_input.text().strip() or str(default_download_dir()))
         self._worker.progressed.connect(self._on_progress)
         self._worker.completed.connect(self._on_completed)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._on_worker_finished)
 
@@ -227,6 +245,23 @@ class OnlineDownloadPage(QWidget):
         self._start_button.setText("下载中…")
         self._update_ui()
         self._worker.start()
+
+    def cancel_download(self) -> bool:
+        """取消整本下载（任务条「取消」按钮 / 关闭应用时调用）。返回是否真的有任务。"""
+        worker = self._worker
+        if worker is None:
+            return False
+        worker.cancel()
+        self._note_fallback("正在取消下载…")
+        return True
+
+    def shutdown(self) -> None:
+        """退出应用前收尾：取消并等待下载线程，避免 QThread 被析构时崩溃。"""
+        worker = self._worker
+        if worker is None:
+            return
+        worker.cancel()
+        worker.wait(3000)
 
     def _on_progress(self, current: int, total: int, detail: str) -> None:
         percent = min(100, int(current * 100 / total)) if total else 0
@@ -244,6 +279,10 @@ class OnlineDownloadPage(QWidget):
     def _on_failed(self, message: str) -> None:
         self._idle(message)
         self._toaster.error(message)
+
+    def _on_cancelled(self) -> None:
+        self._idle("已取消下载（未保存半本书）")
+        self._toaster.info("已取消在线下载")
 
     def _on_worker_finished(self) -> None:
         self._worker = None

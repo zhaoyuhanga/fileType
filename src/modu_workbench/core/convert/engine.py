@@ -14,6 +14,15 @@ class ConversionCancelled(Exception):
     """用户取消。"""
 
 
+#: 当前线程的"是否允许覆盖同名输出"策略。
+#:
+#: 为什么用线程局部而不是给每个内部函数加参数：`_unique_output` 在 10 处被调用
+#: （文本/文档/数据/字幕/电子书/归档各自算输出名），逐个透传一个布尔值会让
+#: 这些纯函数签名变脏；而转换本来就跑在**单个 worker 线程**里，线程局部
+#: 既不会串批，也不用担心并发。`run_conversion` 负责在 finally 里恢复原值。
+_OUTPUT_POLICY = threading.local()
+
+
 @dataclass
 class ConversionResult:
     action_id: str
@@ -33,7 +42,16 @@ def run_conversion(
     source_path: str | Path,
     output_dir: str | Path,
     cancel: threading.Event | None = None,
+    *,
+    overwrite: bool = False,
 ) -> ConversionResult:
+    """执行一次转换。
+
+    `overwrite=False`（默认）时同名输出自动加序号，绝不覆盖已有文件；
+    `overwrite=True` 时直接写回同名文件（「设置 → 转换 → 输出安全」取消勾选后
+    由转换板块传入）。归档解压**始终新建目录**：把一批文件解压进已有目录会
+    和里面的旧文件混在一起，那不是"覆盖"而是"污染"。
+    """
     source = Path(source_path)
     output_dir_path = Path(output_dir)
     source_format = format_from_extension(source.suffix)
@@ -42,6 +60,8 @@ def run_conversion(
     if cancel is not None and cancel.is_set():
         return ConversionResult(action.id, str(source), "cancelled", message="已取消")
 
+    previous_overwrite = getattr(_OUTPUT_POLICY, "overwrite", False)
+    _OUTPUT_POLICY.overwrite = bool(overwrite)
     try:
         if action.kind == "text":
             target = action.target_format
@@ -84,6 +104,8 @@ def run_conversion(
         return ConversionResult(action.id, str(source), "cancelled", message="已取消")
     except Exception as error:  # noqa: BLE001
         return _fail(result_base, str(error))
+    finally:
+        _OUTPUT_POLICY.overwrite = previous_overwrite
 
 
 def _fail(base: ConversionResult, message: str) -> ConversionResult:
@@ -115,7 +137,17 @@ def _ensure_output_exists(path: Path) -> None:
 # ---------- 输出防覆盖 ----------
 
 def _unique_output(output_dir: Path, stem: str, extension: str) -> Path:
+    """输出文件路径：默认加序号防覆盖；策略允许时直接覆盖同名文件。"""
     candidate = output_dir / f"{stem}{extension}"
+    if getattr(_OUTPUT_POLICY, "overwrite", False):
+        # 先删掉旧产物：部分写入器（python-docx / PIL / zip）遇到已存在文件会
+        # 追加或拒绝，而不是干净地替换；先删再写才能保证"覆盖"= 新内容。
+        try:
+            if candidate.is_file() or candidate.is_symlink():
+                candidate.unlink()
+        except OSError:
+            pass  # 删不掉就让写入器自己报错，错误信息比吞掉更清楚
+        return candidate
     index = 2
     while candidate.exists():
         candidate = output_dir / f"{stem} ({index}){extension}"

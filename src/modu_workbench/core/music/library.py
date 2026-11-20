@@ -83,15 +83,24 @@ class MusicLibrary:
         *,
         category: str = "",
         on_progress: ProgressFn | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> List[Track]:
-        """导入文件/文件夹到曲库，返回新增或更新的曲目。"""
+        """导入文件/文件夹到曲库，返回新增或更新的曲目。
+
+        `cancel` 返回 True 时在**批次边界**停下（已提交的批次保留）：
+        导入几百首时用户点「取消」不必等整批跑完。
+        """
         files = scan_audio_files(paths)
         tracks: list[Track] = []
         # 分批提交（见 `BATCH_SIZE` 的注释）：兼顾写入速度与界面响应
         total = len(files)
         for batch_start in range(0, total, BATCH_SIZE):
+            if cancel is not None and cancel():
+                break
             with self.storage.transaction():
                 for index in range(batch_start + 1, min(batch_start + BATCH_SIZE, total) + 1):
+                    if cancel is not None and cancel():
+                        break
                     track = self.build_track(files[index - 1], category=category)
                     track.id = self.storage.upsert_track(track)
                     tracks.append(track)

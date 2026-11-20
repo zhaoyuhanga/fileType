@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -377,6 +378,8 @@ class DocViewerDialog(QDialog):
         self._path = Path(file_path)
         self._saved = ""
         self._dirty = False
+        #: 读取失败时**禁止保存**：编辑器是空的，写回会把原文件清成 0 字节
+        self._load_failed = False
 
         self.setWindowTitle(f"查看：{self._path.name}")
         self.resize(960, 700)
@@ -396,7 +399,24 @@ class DocViewerDialog(QDialog):
         layout.addWidget(self._build_footer())
 
         self._load()
+        self._install_shortcuts()
         self._refresh_title()
+
+    def _install_shortcuts(self) -> None:
+        """补上页脚提示里写着的 Ctrl+S（此前只写在提示里，按了没反应）。
+
+        mp4 没有编辑器，保存/另存为对它是"复制文件"，因此只挂关闭快捷键。
+        """
+        self._shortcuts: list[QShortcut] = []
+        if self._path.suffix.lower() != ".mp4":
+            save = QShortcut(QKeySequence.StandardKey.Save, self)
+            save.activated.connect(self._save)
+            save_as = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
+            save_as.activated.connect(self._save_as)
+            self._shortcuts.extend([save, save_as])
+        close = QShortcut(QKeySequence("Ctrl+W"), self)
+        close.activated.connect(self._request_close)
+        self._shortcuts.append(close)
 
     # ---------- 结构 ----------
 
@@ -515,6 +535,9 @@ class DocViewerDialog(QDialog):
         if not self._path.is_file():
             QMessageBox.warning(self, "无法打开", "文件不存在或已被移动")
             self._saved = ""
+            self._load_failed = True
+            self._save_btn.setEnabled(False)
+            self._save_as_btn.setEnabled(False)
             return
         try:
             if self._path.suffix.lower() == ".mp4":
@@ -527,13 +550,25 @@ class DocViewerDialog(QDialog):
                 return
             content = read_text_smart(self._path)
             self._saved = content
+            # 载入不是"用户编辑"：不阻塞信号会把 _dirty 置真，
+            # 于是刚打开任何文件标题就带 ` *`、关闭时还白问一次「未保存」。
+            self._editor.blockSignals(True)
             self._editor.setPlainText(content)
+            self._editor.blockSignals(False)
+            self._dirty = False
             self._update_meta()
             self._render_preview()
         except Exception as error:  # noqa: BLE001
+            self._load_failed = True
             self._saved = ""
+            self._editor.blockSignals(True)
             self._editor.setPlainText("")
+            self._editor.blockSignals(False)
+            self._dirty = False
             self._preview.setHtml(f"<p style='color:#b3262b;'>读取失败：{error}</p>")
+            self._save_btn.setEnabled(False)
+            self._save_as_btn.setEnabled(False)
+            self._hint_label.setText("读取失败，已禁用保存（避免把原文件清空）；请用外部编辑器打开。")
 
     def _update_meta(self) -> None:
         size = self._path.stat().st_size if self._path.exists() else 0
@@ -550,10 +585,20 @@ class DocViewerDialog(QDialog):
             label.setText(text)
 
     def _current_text(self) -> str:
-        return self._editor.toPlainText() if self._editor.isVisible() else self._saved
+        """编辑器里的当前内容。
 
-    def _render_preview(self) -> None:
-        content = self._saved
+        以前预览模式下返回 `self._saved`，于是「编辑 → 切到预览 → 关闭」既不提示
+        也未保存，改动直接消失。现在无论哪种模式都返回编辑器内容，
+        是否未保存一律用「与磁盘上的内容比较」来判定。
+        """
+        editor = getattr(self, "_editor", None)
+        return editor.toPlainText() if editor is not None else ""
+
+    def _has_unsaved(self) -> bool:
+        return bool(self._dirty and not self._load_failed and self._current_text() != self._saved)
+
+    def _render_preview(self, content: str | None = None) -> None:
+        content = self._current_text() if content is None else content
         ext = self._path.suffix.lower()
         if ext == ".md":
             self._preview.setHtml(_render_markdown(content))
@@ -579,6 +624,10 @@ class DocViewerDialog(QDialog):
             style.polish(btn)
         if editing:
             self._editor.setFocus()
+        else:
+            # 切回预览必须按**当前编辑内容**重渲染：否则预览显示的还是上次保存的旧内容，
+            # 用户会以为改动没生效，关闭时又会被静默丢弃。
+            self._render_preview()
 
     def _format_json(self) -> None:
         raw = self._current_text()
@@ -594,16 +643,23 @@ class DocViewerDialog(QDialog):
             self._mark_dirty()
 
     def _save(self) -> None:
+        if self._load_failed:
+            QMessageBox.warning(self, "无法保存", "文件读取失败，为避免覆盖原文件已禁用保存。")
+            return
+        text = self._current_text()
         try:
-            write_text(self._path, self._editor.toPlainText())
-            self._saved = self._editor.toPlainText()
+            write_text(self._path, text)
+            self._saved = text
             self._dirty = False
-            self._render_preview()
+            self._render_preview(text)
             self._refresh_title()
         except Exception as error:  # noqa: BLE001
             QMessageBox.critical(self, "保存失败", str(error))
 
     def _save_as(self) -> None:
+        if self._load_failed:
+            QMessageBox.warning(self, "无法另存", "文件读取失败，内容为空，不能另存。")
+            return
         target, _ = QFileDialog.getSaveFileName(self, "另存为", str(self._path))
         if not target:
             return
@@ -613,7 +669,8 @@ class DocViewerDialog(QDialog):
 
                 shutil.copyfile(self._path, target)
             else:
-                write_text(target, self._editor.toPlainText())
+                write_text(target, self._current_text())
+            self._hint_label.setText(f"已另存为：{target}")
             QMessageBox.information(self, "另存为", f"已保存到：{target}")
         except Exception as error:  # noqa: BLE001
             QMessageBox.critical(self, "另存为失败", str(error))
@@ -629,7 +686,7 @@ class DocViewerDialog(QDialog):
         self.setWindowTitle(f"查看：{self._path.name}{marker}")
 
     def _request_close(self) -> None:
-        if self._dirty and self._saved != self._current_text():
+        if self._has_unsaved():
             answer = QMessageBox.question(
                 self, "未保存的修改", "当前文档有未保存的修改，关闭将丢失。是否放弃修改并关闭？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -639,7 +696,7 @@ class DocViewerDialog(QDialog):
         self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        if self._dirty and self._saved != self._current_text():
+        if self._has_unsaved():
             answer = QMessageBox.question(
                 self, "未保存的修改", "当前文档有未保存的修改，关闭将丢失。是否放弃修改并关闭？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -652,5 +709,6 @@ class DocViewerDialog(QDialog):
         super().closeEvent(event)
 
     def _notify_edit(self) -> None:
-        self._dirty = True
+        # 改回原样就不该再算"未保存"（以前一旦输入过就永远是脏的）
+        self._dirty = (not self._load_failed) and self._current_text() != self._saved
         self._refresh_title()

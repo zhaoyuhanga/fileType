@@ -666,6 +666,13 @@ class ImageEditorDialog(QDialog):
         self.accept()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        # 关闭时把当前步骤栈存成草稿：编辑了十几步再点「关闭」不再全部丢失，
+        # 下次打开这张图仍是退出时的样子（步骤仍然可撤销）。
+        try:
+            if self._steps:
+                self._library.save_steps(self._item.id, self._steps)
+        except Exception as error:  # noqa: BLE001  存草稿失败不该拦住关闭
+            swallow("保存编辑草稿", error)
         for image in (self._preview, self._source):
             try:
                 if image is not None:

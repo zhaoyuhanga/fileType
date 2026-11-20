@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -52,11 +53,22 @@ class _ConvertWorker(QThread):
     started = Signal(str)
     finished_file = Signal(str, str, str)  # path, status, message/output
 
-    def __init__(self, action: ConverterAction, files: list[str], output_dir: str, parent=None):
+    def __init__(
+        self,
+        action: ConverterAction,
+        files: list[str],
+        output_dir: str,
+        parent=None,
+        *,
+        overwrite: bool = False,
+        remove_source: bool = False,
+    ):
         super().__init__(parent)
         self._action = action
         self._files = files
         self._output_dir = output_dir
+        self._overwrite = overwrite
+        self._remove_source = remove_source
         self.cancel = threading.Event()
 
     def request_cancel(self) -> None:
@@ -68,8 +80,18 @@ class _ConvertWorker(QThread):
                 self.finished_file.emit(file_path, "cancelled", "已取消")
                 continue
             self.started.emit(file_path)
-            result = convert_engine.run_conversion(self._action, file_path, self._output_dir, cancel=self.cancel)
+            result = convert_engine.run_conversion(
+                self._action, file_path, self._output_dir,
+                cancel=self.cancel, overwrite=self._overwrite,
+            )
             detail = result.output_path if result.ok else (result.message or "")
+            if result.ok and self._remove_source:
+                # 「设置 → 转换 → 转换后保留源文件」取消勾选时才走到这里；
+                # 删除失败要**说出来**（用户以为删了、其实还在，比报错更糟）。
+                try:
+                    Path(file_path).unlink()
+                except OSError as error:
+                    detail = f"{detail}（源文件删除失败：{error}）"
             self.finished_file.emit(file_path, result.status, detail or "")
 
 
@@ -80,9 +102,16 @@ class ConvertBoardPage(QWidget):
         super().__init__(parent)
         # v1.0.0：前端统一为 Qt 单栈（原先的 React 内嵌前端与 QtWebEngine 已移除）
         self._toaster = Toaster(self)
-        self._output_dir = output_dir or str(default_output_dir())
+        self._output_dir = output_dir or configured_output_dir()
         self._worker: _ConvertWorker | None = None
         self._rows: list[dict] = []  # path/name/ext/format/checked/status
+        # 本批的文件集合与"失败项"：进度分母、完成汇总、重试都只看本批，
+        # 不能拿整张表算（未勾选/被跳过的行不属于这批）。
+        self._batch_paths: list[str] = []
+        self._batch_action: ConverterAction | None = None
+        self._batch_done = 0
+        self._batch_skipped = 0
+        self._failed_paths: list[str] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(PAGE_MARGIN, SPACE["md"], PAGE_MARGIN, SPACE["md"])
@@ -243,8 +272,15 @@ class ConvertBoardPage(QWidget):
         self._cancel_button = QPushButton("取消")
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._cancel)
+        # 失败重试：一批里常只有个别文件失败（占用/缺依赖/源文件异常），
+        # 以前只能把失败的重新加一遍、再点一次转换。
+        self._retry_button = QPushButton("↻ 重试失败项")
+        self._retry_button.setToolTip("只重跑这一批里失败的文件（使用同一转换动作）")
+        self._retry_button.setEnabled(False)
+        self._retry_button.clicked.connect(self._retry_failed)
         run_row.addWidget(self._run_button)
         run_row.addWidget(self._cancel_button)
+        run_row.addWidget(self._retry_button)
         right_layout.addLayout(run_row)
 
         self._book_btn = QPushButton("📚 将 TXT/EPUB 结果加入书架")
@@ -272,6 +308,14 @@ class ConvertBoardPage(QWidget):
             self._append_paths,
             hint="松手即加入转换列表",
         )
+        # 列宽记忆：用户拉宽「输出」列下次还保留（板块已构造后才读，不影响启动预算）
+        from modu_workbench.ui_kit.view_state import remember_table_layout
+
+        remember_table_layout(self._table, "convert/columns")
+        # 设置里改了「默认输出目录」要即时生效：订阅统一广播（设置对话框保存后发出）
+        from modu_workbench.ui_kit.settings.base import subscribe_settings_changed
+
+        subscribe_settings_changed(self._on_settings_changed, owner=self)
         self._rebuild_action_list()
 
     # ---------- 导入 ----------
@@ -284,9 +328,12 @@ class ConvertBoardPage(QWidget):
 
     def _pick_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择文件夹（递归收集支持的文件）")
-        if folder:
-            files = [str(p) for p in Path(folder).rglob("*") if p.is_file()]
-            self._append_paths(files)
+        if not folder:
+            return
+        files, ignored = collect_folder_files(folder)
+        self._append_paths(files)
+        if ignored:
+            self._toaster.info(f"已忽略 {ignored} 个不支持的文件（未知格式，无法转换）")
 
     def _append_paths(self, paths: list[str]) -> None:
         existing = {row["path"] for row in self._rows}
@@ -347,24 +394,39 @@ class ConvertBoardPage(QWidget):
     def _pick_output_dir(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择输出目录", self._output_dir)
         if folder:
-            self._output_dir = folder
-            self._out_input.setText(folder)
+            self._set_output_dir(folder)
+
+    def _set_output_dir(self, folder: str) -> None:
+        """切换输出目录并**写回设置**：下次启动、设置页里看到的都是它。"""
+        folder = str(folder or "").strip()
+        if not folder:
+            return
+        self._output_dir = folder
+        self._out_input.setText(folder)
+        save_output_dir(folder)
 
     def _commit_output_dir(self) -> None:
         text = self._out_input.text().strip()
-        if text:
+        if text and text != self._output_dir:
             self._output_dir = text
+            save_output_dir(text)
+
+    def _on_settings_changed(self, page_key: str) -> None:
+        """设置对话框保存了「转换」页：同步默认输出目录（正在转换时不动）。"""
+        if page_key != "convert" or self._worker is not None:
+            return
+        stored = str(app_settings().value("convert/output_dir", "", type=str) or "").strip()
+        if stored and stored != self._output_dir:
+            self._output_dir = stored
+            self._out_input.setText(stored)
 
     def _open_board_settings(self) -> None:
         """打开统一设置对话框的「转换」页（设置按板块区分）。"""
         from modu_workbench.ui_kit.settings import SettingsDialog
 
         SettingsDialog(self, initial="convert").exec()
-        # 设置里可能改了默认输出目录，回到本页后同步一次
-        stored = app_settings().value("convert/output_dir", "", type=str)
-        if stored:
-            self._output_dir = str(stored)
-            self._out_input.setText(self._output_dir)
+        # 保存后会有 settings_changed 广播同步本页；这里再兜一次（例如订阅被提前销毁）
+        self._on_settings_changed("convert")
 
     # ---------- 表格 ----------
 
@@ -527,29 +589,53 @@ class ConvertBoardPage(QWidget):
             return
         action = self._selected_action
         checked = self._checked_files()
-        applicable = [p for p in checked
-                      if action is not None and action.matches(
-                          next((row["format"] for row in self._rows if row["path"] == p), ""))]
+        formats = {row["path"]: row["format"] for row in self._rows}
+        applicable = [p for p in checked if action.matches(formats.get(p, ""))]
         skipped = [p for p in checked if p not in applicable]
         for path in skipped:
             for row in self._rows:
                 if row["path"] == path:
                     row["status"] = "跳过"
-                    row["detail"] = f"「{action.label if action else '该动作'}」不适用于此格式"
+                    row["detail"] = f"「{action.label}」不适用于此格式"
         if skipped:
             self._rebuild_table()
             self._toaster.info(f"已跳过 {len(skipped)} 个不适用该动作的文件")
-        files = applicable
-        if not files:
-            self._toaster.info("请先勾选要转换的文件")
+        if not applicable:
+            self._toaster.info("勾选的文件都不适用这个动作，请换个动作或格式")
             return
+        self._run_batch(action, applicable, skipped=len(skipped))
+
+    def _run_batch(
+        self, action: ConverterAction, files: list[str], *, skipped: int = 0
+    ) -> None:
+        """启动一批转换。
+
+        `files` 是**本批真正要转换的文件**（不含未勾选/被跳过的行）：
+        只重置这些行的状态，进度分母也用它。旧实现无条件把整张表重置成
+        「排队中」，未勾选和被跳过的行就永远停在排队中、进度条也到不了 100%。
+        """
         Path(self._output_dir).mkdir(parents=True, exist_ok=True)
+        target_paths = set(files)
         for row in self._rows:
-            row["status"] = "排队中"
-            row["detail"] = ""
+            if row["path"] in target_paths:
+                row["status"] = "排队中"
+                row["detail"] = ""
         self._rebuild_table()
 
-        worker = _ConvertWorker(self._selected_action, files, self._output_dir, self)
+        self._batch_paths = list(files)
+        self._batch_action = action
+        self._batch_done = 0
+        self._batch_skipped = skipped
+        self._failed_paths = []
+        self._retry_button.setEnabled(False)
+        self._retry_button.setText("↻ 重试失败项")
+
+        overwrite = not app_settings().value("convert/no_overwrite", True, type=bool)
+        remove_source = self._confirm_source_removal(files)
+        worker = _ConvertWorker(
+            action, files, self._output_dir, self,
+            overwrite=overwrite, remove_source=remove_source,
+        )
         worker.started.connect(self._on_started)
         worker.finished_file.connect(self._on_finished_file)
         worker.finished.connect(self._on_worker_finished)
@@ -558,11 +644,60 @@ class ConvertBoardPage(QWidget):
         self._cancel_button.setEnabled(True)
         worker.start()
 
+    def _confirm_source_removal(self, files: list[str]) -> bool:
+        """「转换后保留源文件」被取消勾选时，删源文件前必须再问一次。
+
+        删除不可撤销（没有回收站），一批几十个文件时误勾一次代价很大；
+        默认按钮是「否」，并且只在**转换成功**后才删（失败/跳过的保留原文件）。
+        """
+        keep = app_settings().value("convert/keep_original", True, type=bool)
+        if keep:
+            return False
+        answer = QMessageBox.warning(
+            self,
+            "转换后删除源文件",
+            f"设置里关闭了「转换后保留源文件」。\n\n"
+            f"本批 {len(files)} 个文件转换成功后将删除源文件（不进回收站，无法撤销）；"
+            "转换失败或跳过的文件会保留。\n\n确定继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _retry_failed(self) -> None:
+        """只重跑上一批里失败的文件（同一个转换动作）。"""
+        if self._worker is not None or not self._failed_paths:
+            return
+        action = self._batch_action or self._selected_action
+        if action is None:
+            return
+        missing = [path for path in self._failed_paths if not Path(path).is_file()]
+        files = [path for path in self._failed_paths if Path(path).is_file()]
+        for path in missing:
+            for row in self._rows:
+                if row["path"] == path:
+                    row["status"] = "失败"
+                    row["detail"] = "源文件已不存在，无法重试"
+        if missing:
+            self._rebuild_table()
+            self._toaster.info(f"{len(missing)} 个失败项的源文件已不存在，已略过")
+        if not files:
+            self._failed_paths = []
+            self._retry_button.setEnabled(False)
+            return
+        self._run_batch(action, files)
+
     def _on_started(self, path: str) -> None:
         name = Path(path).name
-        index = next((i for i, row in enumerate(self._rows) if row["path"] == path), 0)
-        total = max(1, len([row for row in self._rows if row["status"] in ("排队中", "转换中…")]))
-        self._task_bar.report(f"正在转换（{index + 1}/{total}）：{name}", index, total)
+        self._batch_done += 1
+        total = max(1, len(self._batch_paths))
+        # 分子用「本批已完成数」而不是"这一行在整张表里的行号"：
+        # 表里可能混着未勾选/被跳过的行，用行号会出现 1/3 → 1/1 的错觉。
+        self._task_bar.report(
+            f"正在转换（{self._batch_done}/{total}）：{name}",
+            self._batch_done - 1,
+            total,
+        )
         for row in self._rows:
             if row["path"] == path:
                 row["status"] = "转换中…"
@@ -625,10 +760,17 @@ class ConvertBoardPage(QWidget):
             self._toaster.info("正在取消剩余转换…")
 
     def _on_worker_finished(self) -> None:
-        ok = len([row for row in self._rows if row["status"] == "成功"])
-        failed = len([row for row in self._rows if row["status"] == "失败"])
-        skipped = len([row for row in self._rows if row["status"] == "跳过"])
-        summary = f"转换完成：成功 {ok}，失败 {failed}" + (f"，跳过 {skipped}" if skipped else "")
+        batch = set(self._batch_paths)
+        ok = len([row for row in self._rows if row["path"] in batch and row["status"] == "成功"])
+        failed_rows = [row for row in self._rows if row["path"] in batch and row["status"] == "失败"]
+        failed = len(failed_rows)
+        cancelled = len([row for row in self._rows if row["path"] in batch and row["status"] == "已取消"])
+        skipped = getattr(self, "_batch_skipped", 0)
+        summary = f"转换完成：成功 {ok}，失败 {failed}"
+        if skipped:
+            summary += f"，跳过 {skipped}"
+        if cancelled:
+            summary += f"，取消 {cancelled}"
         # 明确写出输出目录：反馈里有"显示成功但输出目录没数据"，
         # 一大原因是默认输出目录在系统「文档」下（可能被 OneDrive 重定向），用户没找到
         self._task_bar.idle(f"{summary} · 输出目录：{self._output_dir}")
@@ -636,7 +778,14 @@ class ConvertBoardPage(QWidget):
             self._toaster.success(summary)
         elif failed:
             self._toaster.error(summary + "（可查看状态列的失败原因）")
+
+        self._failed_paths = [str(row["path"]) for row in failed_rows]
+        self._retry_button.setEnabled(bool(self._failed_paths))
+        self._retry_button.setText(
+            f"↻ 重试失败项（{len(self._failed_paths)}）" if self._failed_paths else "↻ 重试失败项"
+        )
         self._worker = None
+        self._batch_paths = []
         self._run_button.setEnabled(bool(self._current_actions))
         self._cancel_button.setEnabled(False)
 
@@ -658,10 +807,19 @@ class ConvertBoardPage(QWidget):
         self._book_candidates.clear()
         self._book_btn.setEnabled(False)
 
+    def shutdown(self) -> None:
+        """退出应用前收尾：取消并等待转换线程（主壳 closeEvent 会调用）。"""
+        worker = self._worker
+        if worker is None:
+            return
+        worker.request_cancel()
+        worker.wait(3000)
+
     def closeEvent(self, event) -> None:  # noqa: N802
-        if self._worker is not None:
-            self._worker.request_cancel()
-            self._worker.wait(3000)
+        from modu_workbench.ui_kit.view_state import save_table_layout
+
+        save_table_layout(self._table, "convert/columns")
+        self.shutdown()
         super().closeEvent(event)
 
 
@@ -678,3 +836,51 @@ def default_output_dir() -> Path:
     base = Path(location) / "墨软转换输出" if location else Path.home() / "Documents" / "墨软转换输出"
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def configured_output_dir() -> str:
+    """启动时用的输出目录：设置里的「默认输出目录」优先，否则落到文档目录。"""
+    stored = str(app_settings().value("convert/output_dir", "", type=str) or "").strip()
+    return stored or str(default_output_dir())
+
+
+def save_output_dir(folder: str) -> None:
+    """把当前输出目录写回设置（工具栏改目录与设置页共用同一个键）。"""
+    try:
+        settings = app_settings()
+        settings.setValue("convert/output_dir", str(folder))
+        settings.sync()
+    except Exception as error:  # noqa: BLE001  记不住目录不该让转换不可用
+        from modu_workbench.core.platform.logging import swallow
+
+        swallow("保存转换输出目录", error)
+
+
+def collect_folder_files(folder: str | Path, *, limit: int = 5000) -> tuple[list[str], int]:
+    """递归收集文件夹里**支持转换的文件**。
+
+    旧实现把所有文件（node_modules、.git、__pycache__ 里的二进制）都塞进列表，
+    用户选一个大目录会卡住好几秒、列表里还全是「未知格式」。
+    返回 `(文件列表, 被忽略的数量)`；超过 `limit` 时截断（不再继续扫）。
+    """
+    root = Path(folder)
+    files: list[str] = []
+    ignored = 0
+    try:
+        candidates = sorted(root.rglob("*"))
+    except OSError:
+        return [], 0
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        ext = path.suffix.lower()
+        if not ext or format_from_extension(ext) == "unknown":
+            ignored += 1
+            continue
+        files.append(str(path))
+        if len(files) >= limit:
+            break
+    return files, ignored

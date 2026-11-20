@@ -154,7 +154,10 @@ class AppShell(QMainWindow):
             hook()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        """退出前停止各板块的后台线程与播放。"""
+        """退出前停止各板块的后台线程与播放，并记住窗口大小/位置。"""
+        from ..ui_kit.view_state import save_window_state
+
+        save_window_state(self)
         for index in range(self._stack.count()):
             page = self._stack.widget(index)
             hook = getattr(page, "shutdown", None)

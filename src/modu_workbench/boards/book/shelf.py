@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -364,6 +365,18 @@ class ShelfView(QWidget):
     def _remove_book(self, book_id: int) -> None:
         record = self._library.get_book(book_id)
         if record is None:
+            return
+        # 移出书架会连同阅读进度、书签与历史一起删掉，且不能撤销；
+        # 默认按钮给「否」，避免误点右键就清掉一本书的记录。
+        answer = QMessageBox.question(
+            self,
+            "移出书架",
+            f"确定把《{record.title}》移出书架吗？\n\n"
+            "该书的阅读进度、历史记录会一并删除（磁盘上的原文件不会被删）。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
             return
         self._library.remove(book_id)
         self.reload()

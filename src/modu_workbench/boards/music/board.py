@@ -42,6 +42,18 @@ PLAYLIST_KEY = "playlist"
 CONVERT_KEY = "convert"
 HISTORY_KEY = "history"
 
+#: 播放条偏好：音量与播放模式（上次调到 30、切到随机，重开还是它）
+MUSIC_VOLUME_KEY = "music/volume"
+MUSIC_MODE_KEY = "music/mode"
+
+
+def _ui_settings():  # noqa: ANN202
+    from PySide6.QtCore import QSettings
+
+    from modu_workbench.core.platform.paths import SETTINGS_APP, SETTINGS_ORG
+
+    return QSettings(SETTINGS_ORG, SETTINGS_APP)
+
 
 class MusicPlayerBar(QFrame):
     """底部播放条：与页面无关，始终显示当前播放状态。"""
@@ -116,9 +128,10 @@ class MusicPlayerBar(QFrame):
         layout.addWidget(volume_label)
         self._volume = QSlider(Qt.Orientation.Horizontal)
         self._volume.setRange(0, 100)
+        self._restore_playback_prefs()
         self._volume.setValue(player.volume)
         self._volume.setFixedWidth(90)
-        self._volume.valueChanged.connect(player.set_volume)
+        self._volume.valueChanged.connect(self._on_volume_changed)
         layout.addWidget(self._volume)
 
         player.trackChanged.connect(self._on_track_changed)
@@ -126,6 +139,31 @@ class MusicPlayerBar(QFrame):
         player.stateChanged.connect(self._on_state)
         player.modeChanged.connect(self._on_mode)
         player.errorOccurred.connect(self._on_error)
+        # 恢复的模式发生在信号连接之前：这里补一次，否则按钮上还写着「顺序」
+        self._on_mode(player.mode)
+
+    def _restore_playback_prefs(self) -> None:
+        """启动时恢复音量与播放模式（以前每次都回 70 / 顺序播放）。"""
+        try:
+            settings = _ui_settings()
+            volume = int(settings.value(MUSIC_VOLUME_KEY, self._player.volume) or self._player.volume)
+            self._player.set_volume(max(0, min(100, volume)))
+            mode = str(settings.value(MUSIC_MODE_KEY, self._player.mode) or self._player.mode)
+            self._player.set_mode(mode)
+        except Exception as error:  # noqa: BLE001  记不住偏好不该影响播放
+            swallow("恢复播放偏好", error)
+
+    def _save_pref(self, key: str, value: object) -> None:
+        try:
+            settings = _ui_settings()
+            settings.setValue(key, value)
+            settings.sync()
+        except Exception as error:  # noqa: BLE001
+            swallow(f"保存播放偏好（{key}）", error)
+
+    def _on_volume_changed(self, value: int) -> None:
+        self._player.set_volume(value)
+        self._save_pref(MUSIC_VOLUME_KEY, int(value))
 
     # ---------- 播放器信号 ----------
 
@@ -161,6 +199,7 @@ class MusicPlayerBar(QFrame):
 
     def _on_mode(self, mode: str) -> None:
         self._mode.setText(PLAY_MODE_LABELS.get(mode, mode))
+        self._save_pref(MUSIC_MODE_KEY, mode)
 
     def _on_error(self, message: str) -> None:
         self._meta.setText(f"⚠ {message}")
@@ -348,7 +387,15 @@ class MusicBoardPage(QWidget):
             return
         if mode:
             self._player.set_mode(mode)
-        index = start_index if 0 <= start_index < len(playable) else 0
+        if start_index < 0:
+            # 「随机播放」以前传 -1 被夹成 0：既不随机、也不改播放模式，听起来就是顺序播放。
+            import random
+
+            index = random.randrange(len(playable))
+            if not mode:
+                self._player.set_mode("shuffle")
+        else:
+            index = start_index if 0 <= start_index < len(playable) else 0
         self._player.set_queue(playable, index, autoplay=True)
         self._toaster.info(f"开始播放：{playable[index].display()}")
 

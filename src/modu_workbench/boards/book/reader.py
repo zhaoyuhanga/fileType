@@ -28,7 +28,57 @@ READ_THEMES: list[tuple[str, str, str]] = [
     ("夜间", "#1a1a1a", "#c8c8c8"),
 ]
 
-FONT_MIN, FONT_MAX, FONT_STEP = 12, 30, 2
+FONT_MIN, FONT_MAX, FONT_STEP = 12, 40, 2
+#: 与「设置 → 书库」同一个键：默认字号 / 行距（百分比）/ 记住进度 / 主题
+PREF_FONT_SIZE = "reader/font_size"
+PREF_LINE_SPACING = "reader/line_spacing"
+PREF_REMEMBER = "reader/remember_progress"
+PREF_THEME = "reader/theme"
+LINE_SPACING_MIN, LINE_SPACING_MAX, LINE_SPACING_DEFAULT = 120, 260, 170
+
+
+def _settings():  # noqa: ANN202
+    """与应用其它设置同一个作用域（直接读 QSettings，避开 ui_kit.settings 整包）。"""
+    from PySide6.QtCore import QSettings
+
+    from modu_workbench.core.platform.paths import SETTINGS_APP, SETTINGS_ORG
+
+    return QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+
+def load_reading_preferences() -> tuple[int, int, int, bool]:
+    """读取阅读偏好 `(字号, 行距百分比, 主题序号, 是否记住进度)`，并做范围钳制。"""
+    settings = _settings()
+    try:
+        font = int(settings.value(PREF_FONT_SIZE, 18) or 18)
+    except (TypeError, ValueError):
+        font = 18
+    try:
+        spacing = int(settings.value(PREF_LINE_SPACING, LINE_SPACING_DEFAULT) or LINE_SPACING_DEFAULT)
+    except (TypeError, ValueError):
+        spacing = LINE_SPACING_DEFAULT
+    try:
+        theme = int(settings.value(PREF_THEME, 0) or 0)
+    except (TypeError, ValueError):
+        theme = 0
+    remember = bool(settings.value(PREF_REMEMBER, True, type=bool))
+    return (
+        max(FONT_MIN, min(FONT_MAX, font)),
+        max(LINE_SPACING_MIN, min(LINE_SPACING_MAX, spacing)),
+        theme if 0 <= theme < len(READ_THEMES) else 0,
+        remember,
+    )
+
+
+def save_reading_preference(key: str, value: object) -> None:
+    try:
+        settings = _settings()
+        settings.setValue(key, value)
+        settings.sync()
+    except Exception as error:  # noqa: BLE001  记不住偏好不该影响阅读
+        from modu_workbench.core.platform.logging import swallow
+
+        swallow(f"保存阅读偏好（{key}）", error)
 
 
 def _describe_load_error(error: BaseException, path: str) -> str:
@@ -73,8 +123,12 @@ class ReaderView(QWidget):
         self._library = library
         self._record_id = record.id
         self._index = max(0, record.last_chapter_index)
-        self._font_size = 18
-        self._theme_index = 0
+        (
+            self._font_size,
+            self._line_spacing,
+            self._theme_index,
+            self._remember_progress,
+        ) = load_reading_preferences()
         self._parsed: Book | None = None
         self._chapters = []
 
@@ -82,6 +136,10 @@ class ReaderView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._build_toolbar())
+        from modu_workbench.ui_kit.settings.base import subscribe_settings_changed
+
+        # 设置里改了字号/行距/进度开关，已经打开的阅读器要立刻生效
+        subscribe_settings_changed(self._on_settings_changed, owner=self)
 
         self._browser = QTextBrowser()
         self._browser.setOpenExternalLinks(False)
@@ -138,6 +196,9 @@ class ReaderView(QWidget):
         self._theme_combo = QComboBox()
         for name, _bg, _fg in READ_THEMES:
             self._theme_combo.addItem(name)
+        self._theme_combo.blockSignals(True)
+        self._theme_combo.setCurrentIndex(self._theme_index)
+        self._theme_combo.blockSignals(False)
         self._theme_combo.currentIndexChanged.connect(self._change_theme)
 
         row.addWidget(back)
@@ -187,10 +248,11 @@ class ReaderView(QWidget):
             lines = [c for c in (chapter.paragraphs or []) if c]
         body = "".join(f"<p>{html_mod.escape(line)}</p>" for line in lines)
         title = html_mod.escape(chapter.title or "")
+        line_height = self._line_spacing / 100
         return (
             f'<html><head><style>body{{background:{bg};color:{fg};'
             f"font-family:'PingFang SC','Microsoft YaHei',serif;"
-            f'font-size:{self._font_size}px;line-height:1.9;}}</style></head>'
+            f'font-size:{self._font_size}px;line-height:{line_height:.2f};}}</style></head>'
             f'<body><div style="max-width:820px;margin:0 auto;padding:18px 26px 60px;">'
             f"<h2 style=\"border-bottom:1px solid {fg}33;padding-bottom:8px;\">{title}</h2>"
             f"{body}</div></body></html>"
@@ -220,9 +282,9 @@ class ReaderView(QWidget):
         self._title_label.setText(f"{self._parsed.title if self._parsed else ''} · {chapter.title}")
         self._chapter_label.setText(f"第 {self._index + 1} / {len(self._chapters)} 章")
         self._next.setEnabled(self._index < len(self._chapters) - 1)
-        # 恢复上次进度（滚动比例）
+        # 恢复上次进度（滚动比例）；关闭「记住阅读进度」后既不存也不还原
         progress = self._library.get_book(self._record_id)
-        if progress is not None and progress.last_progress > 0:
+        if self._remember_progress and progress is not None and progress.last_progress > 0:
             QTimer.singleShot(0, lambda: self._set_scroll(progress.last_progress))
         else:
             self._set_scroll(0.0)
@@ -264,6 +326,8 @@ class ReaderView(QWidget):
         self._render()
 
     def _log_chapter_switch(self) -> None:
+        if not self._remember_progress:
+            return
         chapter = self._chapters[self._index]
         try:
             self._library.save_position(
@@ -279,11 +343,31 @@ class ReaderView(QWidget):
 
     def change_font(self, delta: int) -> None:
         self._font_size = min(FONT_MAX, max(FONT_MIN, self._font_size + delta))
+        save_reading_preference(PREF_FONT_SIZE, self._font_size)
         self._render()
 
     def _change_theme(self, index: int) -> None:
-        self._theme_index = max(0, index)
+        self._theme_index = max(0, min(index, len(READ_THEMES) - 1))
+        save_reading_preference(PREF_THEME, self._theme_index)
         self._render()
+
+    def _on_settings_changed(self, page_key: str) -> None:
+        """「设置 → 书库」保存后即时生效（字号 / 行距 / 进度开关）。"""
+        if page_key != "book":
+            return
+        font, spacing, theme, remember = load_reading_preferences()
+        changed = (font, spacing, theme, remember) != (
+            self._font_size, self._line_spacing, self._theme_index, self._remember_progress,
+        )
+        self._font_size = font
+        self._line_spacing = spacing
+        self._theme_index = theme
+        self._remember_progress = remember
+        self._theme_combo.blockSignals(True)
+        self._theme_combo.setCurrentIndex(theme)
+        self._theme_combo.blockSignals(False)
+        if changed:
+            self._render()
 
     # ---------- 保存 ----------
 
@@ -297,7 +381,7 @@ class ReaderView(QWidget):
         self._save_progress()
 
     def _save_progress(self) -> None:
-        if not self._chapters:
+        if not self._chapters or not self._remember_progress:
             return
         bar = self._browser.verticalScrollBar()
         span = bar.maximum() - bar.minimum()

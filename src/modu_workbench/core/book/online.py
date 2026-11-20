@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import os
 import random
 import re
 import time
@@ -29,6 +30,28 @@ try:
     _ua = UserAgent()
 except Exception:  # noqa: BLE001
     _ua = None
+
+
+class DownloadCancelled(Exception):
+    """用户取消了整本下载（由调用方传入的 cancel 回调触发）。"""
+
+
+def unique_download_path(path: str | Path) -> Path:
+    """同名文件已存在时加序号，**绝不覆盖**上一次下载的书。
+
+    以前整本下载直接用 `save_dir / f"{书名}.txt"` 打开写入：同一本书下第二次、
+    或换源下了同名书，旧文件（可能带手工修订）会被静默清空。转换板块早就有
+    `_unique_output` 防覆盖，书库这边一直缺。
+    """
+    candidate = Path(path)
+    if not candidate.exists():
+        return candidate
+    index = 2
+    while True:
+        numbered = candidate.with_name(f"{candidate.stem} ({index}){candidate.suffix}")
+        if not numbered.exists():
+            return numbered
+        index += 1
 
 
 # 无 fake-useragent 时使用内置 UA 池轮换（离线可用，避免额外依赖）
@@ -378,8 +401,14 @@ class NovelSource:
         on_progress: Optional[Callable[[DownloadProgress], None]] = None,
         max_chapters: int = 5000,
         min_delay_sec: float = 0.05,
+        cancel: Optional[Callable[[], bool]] = None,
     ) -> Path:
-        """下载整本小说为 txt。"""
+        """下载整本小说为 txt。
+
+        `cancel`：可选回调，返回 True 时中止（抛出 `DownloadCancelled`）；
+        写入 `.part` 临时文件、成功后才改名，取消/失败都不会留下半本书，
+        也不会覆盖已存在的同名文件。
+        """
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         # 拿目录
@@ -391,10 +420,11 @@ class NovelSource:
 
         # 输出文件名
         safe_title = re.sub(r"[\\/:*?\"<>|]", "_", detail.title).strip() or "novel"
-        out_path = save_dir / f"{safe_title}.txt"
+        out_path = unique_download_path(save_dir / f"{safe_title}.txt")
+        part_path = out_path.with_name(f"{out_path.name}.part")
 
         try:
-            with open(out_path, "w", encoding="utf-8") as fp:
+            with open(part_path, "w", encoding="utf-8") as fp:
                 fp.write(f"{detail.title}\n\n")
                 if detail.author:
                     fp.write(f"作者: {detail.author}\n\n")
@@ -403,6 +433,8 @@ class NovelSource:
                 fp.write(f"共 {total} 章 · 来源: {self.base_url}\n")
                 fp.write("=" * 60 + "\n\n")
                 for i, ch in enumerate(detail.chapters[:total], start=1):
+                    if cancel is not None and cancel():
+                        raise DownloadCancelled("已取消下载")
                     prog.current = i
                     prog.current_title = ch.title
                     if on_progress:
@@ -422,10 +454,17 @@ class NovelSource:
                     # 礼貌 delay,避免被封
                     if min_delay_sec > 0:
                         time.sleep(min_delay_sec)
+        except BaseException:
+            try:
+                part_path.unlink()
+            except OSError:
+                pass
+            raise
         finally:
             prog.done = True
             if on_progress:
                 on_progress(prog)
+        os.replace(part_path, out_path)
         return out_path
 
     # ---------- helpers ----------
@@ -516,20 +555,36 @@ class NovelSource:
         return detail
 
     def download_full_txt(self, download_url: str, save_path: str | Path,
-                          on_progress: Optional[Callable[[int, int], None]] = None) -> Path:
-        """直接下载 00shu 的整本 txt(走 download_url 直链)。"""
+                          on_progress: Optional[Callable[[int, int], None]] = None,
+                          cancel: Optional[Callable[[], bool]] = None) -> Path:
+        """直接下载 00shu 的整本 txt(走 download_url 直链)。
+
+        与 `download_novel` 一样写 `.part` 后原子改名；取消或失败都不留半截文件，
+        也不覆盖已有同名文件（调用方用 `unique_download_path` 算好 `save_path`）。
+        """
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._session.get(download_url, timeout=120, stream=True) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("Content-Length", 0))
-            written = 0
-            with open(save_path, "wb") as fp:
-                for chunk in r.iter_content(chunk_size=64 * 1024):
-                    if not chunk:
-                        continue
-                    fp.write(chunk)
-                    written += len(chunk)
-                    if on_progress:
-                        on_progress(written, total)
+        part_path = save_path.with_name(f"{save_path.name}.part")
+        try:
+            with self._session.get(download_url, timeout=120, stream=True) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("Content-Length", 0))
+                written = 0
+                with open(part_path, "wb") as fp:
+                    for chunk in r.iter_content(chunk_size=64 * 1024):
+                        if cancel is not None and cancel():
+                            raise DownloadCancelled("已取消下载")
+                        if not chunk:
+                            continue
+                        fp.write(chunk)
+                        written += len(chunk)
+                        if on_progress:
+                            on_progress(written, total)
+        except BaseException:
+            try:
+                part_path.unlink()
+            except OSError:
+                pass
+            raise
+        os.replace(part_path, save_path)
         return save_path

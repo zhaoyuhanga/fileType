@@ -119,6 +119,9 @@ class VideoBoardPage(QWidget):
         # 下载队列状态：失败的原始任务留着重试（`.parts/` 已保留，重试即续传）
         self._download_tasks: list = []
         self._failed_tasks: list = []
+        # 多选「下载整部」时一次只能跑一个批次：其余排队，当前批次结束自动接上。
+        # 以前忙时直接弹「已有下载任务在进行」，勾 3 部只有第 1 部真的下。
+        self._download_queue: list[tuple] = []
         self._danmaku_worker: DanmakuWorker | None = None
 
         # 播放会话：当前在播放器里播放的条目与剧集，供换集/换清晰度复用
@@ -284,16 +287,25 @@ class VideoBoardPage(QWidget):
     # ------------------------------------------------------------------ 在线播放
 
     def _play_online(
-        self, remote: RemoteVideo, episode: Episode | None, quality
+        self, remote: RemoteVideo, episode: Episode | None, quality,
+        *, detail_attempt: bool = False,
     ) -> None:  # noqa: ANN001
         """搜索页请求播放：缺剧集就补，再解析地址。"""
         if remote is None:
             return
         if episode is None and not remote.episodes:
+            if detail_attempt:
+                # 补过一次详情仍然是 0 集：必须停下来报原因。
+                # 以前这里会再次发同一个 DetailWorker，而 registry.detail 失败时
+                # **返回原对象**（不抛错），于是无限重试、播放器永远不出。
+                message = f"没有取到可播放的剧集：{remote.title}（源站可能暂时不可用，或该条目没有分集地址）"
+                self._task_bar.idle(message)
+                self._toaster.error(message)
+                return
             self._task_bar.report(f"正在获取剧集：{remote.title}…")
             worker = DetailWorker(remote, self)
             worker.finishedDetail.connect(
-                lambda detailed, r=remote: self._play_online(detailed or r, None, None)
+                lambda detailed, r=remote: self._play_online(detailed or r, None, None, detail_attempt=True)
             )
             worker.failed.connect(lambda message: self._toaster.error(f"获取剧集失败：{message}"))
             worker.finished.connect(lambda w=worker: self._forget_detail_worker(w))
@@ -813,18 +825,24 @@ class VideoBoardPage(QWidget):
     # ------------------------------------------------------------------ 下载
 
     def _handle_download_request(
-        self, remote: RemoteVideo, episodes, quality
+        self, remote: RemoteVideo, episodes, quality,
+        *, detail_attempt: bool = False,
     ) -> None:  # noqa: ANN001
         """搜索页的下载请求：参数可能是「整部（episodes=None）」或「指定若干集」。"""
         if remote is None:
             return
         if episodes is None:
             if not remote.episodes:
+                if detail_attempt:
+                    message = f"没有取到可下载的剧集：{remote.title}（源站可能暂时不可用，或该条目没有分集地址）"
+                    self._task_bar.idle(message)
+                    self._toaster.error(message)
+                    return
                 self._task_bar.report(f"正在获取剧集：{remote.title}…")
                 worker = DetailWorker(remote, self)
                 worker.finishedDetail.connect(
                     lambda detailed, r=remote, q=quality: self._handle_download_request(
-                        detailed or r, None, q
+                        detailed or r, None, q, detail_attempt=True
                     )
                 )
                 worker.failed.connect(
@@ -861,7 +879,10 @@ class VideoBoardPage(QWidget):
 
     def _start_download(self, remote: RemoteVideo, episodes: list, quality) -> None:  # noqa: ANN001
         if self._download_worker is not None and self._download_worker.isRunning():
-            self._toaster.info("已有下载任务在进行，请等待或先取消")
+            self._download_queue.append((remote, episodes, quality))
+            self._toaster.info(
+                f"已加入下载队列：{remote.title}（前面还有 {len(self._download_queue)} 个批次）"
+            )
             return
         dest = video_download_dir_pref()
         Path(dest).mkdir(parents=True, exist_ok=True)
@@ -935,6 +956,9 @@ class VideoBoardPage(QWidget):
         if self._download_worker is not None:
             self._download_worker.cancel()
             self._task_bar.set_text("正在取消下载…")
+        if self._download_queue:
+            self._download_queue.clear()
+            self._toaster.info("已取消排队中的下载任务")
 
     def _task_key(self, task) -> str:  # noqa: ANN001
         """任务的身份键（失败重试队列去重用）：源 + 条目 + 集。"""
@@ -995,6 +1019,15 @@ class VideoBoardPage(QWidget):
             self._pause_button.setText("⏸ 暂停下载")
         if hasattr(self, "_retry_button"):
             self._retry_button.setEnabled(bool(self._failed_tasks))
+        # 队列里的下一批：等当前 finished 的跨线程信号都处理完再启动，
+        # 否则新 worker 可能在旧 worker 的 finished 处理链里被覆盖掉。
+        if self._download_queue:
+            remote, episodes, quality = self._download_queue.pop(0)
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(
+                0, lambda: self._start_download(remote, episodes, quality)
+            )
 
     # ------------------------------------------------------------------ 线程清理
 

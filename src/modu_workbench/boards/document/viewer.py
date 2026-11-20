@@ -741,9 +741,13 @@ class DocViewer(QWidget):
         return parse_plain_text(text, title=self._ir.title)
 
     def current_ir(self) -> Optional[DocumentIR]:
-        """取当前内容（含未保存的编辑）。"""
+        """取当前内容（含未保存的编辑）。
+
+        **不改 dirty 标记**：查找 / 体检 / 版本历史这些"只读"操作也会读内容，
+        以前读一次就把「未保存」清掉 —— 自动保存不再触发、关标签也不提示，
+        用户的编辑就静默丢了。真正清标记的只有保存/自动保存/另存为。
+        """
         self._apply_editor()
-        self._set_dirty(False)
         return self._ir
 
     def apply_ir(self, ir: DocumentIR) -> None:

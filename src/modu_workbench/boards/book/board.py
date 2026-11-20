@@ -34,6 +34,8 @@ class BookBoardPage(QWidget):
         self._shelf = ShelfView(self._library, self._toaster)
         self._shelf.open_book.connect(self._open_reader)
         self._online = OnlineDownloadPage(self._library, self._toaster, task_bar=self._task_bar)
+        # 任务条的「取消」以前是死按钮：在线整本下载动辄十几分钟，点了没反应。
+        self._task_bar.cancelled.connect(self._cancel_current)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -128,6 +130,17 @@ class BookBoardPage(QWidget):
         reader.deleteLater()
         self._mode_bar.show()
         self._show_mode(SHELF_KEY)
+
+    def _cancel_current(self) -> None:
+        """任务条「取消」：转给正在跑的任务（目前只有在线下载是长任务）。"""
+        if not self._online.cancel_download():
+            self._toaster.info("当前没有可取消的任务")
+
+    def shutdown(self) -> None:
+        """退出应用前收尾：取消下载线程、落盘阅读进度。"""
+        self._online.shutdown()
+        if self._reader is not None:
+            self._reader._save_now()  # noqa: SLF001  与阅读器自己关闭时的行为一致
 
     @property
     def library(self) -> Library:

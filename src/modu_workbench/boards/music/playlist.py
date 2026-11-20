@@ -172,7 +172,9 @@ class MusicPlaylistPage(QWidget):
         self._table = configure_table(
             QTableWidget(), ["曲名", "歌手", "专辑", "时长", "格式", "收藏"]
         )
-        self._table.doubleClicked.connect(lambda _i: self._play(0, "order"))
+        self._table.doubleClicked.connect(
+            lambda _i: self._play(self._table.currentRow(), self._player.mode)
+        )
         self._table.itemClicked.connect(self._on_track_clicked)
         attach_context_menu(self._table, self._row_menu)
         self._empty = EmptyState(
@@ -192,10 +194,10 @@ class MusicPlaylistPage(QWidget):
 
         actions = QHBoxLayout()
         for label, handler, obj in (
-            ("播放", lambda: self._play(0, "order"), "primaryButton"),
-            ("列表循环", lambda: self._play(0, "loop-all"), None),
-            ("随机播放", lambda: self._play(0, "shuffle"), None),
-            ("单曲循环", lambda: self._play(0, "loop-one"), None),
+            ("播放", lambda: self._play(self._table.currentRow(), "order"), "primaryButton"),
+            ("列表循环", lambda: self._play(self._table.currentRow(), "loop-all"), None),
+            ("随机播放", lambda: self._play(self._table.currentRow(), "shuffle"), None),
+            ("单曲循环", lambda: self._play(self._table.currentRow(), "loop-one"), None),
             ("移除选中", self._remove_selected, "dangerButton"),
             ("下载待下载项", self._download_pending, None),
             ("移除待下载", self._remove_pending, None),
@@ -418,6 +420,7 @@ class MusicPlaylistPage(QWidget):
 
     def _on_downloaded(self, results: list) -> None:
         ok = [r for r in results if r.ok]
+        failed = [r for r in results if not r.ok]
         imported = self._library.import_download_results(ok)
         if self._playlist_id is not None and imported:
             self._storage.add_to_playlist(self._playlist_id, [t.id for t in imported])
@@ -428,7 +431,17 @@ class MusicPlaylistPage(QWidget):
         self._set_progress(100)
         self._render()
         self.libraryChanged.emit()
-        self._toaster.success(f"已下载并入歌单：{len(imported)} 首")
+
+        summary = f"已下载并入歌单：{len(imported)} 首"
+        if failed:
+            summary += f"，失败 {len(failed)} 首（仍留在待下载列表）"
+        self._idle(summary)
+        if imported:
+            self._toaster.success(f"已下载并入歌单：{len(imported)} 首")
+        if failed:
+            # 以前全失败也弹绿色「已下载 0 首」：失败原因看不到、待下载项原地不动。
+            reasons = "；".join(dict.fromkeys(r.message for r in failed if r.message))
+            self._toaster.error(f"下载失败 {len(failed)} 首" + (f"：{reasons}" if reasons else ""))
 
     def _on_download_finished(self) -> None:
         self._download = None

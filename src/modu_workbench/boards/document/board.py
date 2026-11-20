@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSplitter,
     QTabBar,
@@ -129,7 +130,7 @@ class DocumentBoardPage(QWidget):
             ("save", "Ctrl+S", self._save_current),
             ("save_as", "Ctrl+Shift+S", self._save_as_current),
             ("print", "Ctrl+P", self._print_current),
-            ("close_tab", "Ctrl+W", lambda: self._on_doc_tab_closed(self._doc_tabs.currentIndex())),
+            ("close_tab", "Ctrl+W", lambda: self._request_close_tab(self._doc_tabs.currentIndex())),
             ("focus_search", "Ctrl+L", lambda: (self._search.setFocus(), self._search.selectAll())),
             ("find", "Ctrl+F", lambda: self._viewer._find_input.setFocus()),
             ("refresh", "F5", self.on_shown),
@@ -323,7 +324,7 @@ class DocumentBoardPage(QWidget):
         self._doc_tabs.setVisible(False)
         self._doc_tabs.setToolTip("已打开的文档（点标签切换；• 表示有未保存的编辑）")
         self._doc_tabs.currentChanged.connect(self._on_doc_tab_changed)
-        self._doc_tabs.tabCloseRequested.connect(self._on_doc_tab_closed)
+        self._doc_tabs.tabCloseRequested.connect(self._request_close_tab)
         outer.addWidget(self._doc_tabs)
 
         self._tabs = QTabWidget()
@@ -537,6 +538,35 @@ class DocumentBoardPage(QWidget):
         self._stash_current()
         self._apply_ir(ir)
         W.note(self._task_bar, f"已切换到：{Path(str(key)).name}")
+
+    def _request_close_tab(self, index: int) -> None:
+        """关标签前的未保存确认（保存 / 放弃 / 取消）。
+
+        以前关标签只 `removeTab`，面板上的未保存编辑直接消失：文档板块
+        自己的 `closeEvent` 对嵌入的查看器也不会触发。这里补在**用户动作**入口，
+        `_on_doc_tab_closed` 仍保持纯逻辑（测试/程序内部调用不弹窗）。
+        """
+        if index < 0:
+            return
+        key = str(self._doc_tabs.tabData(index) or "")
+        current_key = (self._current_ir.path or self._current_ir.title) if self._current_ir else ""
+        if key == current_key and self._viewer.is_dirty():
+            answer = QMessageBox.question(
+                self,
+                "未保存的修改",
+                f"《{Path(key).name or key}》有未保存的修改。关闭标签前要保存吗？",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if answer == QMessageBox.StandardButton.Cancel:
+                return
+            if answer == QMessageBox.StandardButton.Save:
+                self._viewer.save()
+                if self._viewer.is_dirty():
+                    return  # 保存被取消或失败：标签保持打开，别把内容关掉
+        self._on_doc_tab_closed(index)
 
     def _on_doc_tab_closed(self, index: int) -> None:
         key = str(self._doc_tabs.tabData(index) or "")

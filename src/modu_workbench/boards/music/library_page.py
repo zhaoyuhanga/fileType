@@ -55,10 +55,13 @@ class MusicLibraryPage(QWidget):
     libraryChanged = Signal()
 
     def _cancel_current(self) -> None:
-        """供板块任务条调用：取消本页正在进行的任务。"""
-        if getattr(self, "_worker", None) is not None:
+        """供板块任务条调用：取消本页正在进行的导入/转换任务。"""
+        for name in ("_import_worker", "_worker"):
+            worker = getattr(self, name, None)
+            if worker is None:
+                continue
             try:
-                self._worker.cancel()
+                worker.cancel()
             except Exception as error:  # noqa: BLE001  可忽略但必须留痕
                 swallow("library_page 中的可选步骤", error)
 
@@ -364,6 +367,7 @@ class MusicLibraryPage(QWidget):
             lambda done, total, message: self._report(message, done, total)
         )
         worker.finishedImport.connect(self._on_import_finished)
+        worker.cancelled.connect(self._on_import_cancelled)
         worker.failed.connect(self._on_import_failed)
         worker.finished.connect(lambda: setattr(self, "_import_worker", None))
         self._busy(f"正在导入 {len(files)} 个文件…")
@@ -373,8 +377,14 @@ class MusicLibraryPage(QWidget):
         """导入完成（在主线程执行，可以安全刷界面）。"""
         self.reload()
         self.libraryChanged.emit()
+        self._idle(f"已导入 {len(tracks)} 首")
         self._toaster.success(f"已导入 {len(tracks)} 首")
-        self._report(f"已导入 {len(tracks)} 首")
+
+    def _on_import_cancelled(self, imported: int) -> None:
+        self.reload()
+        self.libraryChanged.emit()
+        self._idle(f"已取消导入（已入库 {imported} 首）")
+        self._toaster.info(f"已取消导入（已入库 {imported} 首）")
 
     def _on_import_failed(self, reason: str) -> None:
         self._idle("")

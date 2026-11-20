@@ -38,7 +38,7 @@ class ConvertSettingsPage(SettingsPage):
         form.setSpacing(10)
 
         self._output_dir = QLineEdit()
-        self._output_dir.setPlaceholderText("留空则输出到源文件同目录")
+        self._output_dir.setPlaceholderText("留空则输出到系统「文档」下的「墨软转换输出」")
         pick = QPushButton("选择…")
         pick.clicked.connect(self._pick_dir)
         row = QHBoxLayout()
@@ -51,7 +51,7 @@ class ConvertSettingsPage(SettingsPage):
         self._no_overwrite = QCheckBox("同名输出自动加序号（不覆盖已有文件）")
         form.addRow("输出安全", self._no_overwrite)
 
-        self._keep_original = QCheckBox("转换后保留源文件（默认开启）")
+        self._keep_original = QCheckBox("转换后保留源文件（取消勾选：成功后删除源文件，不可恢复）")
         form.addRow("源文件", self._keep_original)
 
         ffmpeg = find_ffmpeg()

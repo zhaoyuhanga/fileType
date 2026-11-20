@@ -58,4 +58,77 @@ def save_table_layout(table: QTableWidget, key: str) -> None:
         swallow(f"保存列宽（{key}）", error)
 
 
-__all__ = ["remember_table_layout", "save_table_layout"]
+# ---------------------------------------------------------------- 主窗口几何
+#
+# 每次启动都回到 1180×760 的"固定初始位置"是很常见的不满：用户把窗口拖到
+# 副屏、拉到接近全屏的尺寸、最大化，重启后全丢。这里只存两个值
+# （geometry + 是否最大化），板块仍按需构造，不影响启动预算。
+
+WINDOW_GEOMETRY_KEY = "ui/window_geometry"
+WINDOW_MAXIMIZED_KEY = "ui/window_maximized"
+
+
+def restore_window_state(window) -> str:  # noqa: ANN001
+    """恢复窗口大小/位置；返回 `"maximized"` / `"normal"` / `""`（没有记录）。
+
+    显示器拔掉/分辨率变化时，旧坐标可能落在屏幕外 —— 这时把窗口拉回主屏，
+    否则用户会以为程序"没启动"（窗口在屏幕外看不见）。
+    """
+    try:
+        settings = _settings()
+        saved = settings.value(WINDOW_GEOMETRY_KEY, None, type=QByteArray)
+        if not saved:
+            return ""
+        if not window.restoreGeometry(saved):
+            return ""
+        _clamp_to_available_screen(window)
+        if bool(settings.value(WINDOW_MAXIMIZED_KEY, False, type=bool)):
+            return "maximized"
+        return "normal"
+    except Exception as error:  # noqa: BLE001  记住窗口大小失败不该影响启动
+        swallow("恢复窗口状态", error)
+        return ""
+
+
+def save_window_state(window) -> None:  # noqa: ANN001
+    try:
+        settings = _settings()
+        settings.setValue(WINDOW_GEOMETRY_KEY, window.saveGeometry())
+        settings.setValue(WINDOW_MAXIMIZED_KEY, bool(window.isMaximized()))
+        settings.sync()
+    except Exception as error:  # noqa: BLE001
+        swallow("保存窗口状态", error)
+
+
+def _clamp_to_available_screen(window) -> None:  # noqa: ANN001
+    """把窗口几何限制在某个可用屏幕内（屏幕被拔掉/改分辨率后的兜底）。"""
+    from PySide6.QtGui import QGuiApplication
+
+    rect = window.frameGeometry()
+    screens = QGuiApplication.screens()
+    if not screens:
+        return
+    for screen in screens:
+        if screen.availableGeometry().intersects(rect):
+            return
+    primary = QGuiApplication.primaryScreen()
+    if primary is None:
+        return
+    area = primary.availableGeometry()
+    width = min(max(720, rect.width()), area.width())
+    height = min(max(480, rect.height()), area.height())
+    window.resize(width, height)
+    window.move(
+        area.x() + (area.width() - width) // 2,
+        area.y() + (area.height() - height) // 2,
+    )
+
+
+__all__ = [
+    "WINDOW_GEOMETRY_KEY",
+    "WINDOW_MAXIMIZED_KEY",
+    "remember_table_layout",
+    "restore_window_state",
+    "save_table_layout",
+    "save_window_state",
+]

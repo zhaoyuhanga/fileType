@@ -64,8 +64,16 @@ def main(argv: list[str] | None = None) -> int:
 
     shell = AppShell()
     shell.setWindowTitle(f"{APP_NAME} · {APP_SLOGAN} v{__version__}")
-    shell.resize(1180, 760)
-    shell.show()
+    # 还原上次的窗口大小/位置/最大化状态；没有记录时才用默认 1180×760
+    from ..ui_kit.view_state import restore_window_state
+
+    window_state = restore_window_state(shell)
+    if not window_state:
+        shell.resize(1180, 760)
+    if window_state == "maximized":
+        shell.showMaximized()
+    else:
+        shell.show()
     return app.exec()
 
 

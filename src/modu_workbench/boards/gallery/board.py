@@ -285,8 +285,13 @@ class GalleryBoardPage(QWidget):
         page_row.addWidget(self._page_label)
 
         self._page_size_combo = QComboBox()
-        for size in (60, 120, 240, 480, 0):
+        sizes = (60, 120, 240, 480, 0)
+        if self._page_size not in sizes:
+            # 设置里填的「每页张数」可能不在预设里：补一项，否则下拉显示与实际分页对不上
+            sizes = tuple(sorted({*sizes, self._page_size}, key=lambda value: (value == 0, value)))
+        for size in sizes:
             self._page_size_combo.addItem("全部（不分页）" if size == 0 else f"{size} 张/页", size)
+        self._page_size_combo.setCurrentIndex(max(0, self._page_size_combo.findData(self._page_size)))
         self._page_size_combo.setToolTip("每页显示多少张：每页越少越流畅")
         self._page_size_combo.currentIndexChanged.connect(self._on_page_size_changed)
         page_row.addWidget(self._page_size_combo)
@@ -728,6 +733,15 @@ class GalleryBoardPage(QWidget):
         size = self._page_size_combo.currentData()
         self._page_size = int(size if size is not None else 120)
         self._page = 1
+        # 记住选择：以前每次重启都回到 120，用户在大图库上要重设一遍
+        try:
+            from PySide6.QtCore import QSettings
+
+            settings = QSettings("ModuWorkbench", "modu-workbench")
+            settings.setValue("gallery/page_size", self._page_size)
+            settings.sync()
+        except Exception:  # noqa: BLE001  记不住分页不该影响浏览
+            pass
         self.reload(keep_page=False)
 
     def goto_item_page(self, image_id: int) -> None:
@@ -1089,17 +1103,51 @@ class GalleryBoardPage(QWidget):
 
     # ------------------------------------------------------------------ 操作
 
+    @staticmethod
+    def _import_start_dir() -> str:
+        """导入对话框的起始目录：设置里的「默认导入目录」优先，其次系统图片目录。"""
+        from PySide6.QtCore import QSettings
+
+        from modu_workbench.core.platform import paths as platform_paths
+
+        try:
+            stored = str(QSettings("ModuWorkbench", "modu-workbench").value(
+                "gallery/import_dir", ""
+            ) or "")
+        except Exception:  # noqa: BLE001
+            stored = ""
+        if stored and Path(stored).is_dir():
+            return stored
+        try:
+            return str(platform_paths.gallery_import_dir())
+        except Exception:  # noqa: BLE001
+            return str(Path.home() / "Pictures")
+
+    @staticmethod
+    def _remember_import_dir(folder: str) -> None:
+        try:
+            from PySide6.QtCore import QSettings
+
+            QSettings("ModuWorkbench", "modu-workbench").setValue("gallery/import_dir", folder)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _import_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in
                             (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"))
-        files, _ = QFileDialog.getOpenFileNames(self, "选择图片", "", f"图片文件 ({patterns})")
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择图片", self._import_start_dir(), f"图片文件 ({patterns})"
+        )
         if files:
+            self._remember_import_dir(str(Path(files[0]).parent))
             self._start_import(files, source="local")
 
     def _import_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "选择要扫描的文件夹",
-                                                 str(Path.home() / "Pictures"))
+        folder = QFileDialog.getExistingDirectory(
+            self, "选择要扫描的文件夹", self._import_start_dir()
+        )
         if folder:
+            self._remember_import_dir(folder)
             self._start_import([folder], source="folder")
 
     def _import_screenshots(self) -> None:
@@ -1140,7 +1188,8 @@ class GalleryBoardPage(QWidget):
 
     def _on_import_done(self, result) -> None:  # noqa: ANN001
         self._set_progress(100)
-        self._report(f"导入完成：{result.summary()}")
+        # 必须 idle：只 _report 的话进度条与「取消」会永久挂在底部（取消按钮还是死的）
+        self._idle(f"导入完成：{result.summary()}")
         self._toaster.success(f"导入完成：{result.summary()}")
         self.reload()
 
@@ -1453,7 +1502,7 @@ class GalleryBoardPage(QWidget):
         self._report(message)
 
     def _on_task_failed(self, message: str) -> None:
-        self._report(f"任务失败：{message}")
+        self._idle(f"任务失败：{message}")
         self._toaster.error(message)
 
     def _on_worker_finished(self) -> None:
