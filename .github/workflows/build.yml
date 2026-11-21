@@ -134,6 +134,10 @@ jobs:
     needs: test
     runs-on: windows-latest
     timeout-minutes: 45
+    # 供（获批后启用的）签名作业读取：未签名 zip 的 artifact-id。
+    # 只在 tag 构建上有值；sign 作业同样只在 tag 上跑，所以拿不到时它本来就不会执行。
+    outputs:
+      unsigned-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -247,11 +251,20 @@ jobs:
         run: |
           # 用 sha 而不是 ref_name：PR 构建时 ref_name 形如 "123/merge"，
           # 带斜杠会生成非法文件名（CI 上这类错很难一眼看出）
-          $zip = "dist\ModuWorkbench-${{ github.sha }}.zip"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\ModuWorkbench-${{ github.sha }}.zip"
           # 用系统自带 bsdtar 而不是 Compress-Archive：后者对 380MB / 数万文件
           # 会吃光内存（CI 上常见的莫名失败）。实测 tar 9s / 14s，产物同为合法 zip。
-          tar -a -c -f $zip -C dist\ModuWorkbench .
-          if ($LASTEXITCODE -ne 0) { throw "tar 打包失败：$LASTEXITCODE" }
+          #
+          # ⚠️ 必须在 onedir 目录里用 `*` 打包，**不能**用 `-C dist\ModuWorkbench .`：
+          #    后者的条目会带 `./` 前缀（`./ModuWorkbench.exe`），而 SignPath 的
+          #    artifact configuration 按 `<pe-file path="ModuWorkbench.exe">` 精确匹配
+          #    根级路径 —— 带前缀会让签名请求找不到目标文件（要等人工批准之后才报错，
+          #    白等一轮）。这里实测条目为 `ModuWorkbench.exe` / `_internal/...`。
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE "dist\ModuWorkbench")
+          tar -a -c -f $zip *
+          $tarCode = $LASTEXITCODE
+          Pop-Location
+          if ($tarCode -ne 0) { throw "tar 打包失败：$tarCode" }
           $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
           "压缩包：$mb MB"
           if ($env:GITHUB_STEP_SUMMARY) {
@@ -294,6 +307,26 @@ jobs:
             dist/*.zip
             dist/*-Setup-*.exe
           if-no-files-found: warn
+          retention-days: 14
+
+      # ---------------------------------------------------------------- 待签名原件
+      #
+      # 与上面"给人下载的产物"分开传：签名要的是**一个可直接当 zip 用的文件**。
+      # `archive: false` 让 upload-artifact 不再包一层 zip，于是 SignPath 拿到的就是
+      # 我们自己打的 `ModuWorkbench-<sha>.zip`；配合 signpath action 的
+      # `skip-decompress: true`，artifact configuration 的根节点写 `<zip-file>`、
+      # 里面 `<pe-file path="ModuWorkbench.exe">` 即可（条目无 `./` 前缀，见「压缩产物」）。
+      #
+      # 只在 tag 构建上跑：签名是发布动作，PR 与日常 push 不需要，也不该产生多余 artifact。
+      - name: 上传待签名原件（仅 tag 构建）
+        id: upload-unsigned
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ModuWorkbench-${{ github.sha }}
+          path: dist/ModuWorkbench-${{ github.sha }}.zip
+          archive: false
+          if-no-files-found: error
           retention-days: 14
 
       # 失败诊断：test 作业有同名步骤，但失败也可能发生在 build 作业
@@ -365,3 +398,56 @@ jobs:
             Start-Sleep -Seconds 5
           }
 
+
+  # ---------------------------------------------------------------- 代码签名（SignPath，获批后启用）
+  #
+  # 现状：**尚未获批**，所以整段保持注释；条款与申请材料见 docs/SIGNPATH_APPLICATION.md。
+  # 获批后按顺序做三件事：
+  #   1) 在 SignPath 建好 project / signing policy / artifact configuration（命名见文档）；
+  #   2) 仓库 Settings → Secrets 配 SIGNPATH_API_TOKEN、SIGNPATH_ORGANIZATION_ID；
+  #   3) 取消下面整段注释，并打一个 v* tag 触发（sign 作业只在 tag 上跑）。
+  #
+  # 几个必须对齐的点（都与 SignPath 官方文档核对过）：
+  #   - action 版本是 **v3**（不是 v1）；
+  #   - `github-artifact-id` 必须来自 upload-artifact **v4+**，这里读 build 作业的
+  #     `unsigned-artifact-id`（已在 build 作业的 outputs 里接好）；
+  #   - 因为上传时用了 `archive: false`，这里要配 `skip-decompress: true`，
+  #     artifact configuration 的根节点才是 `<zip-file>`；
+  #   - 条款要求**每个版本人工批准一次**，所以这一步会挂着等审批（默认等 600 秒，
+  #     可用 wait-for-completion-timeout-in-seconds 加长），不是"提交即完成"。
+  #
+  # sign:
+  #   name: 代码签名
+  #   needs: build
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 60
+  #   permissions:
+  #     actions: read        # 读 artifact 与 job 信息
+  #     contents: read
+  #   steps:
+  #     - name: 提交签名请求（在 SignPath 界面批准后才会返回）
+  #       id: sign
+  #       uses: signpath/github-action-submit-signing-request@v3
+  #       with:
+  #         api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+  #         organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+  #         project-slug: modu-workbench
+  #         signing-policy-slug: release-signing
+  #         artifact-configuration-slug: onedir-zip
+  #         github-artifact-id: ${{ needs.build.outputs.unsigned-artifact-id }}
+  #         wait-for-completion: true
+  #         wait-for-completion-timeout-in-seconds: 3600
+  #         skip-decompress: true
+  #         output-artifact-directory: signed
+  #         parameters: |
+  #           version: "${{ github.ref_name }}"
+  #
+  #     - name: 复核签名（签名无效时让作业失败）
+  #       shell: pwsh
+  #       run: |
+  #         $exe = Get-ChildItem signed -Recurse -Filter ModuWorkbench.exe | Select-Object -First 1
+  #         if (-not $exe) { throw "签名产物里没有 ModuWorkbench.exe" }
+  #         $sig = Get-AuthenticodeSignature $exe.FullName
+  #         "签名状态：$($sig.Status)；签名者：$($sig.SignerCertificate.Subject)"
+  #         if ($sig.Status -ne 'Valid') { throw "签名无效：$($sig.Status)" }

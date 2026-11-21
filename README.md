@@ -646,6 +646,10 @@ certificate by [SignPath Foundation](https://signpath.org).
 
 **本程序不会向其它联网系统传输任何信息，除非用户明确请求或由其配置。**
 
+> English (the wording required by the [SignPath Foundation terms](https://signpath.org/terms)):
+> **This program will not transfer any information to other networked systems unless
+> specifically requested by the user or the person installing or operating it.**
+
 具体地：
 
 - **默认完全离线**：阅读本地书籍、格式转换、图片处理、文档编辑等全部本地完成，
