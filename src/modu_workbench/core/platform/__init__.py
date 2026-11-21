@@ -37,7 +37,12 @@ from typing import Any
 
 # 便宜的（不拖 requests/Qt）—— 保持模块级导入，各板块高频使用
 from .db import SqliteStore, app_db, run_migrations
-from .files import SUPPORTED_IMPORT_EXTENSIONS, scan_paths
+from .files import (
+    SUPPORTED_IMPORT_EXTENSIONS,
+    safe_filename,
+    scan_paths,
+    unique_path,
+)
 from .logging import debug, swallow
 from .media import bundled_dir, find_ffmpeg, find_ffprobe, probe_duration_ms
 from .paths import (
@@ -98,8 +103,10 @@ __all__ = sorted(
         "music_download_dir",
         "probe_duration_ms",
         "run_migrations",
+        "safe_filename",
         "scan_paths",
         "swallow",
+        "unique_path",
         "video_db_path",
         "video_dir",
         "video_download_dir",

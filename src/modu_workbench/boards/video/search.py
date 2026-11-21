@@ -42,6 +42,7 @@ from modu_workbench.ui_kit.components import (
     row,
     spacer,
 )
+from modu_workbench.ui_kit.components.task_status import TaskStatusMixin
 from modu_workbench.ui_kit.toast import Toaster
 
 from .detail import VideoDetailDialog
@@ -64,7 +65,7 @@ from modu_workbench.core.platform.logging import swallow
 COLUMNS = ["片名", "类型", "年份", "地区", "集数", "备注", "源"]
 
 
-class VideoSearchPage(QWidget):
+class VideoSearchPage(TaskStatusMixin, QWidget):
     """在线搜索页：搜索 → 选集 → 在线播放 / 下载 / 加入分类收藏。"""
 
     playRequested = Signal(object, object, object)  # remote, episode, quality
@@ -206,12 +207,6 @@ class VideoSearchPage(QWidget):
         """兼容旧引用：状态文字统一显示在任务条上。"""
         return self._task._label  # noqa: SLF001
 
-    def _note_fallback(self, message: str) -> None:
-        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
-        label = getattr(self, "_fallback_status", None)
-        if label is not None:
-            label.setText(message)
-
     def _report(self, message: str, done: int = 0, total: int = 0) -> None:
         """把状态/进度交给板块底部的统一任务条（没有注入时静默忽略）。"""
         if self._task is not None:
@@ -219,12 +214,6 @@ class VideoSearchPage(QWidget):
                 self._task.report(message, done, total)
             else:
                 self._task.note(message)  # 纯信息：不显示进度条/取消
-
-    def _busy(self, message: str) -> None:
-        """进行中提示（搜索/导入/解析这类未知时长）。"""
-        self._note_fallback(message)
-        if self._task is not None:
-            self._task.busy(message)
 
     def _idle(self, message: str = "") -> None:
         if self._task is not None:

@@ -9,6 +9,11 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# 实现收敛到共享层（三个板块曾各抄一份 `safe_filename`；`strip_html` 与
+# `core.platform.textutil` 曾各有一份）。本模块只保留影视的默认值。
+from modu_workbench.core.platform.files import safe_filename as _safe_filename
+from modu_workbench.core.platform.textutil import strip_html as _strip_html
+
 # 支持的本地视频扩展名（本地库与导入共用）
 VIDEO_EXTENSIONS = (
     ".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm", ".m4v", ".ts", ".mpg", ".mpeg", ".rmvb",
@@ -47,25 +52,20 @@ _KIND_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("movie", ("电影", "影片", "片", "movie", "film")),
 )
 
-_ILLEGAL = re.compile(r'[\\/:*?"<>|\r\n\t]')
 _TAG_SPLIT = re.compile(r"[,，/|、;；]+")
-_HTML_TAG = re.compile(r"<[^>]+>")
 
 # 收藏集合名（与 core.music.storage.FAVORITE_NAME 保持一致）
 FAVORITE_NAME = "我的收藏"
 
 
 def safe_filename(name: str, fallback: str = "video") -> str:
-    """把片名转换为合法文件名（去非法字符、合并连续下划线、限长）。"""
-    cleaned = _ILLEGAL.sub("_", (name or "").strip())
-    cleaned = re.sub(r"_{2,}", "_", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._")
-    return (cleaned or fallback)[:120]
+    """把片名转换为合法文件名（去非法字符、合并连续下划线、限长 120）。"""
+    return _safe_filename(name, fallback, 120)
 
 
 def strip_html(text: str) -> str:
     """站点简介里常带 HTML 标签，展示前先清洗。"""
-    return _HTML_TAG.sub("", (text or "").replace("&nbsp;", " ")).strip()
+    return _strip_html(text)
 
 
 def split_tags(value: str) -> list[str]:

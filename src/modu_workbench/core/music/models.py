@@ -1,9 +1,11 @@
 """墨软乐库：数据模型（本地曲目 / 在线结果 / 歌单 / 历史）。"""
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# 文件净化实现收敛到共享层（乐库/影视/图库曾各抄一份）；本模块只保留乐库的默认值与限长。
+from modu_workbench.core.platform.files import safe_filename as _safe_filename
 
 # 支持的音频扩展名（本地库与导入共用）
 AUDIO_EXTENSIONS = (
@@ -21,15 +23,9 @@ PLAY_MODE_LABELS = {
     "shuffle": "随机播放",
 }
 
-_ILLEGAL = re.compile(r'[\\/:*?"<>|\r\n\t]')
-
-
 def safe_filename(name: str, fallback: str = "track") -> str:
-    """把曲目名转换为合法文件名（去非法字符、合并连续下划线、限长）。"""
-    cleaned = _ILLEGAL.sub("_", (name or "").strip())
-    cleaned = re.sub(r"_{2,}", "_", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._")
-    return (cleaned or fallback)[:120]
+    """把曲目名转换为合法文件名（去非法字符、合并连续下划线、限长 120）。"""
+    return _safe_filename(name, fallback, 120)
 
 
 @dataclass

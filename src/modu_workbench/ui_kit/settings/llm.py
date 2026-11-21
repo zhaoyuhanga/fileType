@@ -77,6 +77,20 @@ class LlmSettingsPage(SettingsPage):
         body = QHBoxLayout()
         body.setSpacing(10)
 
+        body = QHBoxLayout()
+        body.setSpacing(10)
+
+        # 三栏从左到右：类型 → 候选列表 → 参数详情。拆成 _build_* 之后
+        # **调用顺序就是栏位顺序**（用户看到的左中右），不要重排。
+        self._build_kind_list(body)
+        self._build_profile_list(body)
+        self._build_profile_form(body)
+
+        layout.addLayout(body, 1)
+        self._reload_profiles()
+
+    def _build_kind_list(self, body: QHBoxLayout) -> None:
+        """左栏：模型类型（文字 / 图片 / 视频）。切换类型只换候选列表，不动表单。"""
         # ---------------- 左：类型 ----------------
         kinds_box = QVBoxLayout()
         kinds_box.setSpacing(6)
@@ -92,6 +106,12 @@ class LlmSettingsPage(SettingsPage):
         kinds_box.addWidget(self._kinds, 1)
         body.addLayout(kinds_box)
 
+    def _build_profile_list(self, body: QHBoxLayout) -> None:
+        """中栏：该类型的候选配置列表 + 上移/下移/删除 + 优先级说明。
+
+        列表**从上到下就是调用优先级**：前一份失败（鉴权/限流/超时/模型不可用）
+        会自动降级到下一份，所以排序按钮的语义是"提高/降低调用优先级"。
+        """
         # ---------------- 中：候选列表 ----------------
         list_box = QVBoxLayout()
         list_box.setSpacing(6)
@@ -132,6 +152,8 @@ class LlmSettingsPage(SettingsPage):
         list_box.addWidget(self._order_label)
         body.addLayout(list_box, 1)
 
+    def _build_profile_form(self, body: QHBoxLayout) -> None:
+        """右栏：单份配置的参数表单 + 保存/测试 + 状态与用量回显。"""
         # ---------------- 右：参数 ----------------
         form_box = QVBoxLayout()
         form_box.setSpacing(6)
@@ -218,9 +240,6 @@ class LlmSettingsPage(SettingsPage):
         holder.setLayout(form_box)
         holder.setMinimumWidth(262)
         body.addWidget(holder, 1)
-
-        layout.addLayout(body, 1)
-        self._reload_profiles()
 
     # ------------------------------------------------------------------ 列表
 

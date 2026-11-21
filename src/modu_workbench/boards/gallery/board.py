@@ -743,8 +743,8 @@ class GalleryBoardPage(QWidget):
             settings = QSettings("ModuWorkbench", "modu-workbench")
             settings.setValue("gallery/page_size", self._page_size)
             settings.sync()
-        except Exception:  # noqa: BLE001  记不住分页不该影响浏览
-            pass
+        except Exception as error:  # noqa: BLE001  记不住分页不该影响浏览
+            swallow("记住每页张数", error)
         self.reload(keep_page=False)
 
     def goto_item_page(self, image_id: int) -> None:
@@ -1236,8 +1236,8 @@ class GalleryBoardPage(QWidget):
             from PySide6.QtCore import QSettings
 
             QSettings("ModuWorkbench", "modu-workbench").setValue("gallery/import_dir", folder)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001  记不住上次目录不影响导入
+            swallow("记住导入目录", error)
 
     def _import_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in

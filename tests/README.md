@@ -12,7 +12,8 @@ tests/
 ```
 
 运行：`python -m pytest tests -q`（详见 `docs/TESTING.md`）。
-当前规模：**89 个文件 / 1195 个用例 / 约 2.5 分钟**。
+当前规模：**115 个含用例的文件 / 1665 个用例 / 约 2.5 分钟**（v2.3.0 复核；此前这里写的
+89 个文件 / 1195 个用例是 v2.0 时代留下的旧数，已过期）。
 
 ## architecture/ —— 这些闸门在守什么
 
@@ -29,6 +30,7 @@ tests/
 | `test_version.py` | 版本单一来源（包 / pyproject / version_info / nsi） | 发版时漏改某一处 |
 | `test_ui_design_system.py` | 令牌尺度、无直角、组件行为、首页栅格、副标题含全部板块 | 界面漂移 |
 | `test_ui_page_conventions.py` | 任务条助手、只读属性、`task_bar` 参数约定 | 页面之间行为不一致 |
+| `test_ui_task_status.py` | `TaskStatusMixin` 的五条转发语义（用假宿主，不起 Qt） | v2.3.0 把 33 份逐字复制的状态助手收敛成混入，需要钉住"哪些**不该**被顺手改掉" |
 | `test_branding_assets.py` | 图标与安装包图形随包 | 打包漏资源 |
 
 ## platform/
@@ -36,7 +38,10 @@ tests/
 - `test_db_schema.py`：单库 28 张表的结构快照（新增表必须在这里登记）；
 - `test_db_indexes.py`：**用 `EXPLAIN QUERY PLAN` 钉住热点查询必须走索引**，
   并覆盖"从 v1.1.0 老库升级"与"缺表不能崩"两种情形；
-- `test_media_proxy_urls.py`：本机代理的地址构造与 Range 响应。
+- `test_media_proxy_urls.py`：本机代理的地址构造与 Range 响应；
+- `test_platform_files.py`：`files.safe_filename` / `unique_path` 的规则，以及
+  **三个板块各自的默认值与限长不变**（图库 110、乐库/影视 120）——
+  v2.3.0 把三份复制实现收敛到平台层时补的守门用例。
 
 ## smoke/
 

@@ -89,6 +89,20 @@ class VideoSettingsPage(SettingsPage):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
+        # 装配顺序 = 用户在设置页里从上往下看到的顺序。拆成 7 个 _build_* 之后
+        # **调用顺序就是这个顺序**，不要为了"看起来整齐"重排（下拉框的默认选中、
+        # 表单行距、动态数据源勾选框的位置都会因此变化）。
+        self._build_basics(layout)
+        self._build_sources(layout)
+        self._build_playback(layout)
+        self._build_shortcuts(layout)
+        self._build_cache(layout)
+        self._build_danmaku(layout)
+        layout.addStretch(1)
+        self._build_footer(layout)
+
+    def _build_basics(self, layout: QVBoxLayout) -> None:
+        """目录 / 容错 / 合规 / ffmpeg 说明 / 库目录（本页最常用的一组）。"""
         form = QFormLayout()
         form.setSpacing(10)
 
@@ -122,6 +136,8 @@ class VideoSettingsPage(SettingsPage):
         form.addRow("影视库目录", self._library_dir)
         layout.addLayout(form)
 
+    def _build_sources(self, layout: QVBoxLayout) -> None:
+        """数据源勾选框：条目来自注册表，**数量随内置源变化**，所以只能动态生成。"""
         layout.addWidget(QLabel("数据源（停用后不参与搜索与自动换源）"))
         self._source_checks: dict[str, QCheckBox] = {}
         for info in self._registry.infos():
@@ -134,6 +150,8 @@ class VideoSettingsPage(SettingsPage):
             self._source_checks[info.key] = check
             layout.addWidget(check)
 
+    def _build_playback(self, layout: QVBoxLayout) -> None:
+        """播放：解码后端 / 硬解 / 纹理转换 / 渲染路径 / 清晰度策略 / 自动调档 / 连播。"""
         layout.addWidget(self._section("播放（解码与渲染）"))
         play_form = QFormLayout()
         play_form.setSpacing(10)
@@ -184,6 +202,8 @@ class VideoSettingsPage(SettingsPage):
         play_form.addRow("连播", self._auto_next)
         layout.addLayout(play_form)
 
+    def _build_shortcuts(self, layout: QVBoxLayout) -> None:
+        """小窗快捷键（有人习惯 M，有人笔记本没有独立键，键位不该写死）。"""
         # v2.2.x：小窗快捷键可改 —— 有人习惯 M，有人用笔记本没有独立键，键位不该写死
         layout.addWidget(self._section("播放器快捷键（小窗）"))
         shortcut_form = QFormLayout()
@@ -208,6 +228,8 @@ class VideoSettingsPage(SettingsPage):
         shortcut_form.addRow("小窗最小化", self._shortcut_mini_minimize)
         layout.addLayout(shortcut_form)
 
+    def _build_cache(self, layout: QVBoxLayout) -> None:
+        """缓存与网络：缓冲档位 / 缓存目录与配额 / 预取 / 并发 / 限速 / 排序 / 清理。"""
         layout.addWidget(self._section("缓存与网络（代理/下载）"))
         cache_form = QFormLayout()
         cache_form.setSpacing(10)
@@ -296,6 +318,8 @@ class VideoSettingsPage(SettingsPage):
         cache_form.addRow("缓存占用", cache_holder)
         layout.addLayout(cache_form)
 
+    def _build_danmaku(self, layout: QVBoxLayout) -> None:
+        """弹幕（弹弹play，只读）：开关、凭证、外观、屏蔽词与去重。"""
         layout.addWidget(self._section("弹幕（弹弹play，只读）"))
         danmaku_form = QFormLayout()
         danmaku_form.setSpacing(10)
@@ -335,7 +359,8 @@ class VideoSettingsPage(SettingsPage):
         danmaku_form.addRow("去重", self._danmaku_dedupe)
         layout.addLayout(danmaku_form)
 
-        layout.addStretch(1)
+    def _build_footer(self, layout: QVBoxLayout) -> None:
+        """页脚说明：源顺序与连通性测试不在本页，指向板块内「源设置」。"""
         hint = QLabel(
             "源顺序、改动接口地址、连通性测试在板块内「源设置」里完成；"
             "采集类接口来自第三方站点，可能随时变更。"

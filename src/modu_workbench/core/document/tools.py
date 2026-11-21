@@ -1193,7 +1193,19 @@ def _tool_set_watermark(context: ToolContext, args: dict) -> ToolResult:
 # ---------------------------------------------------------------- 注册
 
 
-def _register_all() -> None:
+# ---------------------------------------------------------------- 注册
+#
+# 51 个工具按**类别**分成 9 组注册。
+#
+# ⚠️ 函数**调用顺序** = `TOOL_ORDER` 顺序 = AI 工具目录与界面的展示顺序。
+#    不要为了「整齐」按类别字典重排：`export_images` 的类别是 `write`，
+#    但它刻意排在 PDF 组之后（历史顺序，改了会让工具目录在用户眼前重排）。
+#    新增工具：加到对应分组末尾；确实是新类别时，在末尾新增一组，并在
+#    `TOOL_CATEGORIES` 里登记（否则界面的分类标签会缺一个）。
+
+
+def _register_read_tools() -> None:
+    """读取与解析：把文件变成当前工作文档，或只回显结构信息（不改内容）（2 个：`read_document`、`document_info`）。"""
     register_tool(
         ToolSpec(
             "read_document",
@@ -1214,6 +1226,10 @@ def _register_all() -> None:
             handler=_tool_document_info,
         )
     )
+
+
+def _register_write_tools() -> None:
+    """写入与导出：把当前文档落成文件。**它会写磁盘**，路径来自用户参数（2 个：`export_document`、`write_document`）。"""
     register_tool(
         ToolSpec(
             "export_document",
@@ -1238,6 +1254,10 @@ def _register_all() -> None:
             handler=_tool_write_document,
         )
     )
+
+
+def _register_edit_tools() -> None:
+    """编辑与排版：查找替换、术语统一、编号、目录、模板 —— 改的是 IR，不碰磁盘（13 个：`find_replace`、`unify_terms`、`normalize_text`、`add_comment`、`list_comments`、`dedupe_paragraphs`、`beautify`、`number_headings`、`set_heading_levels`、`build_toc`、`beautify_table`、`apply_template`、`register_template`）。"""
     register_tool(
         ToolSpec(
             "find_replace",
@@ -1379,6 +1399,10 @@ def _register_all() -> None:
             handler=_tool_register_template,
         )
     )
+
+
+def _register_sheet_tools() -> None:
+    """表格与计算：公式求值、条件检查、自动填充、智能填充、统计、透视（6 个：`compute_formula`、`check_calculation`、`autofill`、`smart_fill`、`statistics`、`pivot_table`）。"""
     register_tool(
         ToolSpec(
             "compute_formula",
@@ -1449,6 +1473,10 @@ def _register_all() -> None:
             handler=_tool_pivot_table,
         )
     )
+
+
+def _register_ai_tools() -> None:
+    """AI 文本：逐段调用模型并写回正文，每段留一条 Change（可预览、可回滚）（8 个：`polish`、`summarize`、`translate`、`expand`、`condense`、`proofread`、`rewrite`、`quality_check`）。"""
     register_tool(
         ToolSpec(
             "polish",
@@ -1536,6 +1564,10 @@ def _register_all() -> None:
             handler=_tool_quality_check,
         )
     )
+
+
+def _register_merge_tools() -> None:
+    """合并与拆分：两稿合并（七种模式 + 报告）、按段数拆分、两稿对比（3 个：`merge_documents`、`split_document`、`diff_documents`）。"""
     register_tool(
         ToolSpec(
             "merge_documents",
@@ -1571,6 +1603,10 @@ def _register_all() -> None:
             handler=_tool_diff_documents,
         )
     )
+
+
+def _register_pdf_tools() -> None:
+    """PDF 页面操作：信息、拆分、合并、抽页、压缩、转图（只动 PDF，不碰 IR）（13 个：`pdf_info`、`pdf_split`、`pdf_merge`、`pdf_extract_pages`、`pdf_compress`、`pdf_encrypt`、`pdf_decrypt`、`pdf_rotate`、`pdf_watermark`、`pdf_form`、`pdf_list_annotations`、`annotate_pdf`、`pdf_to_images`）。"""
     register_tool(
         ToolSpec(
             "pdf_info",
@@ -1719,6 +1755,10 @@ def _register_all() -> None:
             handler=_tool_pdf_to_images,
         )
     )
+
+
+def _register_write_tools_2() -> None:
+    """写入与导出：把当前文档落成文件。**它会写磁盘**，路径来自用户参数（1 个：`export_images`）。"""
     register_tool(
         ToolSpec(
             "export_images",
@@ -1729,6 +1769,10 @@ def _register_all() -> None:
             handler=_tool_export_images,
         )
     )
+
+
+def _register_secure_tools() -> None:
+    """安全与识别：OCR、脱敏、水印 —— 都属于「上传前 / 交付前」的处理（3 个：`ocr`、`mask_document`、`set_watermark`）。"""
     register_tool(
         ToolSpec(
             "ocr",
@@ -1759,6 +1803,20 @@ def _register_all() -> None:
             handler=_tool_set_watermark,
         )
     )
+
+
+def _register_all() -> None:
+    """按固定顺序注册全部工具（顺序即 `TOOL_ORDER`，见上面的说明）。"""
+    _register_read_tools()
+    _register_write_tools()
+    _register_edit_tools()
+    _register_sheet_tools()
+    _register_ai_tools()
+    _register_merge_tools()
+    _register_pdf_tools()
+    _register_write_tools_2()
+    _register_secure_tools()
+
 
 
 _register_all()

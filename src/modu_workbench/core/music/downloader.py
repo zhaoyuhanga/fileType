@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # ResolvedAudio 只出现在注解里（字符串注解，运
     from .sources.base import ResolvedAudio
 
 from .models import RemoteTrack, safe_filename
+from modu_workbench.core.platform.files import unique_path
 from modu_workbench.core.platform.media import probe_duration_ms
 
 from .sources import MusicSource, SourceError, clean_lyrics, describe_network_error, get_source
@@ -81,18 +82,8 @@ class DownloadResult:
     switched_from: str = ""   # 原音源（发生换源时填写）
 
 
-def unique_path(directory: Path, filename: str) -> Path:
-    """目标文件已存在时自动加序号，避免覆盖。"""
-    directory.mkdir(parents=True, exist_ok=True)
-    candidate = directory / filename
-    if not candidate.exists():
-        return candidate
-    stem, suffix = candidate.stem, candidate.suffix
-    for index in range(2, 1000):
-        candidate = directory / f"{stem} ({index}){suffix}"
-        if not candidate.exists():
-            return candidate
-    return directory / f"{stem} ({os.getpid()}){suffix}"
+# 说明：`unique_path` 由模块顶部的 `from ...platform.files import unique_path` 提供，
+# 对外仍是 `core.music.downloader.unique_path`（乐库/影视曾各抄一份实现，现已收敛）。
 
 
 def guess_extension(url: str, headers: dict | None = None, fallback: str = ".mp3") -> str:

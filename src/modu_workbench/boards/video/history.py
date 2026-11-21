@@ -27,6 +27,7 @@ from modu_workbench.ui_kit.components import (
     primary_button,
     row,
 )
+from modu_workbench.ui_kit.components.task_status import TaskStatusMixin
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import VIDEO_ID_ROLE, attach_context_menu, configure_table, select_all
@@ -46,7 +47,7 @@ def _format_time(stamp: int) -> str:
         return "-"
 
 
-class VideoHistoryPage(QWidget):
+class VideoHistoryPage(TaskStatusMixin, QWidget):
     """播放 / 下载历史。"""
 
     playRequested = Signal(list, int)   # List[Video], start_index
@@ -128,12 +129,6 @@ class VideoHistoryPage(QWidget):
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
         return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
-
-    def _note_fallback(self, message: str) -> None:
-        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
-        label = getattr(self, "_fallback_status", None)
-        if label is not None:
-            label.setText(message)
 
     def _report(self, message: str) -> None:
         self._note_fallback(message)

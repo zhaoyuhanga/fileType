@@ -26,6 +26,7 @@ from modu_workbench.core.music import (
 )
 from . import context as app_context
 from modu_workbench.ui_kit.components import EmptyState
+from modu_workbench.ui_kit.components.task_status import TaskStatusMixin
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import (
@@ -45,7 +46,7 @@ from modu_workbench.core.platform.logging import swallow
 FAVORITE_COLUMN = 5
 
 
-class MusicPlaylistPage(QWidget):
+class MusicPlaylistPage(TaskStatusMixin, QWidget):
     """歌单管理：左侧歌单列表，右侧曲目与「待下载」在线曲目。"""
 
     playRequested = Signal(list, int, str)  # (tracks, start_index, mode)
@@ -67,43 +68,6 @@ class MusicPlaylistPage(QWidget):
         return (
             self._task._label if self._task is not None else self._fallback_status
         )  # noqa: SLF001
-
-    def _note_fallback(self, message: str) -> None:
-        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
-        label = getattr(self, "_fallback_status", None)
-        if label is not None:
-            label.setText(message)
-
-    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
-        self._note_fallback(message)
-        if self._task is not None:
-            if done or total:
-                self._task.report(message, done, total)
-            else:
-                self._task.note(message)  # 纯信息：不显示进度条/取消
-
-    def _busy(self, message: str) -> None:
-        """进行中提示（搜索/导入/解析这类未知时长）。"""
-        self._note_fallback(message)
-        if self._task is not None:
-            self._task.busy(message)
-
-    def _idle(self, message: str = "") -> None:
-        if message:
-            self._note_fallback(message)
-        if self._task is not None:
-            self._task.idle(message)
-
-    def _set_progress(self, value: int) -> None:
-        """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
-        bar = (
-            self._task_bar._progress
-            if hasattr(self, "_task_bar")
-            else (self._task._progress if self._task is not None else None)
-        )  # noqa: SLF001
-        if bar is not None:
-            bar.setRange(0, 100)
-            bar.setValue(int(value))
 
     def __init__(
         self,

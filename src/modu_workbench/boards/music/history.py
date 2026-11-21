@@ -16,12 +16,13 @@ from PySide6.QtWidgets import (
 
 from modu_workbench.core.music import MusicLibrary, MusicPlayer, MusicStorage
 from modu_workbench.ui_kit.components import EmptyState
+from modu_workbench.ui_kit.components.task_status import TaskStatusMixin
 from modu_workbench.ui_kit.toast import Toaster
 
 from .widgets import TRACK_ID_ROLE, configure_table
 
 
-class MusicHistoryPage(QWidget):
+class MusicHistoryPage(TaskStatusMixin, QWidget):
     """播放/下载历史：双击可重新播放。"""
 
     playRequested = Signal(list, int)   # (tracks, start_index)
@@ -32,40 +33,6 @@ class MusicHistoryPage(QWidget):
     def _status(self) -> QLabel:
         """兼容旧引用：状态文字统一显示在板块任务条上。"""
         return self._task._label if self._task is not None else self._fallback_status   # noqa: SLF001
-
-    def _note_fallback(self, message: str) -> None:
-        """把状态文字写到兜底标签（未创建时静默忽略，避免状态助手成为崩溃点）。"""
-        label = getattr(self, "_fallback_status", None)
-        if label is not None:
-            label.setText(message)
-
-    def _report(self, message: str, done: int = 0, total: int = 0) -> None:
-        self._note_fallback(message)
-        if self._task is not None:
-            if done or total:
-                self._task.report(message, done, total)
-            else:
-                self._task.note(message)      # 纯信息：不显示进度条/取消
-
-    def _busy(self, message: str) -> None:
-        """进行中提示（搜索/导入/解析这类未知时长）。"""
-        self._note_fallback(message)
-        if self._task is not None:
-            self._task.busy(message)
-
-    def _idle(self, message: str = "") -> None:
-        if message:
-            self._note_fallback(message)
-        if self._task is not None:
-            self._task.idle(message)
-
-    def _set_progress(self, value: int) -> None:
-        """兼容旧写法：只更新进度数值；是否显示进度条由 report/busy/idle 决定。"""
-        bar = self._task_bar._progress if hasattr(self, "_task_bar") else (
-            self._task._progress if self._task is not None else None)     # noqa: SLF001
-        if bar is not None:
-            bar.setRange(0, 100)
-            bar.setValue(int(value))
 
     def __init__(self, library: MusicLibrary, storage: MusicStorage, player: MusicPlayer,
                  toaster: Toaster, parent: QWidget | None = None, *, task_bar=None):

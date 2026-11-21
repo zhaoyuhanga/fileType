@@ -40,9 +40,18 @@ class GallerySettingsPage(SettingsPage):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
+        # `form` 由"目录/缓存"与"浏览偏好"两段共用一个 QFormLayout（行顺序不能变），
+        # 所以在这里创建、以参数传下去。
         form = QFormLayout()
         form.setSpacing(10)
+        self._build_dirs(form)
+        self._build_preferences(form)
+        layout.addLayout(form)
+        self._build_ai(layout)
+        layout.addStretch(1)
 
+    def _build_dirs(self, form: QFormLayout) -> None:
+        """目录与缓存：默认导入目录、图库目录、缩略图缓存目录与占用/清理。"""
         # ---- 目录 ----
         self._import_dir = QLineEdit()
         self._import_dir.setPlaceholderText("留空则在导入时每次询问")
@@ -75,6 +84,8 @@ class GallerySettingsPage(SettingsPage):
         cache_holder.setLayout(cache_row)
         form.addRow("缓存占用", cache_holder)
 
+    def _build_preferences(self, form: QFormLayout) -> None:
+        """浏览偏好：默认列数、是否预生成缩略图、每页张数。"""
         # ---- 浏览偏好 ----
         self._columns = QSpinBox()
         self._columns.setRange(2, 8)
@@ -90,8 +101,12 @@ class GallerySettingsPage(SettingsPage):
         self._page_size.setToolTip("图库网格分页大小：每页越少越流畅，翻页越频繁")
         form.addRow("每页张数", self._page_size)
 
-        layout.addLayout(form)
+    def _build_ai(self, layout: QVBoxLayout) -> None:
+        """AI（大模型）：当前模型回显、隐私开关、看图识别、连通性测试。
 
+        这里必须把"大模型只处理文本、不能生成或编辑图片"讲清楚 ——
+        界面上一句含糊的说明，就会变成用户口中"点了没反应的 AI 优化"。
+        """
         # ---- AI / 大模型 ----
         ai_title = QLabel("AI（大模型）")
         ai_title.setObjectName("sectionTitle")
@@ -140,7 +155,6 @@ class GallerySettingsPage(SettingsPage):
         ai_form.addRow("连通性", test_holder)
 
         layout.addLayout(ai_form)
-        layout.addStretch(1)
 
     # ------------------------------------------------------------------ 动作
 

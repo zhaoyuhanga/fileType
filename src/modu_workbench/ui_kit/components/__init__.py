@@ -20,6 +20,7 @@ from .layout import (
     spacer,
 )
 from .taskbar import TaskBar
+from .task_status import TaskStatusMixin
 
 __all__ = [
     "ColumnPage",
@@ -27,6 +28,7 @@ __all__ = [
     "PageHeader",
     "SectionCard",
     "TaskBar",
+    "TaskStatusMixin",
     "Toolbar",
     "chip",
     "divider",

@@ -117,6 +117,26 @@ class ConvertBoardPage(QWidget):
         layout.setContentsMargins(PAGE_MARGIN, SPACE["md"], PAGE_MARGIN, SPACE["md"])
         layout.setSpacing(SECTION_GAP)
 
+        # 装配顺序 = 用户看到的顺序（页头 → 工具条 → 左文件面板 → 右动作面板）。
+        # 拆成 _build_* 之后**调用顺序就是这个顺序**；`QSplitter` 由左右两个面板
+        # 各自 addWidget，所以它必须在这里创建、以参数传下去。
+        self._build_header(layout)
+        self._build_toolbar(layout)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._build_file_panel(splitter)
+        self._build_action_panel(splitter)
+        layout.addWidget(self._task_bar)
+        splitter.setSizes([720, 300])
+        layout.addWidget(splitter, 1)
+        self._wire_up()
+
+    def _build_header(self, layout: QVBoxLayout) -> None:
+        """统一页头 + 任务条。
+
+        注意：任务条在这里**创建**，但要等左右面板都进 splitter 之后才加入布局
+        （见 `__init__` 尾部的 `layout.addWidget(self._task_bar)`）——
+        否则它会出现在 splitter 上面而不是最底部。
+        """
         # 统一页头（与其他板块一致）
         self._header = PageHeader(
             "墨软转换",
@@ -128,6 +148,8 @@ class ConvertBoardPage(QWidget):
         self._task_bar = TaskBar("就绪。添加文件后选择动作，点「开始转换」。")
         self._task_bar.cancelled.connect(self._cancel)
 
+    def _build_toolbar(self, layout: QVBoxLayout) -> None:
+        """工具条：加文件/加文件夹/移除选中/清空、输出目录输入与选择、板块设置。"""
         toolbar = QHBoxLayout()
         add_files = QPushButton("添加文件")
         add_files.clicked.connect(self._pick_files)
@@ -161,8 +183,8 @@ class ConvertBoardPage(QWidget):
         toolbar.addWidget(board_settings)
         layout.addLayout(toolbar)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
+    def _build_file_panel(self, splitter: QSplitter) -> None:
+        """左侧文件面板：空状态引导 + 待处理文件表格（含列宽策略与删除快捷键）。"""
         self._table = QTableWidget(0, 6)
 
         # Delete 只在这张表有焦点时生效（在搜索框里按 Delete 只删文字）
@@ -218,6 +240,8 @@ class ConvertBoardPage(QWidget):
         self._table.setVisible(False)          # 无文件时显示引导，有文件时切回表格
         splitter.addWidget(left)
 
+    def _build_action_panel(self, splitter: QSplitter) -> None:
+        """右侧动作面板：搜索、分类芯片、动作列表、开始/取消/重试失败、加入书架、提示。"""
         right = QWidget()
         right.setObjectName("actionPanel")
         right_layout = QVBoxLayout(right)
@@ -293,10 +317,9 @@ class ConvertBoardPage(QWidget):
         self._hint.setObjectName("readerStatus")
         right_layout.addWidget(self._hint)
         splitter.addWidget(right)
-        layout.addWidget(self._task_bar)
-        splitter.setSizes([720, 300])
-        layout.addWidget(splitter, 1)
 
+    def _wire_up(self) -> None:
+        """接线：表格信号、拖拽导入、列宽记忆、设置变更广播，最后铺一次动作列表。"""
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.cellDoubleClicked.connect(self._on_double_click)
 

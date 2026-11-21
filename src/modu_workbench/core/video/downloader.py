@@ -26,6 +26,7 @@ import requests
 from .hls import parse_m3u8, segment_iv
 from .models import Episode, Quality, RemoteVideo, safe_filename
 from .sources import ResolvedPlay, VideoRegistry, describe_network_error, guess_referer
+from modu_workbench.core.platform.files import unique_path
 
 ProgressFn = Callable[[int, int, str], None]  # written, total, message
 
@@ -70,20 +71,8 @@ class DownloadResult:
 
 
 # --------------------------------------------------------------------------- 工具
-
-
-def unique_path(directory: Path, filename: str) -> Path:
-    """目标文件已存在时自动加序号，避免覆盖。"""
-    directory.mkdir(parents=True, exist_ok=True)
-    candidate = directory / filename
-    if not candidate.exists():
-        return candidate
-    stem, suffix = candidate.stem, candidate.suffix
-    for index in range(2, 1000):
-        candidate = directory / f"{stem} ({index}){suffix}"
-        if not candidate.exists():
-            return candidate
-    return directory / f"{stem} ({os.getpid()}){suffix}"
+# 说明：`unique_path` 由模块顶部的 `from ...platform.files import unique_path` 提供，
+# 对外仍是 `core.video.downloader.unique_path`（乐库/影视曾各抄一份实现，现已收敛）。
 
 
 def build_filename(video: RemoteVideo, episode: Episode | None = None, suffix: str = ".mp4") -> str:

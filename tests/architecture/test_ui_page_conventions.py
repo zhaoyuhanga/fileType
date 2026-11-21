@@ -4,6 +4,15 @@
 `self._report(...)` / `self._busy(...)` 这类调用，以及只读属性 `_status`。
 一旦某个类调用了助手却没定义（或 `@property` 被插到别的方法前），
 `compileall` 查不出来、只有运行时才炸 —— 这里用静态检查兜住。
+
+## v2.3.0：助手可以来自共享混入
+
+这五个助手原本在乐库 5 个页面里逐字复制了 5 遍（影视还有 3 份 `_note_fallback`），
+v2.3.0 收敛成 `ui_kit.components.task_status.TaskStatusMixin`。因此本闸门放行
+**显式声明了该混入的类**：它们不再各自定义助手是设计意图，而不是漏定义。
+
+放行的边界故意写得很窄（只认 `TaskStatusMixin` 这一个名字）：
+换别的基类、拼错名字、忘了 `import`，都仍然按"未定义"判失败。
 """
 from __future__ import annotations
 
@@ -17,6 +26,13 @@ REPO = Path(__file__).resolve().parents[2]
 BOARDS = REPO / "src" / "modu_workbench" / "boards"
 
 HELPERS = ("_report", "_busy", "_idle", "_set_progress", "_note_fallback")
+
+#: 由共享混入统一提供的助手（页面侧不再重复定义）。键是基类名，值是它提供的方法。
+#: 只登记"实现与语义都由一处决定"的混入；新增条目要求同时在
+#: `tests/architecture/test_ui_task_status.py` 里有用例钉住其行为。
+MIXIN_HELPERS: dict[str, set[str]] = {
+    "TaskStatusMixin": set(HELPERS),
+}
 
 
 def board_files() -> list[Path]:
@@ -32,6 +48,14 @@ def methods_of(node: ast.ClassDef) -> set[str]:
     return {child.name for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
 
+def provided_helpers(node: ast.ClassDef) -> set[str]:
+    """该类可用的状态助手 = 自己定义的 + 显式声明的共享混入提供的。"""
+    provided = methods_of(node)
+    for base in node.bases:
+        provided |= MIXIN_HELPERS.get(ast.unparse(base), set())
+    return provided
+
+
 def called_helpers(node: ast.ClassDef) -> set[str]:
     called: set[str] = set()
     for child in ast.walk(node):
@@ -43,10 +67,24 @@ def called_helpers(node: ast.ClassDef) -> set[str]:
 
 @pytest.mark.parametrize("path", board_files(), ids=lambda path: path.name)
 def test_helper_calls_are_defined(path: Path) -> None:
-    """调用状态助手的类必须自己定义这些方法（否则运行时 AttributeError）。"""
+    """调用状态助手的类必须自己定义、或显式继承提供它们的共享混入。"""
     for node in classes_of(path):
-        missing = called_helpers(node) - methods_of(node)
-        assert not missing, f"{path.name} 的 {node.name} 调用了未定义的助手：{sorted(missing)}"
+        missing = called_helpers(node) - provided_helpers(node)
+        assert not missing, (
+            f"{path.name} 的 {node.name} 调用了未定义的助手：{sorted(missing)}"
+            "（要么在本类里定义，要么继承 ui_kit.components.task_status.TaskStatusMixin）"
+        )
+
+
+def test_registered_mixins_really_provide_helpers() -> None:
+    """登记进 `MIXIN_HELPERS` 的混入必须**真的有**这些方法（防止闸门被空登记绕过）。"""
+    from modu_workbench.ui_kit.components import task_status
+
+    for mixin_name, helpers in MIXIN_HELPERS.items():
+        mixin = getattr(task_status, mixin_name, None)
+        assert mixin is not None, f"{mixin_name} 不在 ui_kit.components.task_status 里"
+        missing = sorted(helpers - {name for name in dir(mixin)})
+        assert not missing, f"{mixin_name} 缺少这些助手实现：{missing}"
 
 
 @pytest.mark.parametrize("path", board_files(), ids=lambda path: path.name)

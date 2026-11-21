@@ -16,6 +16,8 @@ def main(argv: list[str] | None = None) -> int:
 
         log_module.note_startup(__version__, data_dir=str(config.app_data_dir()))
     except Exception:  # noqa: BLE001  日志装配失败绝不能影响启动
+        # 这里**刻意保留 pass**：出问题的正是日志系统本身，此时 `swallow()` 也会走同一条
+        # 装配路径再失败一次。这是全仓唯一"不能留痕"的位置（AGENTS.md 的例外）。
         pass
 
     # 统一数据入口：建库/迁移/导入旧版分库（失败不阻断启动）

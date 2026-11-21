@@ -8,9 +8,11 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# 文件净化实现收敛到共享层（图库曾与乐库/影视各抄一份）；本模块保留历史上的 110 上限。
+from modu_workbench.core.platform.files import safe_filename as _safe_filename
 
 # 支持的图片扩展名（本地导入/扫描共用）
 IMAGE_EXTENSIONS = (
@@ -74,15 +76,9 @@ TASK_STATE_LABELS = {
     "canceled": "已取消",
 }
 
-_ILLEGAL = re.compile(r'[\\/:*?"<>|\r\n\t]')
-
-
 def safe_filename(name: str, fallback: str = "image") -> str:
-    """把名称转成合法文件名。"""
-    cleaned = _ILLEGAL.sub("_", (name or "").strip())
-    cleaned = re.sub(r"_{2,}", "_", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._")
-    return (cleaned or fallback)[:110]
+    """把名称转成合法文件名（限长 110 —— 图库的历史行为，不改）。"""
+    return _safe_filename(name, fallback, 110)
 
 
 def format_size(size_bytes: int) -> str:

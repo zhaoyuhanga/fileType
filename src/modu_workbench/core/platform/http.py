@@ -18,6 +18,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from .logging import debug
+
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -52,13 +54,15 @@ def ca_bundle() -> str | bool:
         import certifi
 
         candidates.append(certifi.where())
-    except Exception:  # noqa: BLE001  certifi 不在（极简环境）时继续找系统证书
-        pass
+    except Exception as error:  # noqa: BLE001  certifi 不在（极简环境）时继续找系统证书
+        # 高频路径（每次建 HttpClient 都会走），所以用 debug 而不是 swallow：
+        # 默认日志级别下不该因为"没装 certifi"刷警告。
+        debug("加载 certifi 证书", error)
     try:
         paths = ssl.get_default_verify_paths()
         candidates.extend([paths.cafile or "", paths.openssl_cafile or ""])
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as error:  # noqa: BLE001  某些 OpenSSL 构建不提供默认路径
+        debug("查询系统证书路径", error)
     candidates.append(os.environ.get("REQUESTS_CA_BUNDLE", ""))
     for candidate in candidates:
         if candidate and os.path.isfile(candidate):

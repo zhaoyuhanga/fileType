@@ -282,6 +282,30 @@ class VideoPlayerDialog(QDialog):
         subtitle_path: str = "",
     ):
         super().__init__(parent)
+        self._init_state(title, url, is_hls, referer, start_ms, has_next, render_path, diagnostics_provider)
+        self._build_ui(qualities or [], current_quality, episode_label, has_prev, has_next)
+        self.reload_shortcuts()
+        if subtitle_path:
+            self.load_subtitle(subtitle_path)
+        self._load(url, is_hls, referer)
+
+    def _init_state(
+        self,
+        title: str,
+        url: str,
+        is_hls: bool,
+        referer: str,
+        start_ms: int,
+        has_next: bool,
+        render_path: str,
+        diagnostics_provider=None,  # noqa: ANN001  Callable[[], dict]
+    ) -> None:
+        """把所有状态字段初始化为"干净起点"。
+
+        这些赋值**顺序敏感**的地方只有两处：`windowFlags()` 必须在 `super().__init__()`
+        之后读（窗口标志此时才成立），`Toaster(self)` 需要 `self` 已经是 QWidget。
+        其余都是纯赋值，拆出来只是为了让 `__init__` 一眼看清"先状态、再界面、最后加载"。
+        """
         self.setWindowTitle(title or "墨软影视 · 播放")
         self.resize(1120, 700)
         # 小窗模式：记住进入前的窗口标志与几何，退出时原样还原
@@ -343,14 +367,7 @@ class VideoPlayerDialog(QDialog):
         self._surface = None
         self._native_holder = None
 
-        self._build_ui(qualities or [], current_quality, episode_label, has_prev, has_next)
-        self.reload_shortcuts()
-        if subtitle_path:
-            self.load_subtitle(subtitle_path)
-        self._load(url, is_hls, referer)
-
     # ------------------------------------------------------------------ 界面
-
     def _build_ui(
         self,
         qualities: list[str],
@@ -363,19 +380,7 @@ class VideoPlayerDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header = QWidget()
-        self._header = header
-        header.setObjectName("viewerHeader")
-        header_row = QHBoxLayout(header)
-        header_row.setContentsMargins(14, 8, 14, 8)
-        header_row.setSpacing(10)
-        self._title_label = QLabel(self.windowTitle())
-        self._title_label.setObjectName("viewerName")
-        header_row.addWidget(self._title_label, 1)
-        self._engine_label = QLabel("原生解码")
-        self._engine_label.setObjectName("viewerHint")
-        header_row.addWidget(self._engine_label)
-        layout.addWidget(header)
+        self._build_header(layout)
 
         # 小窗控制条浮在画面上，不进布局（进了布局就会把 16:9 的高度吃掉一截）
         self._mini_bar = _MiniBar(self)
@@ -396,7 +401,36 @@ class VideoPlayerDialog(QDialog):
         row = QHBoxLayout(controls)
         row.setContentsMargins(14, 8, 14, 10)
         row.setSpacing(10)
+        self._build_transport(row, has_prev, has_next)
+        self._build_options(row, qualities, current_quality, episode_label)
+        layout.addWidget(controls)
 
+        self._build_native_surface()
+        self._install_pointer_filters()
+
+        # 播放中每 2s 更新一次"该预取哪一段"（交给会话层用）
+        self._prefetch_timer = QTimer(self)
+        self._prefetch_timer.setInterval(2000)
+        self._prefetch_timer.timeout.connect(self._on_prefetch_tick)
+
+    def _build_header(self, layout: QVBoxLayout) -> None:
+        """页头：标题 + 解码后端标签（"原生解码"只作提示，真实后端见诊断面板）。"""
+        header = QWidget()
+        self._header = header
+        header.setObjectName("viewerHeader")
+        header_row = QHBoxLayout(header)
+        header_row.setContentsMargins(14, 8, 14, 8)
+        header_row.setSpacing(10)
+        self._title_label = QLabel(self.windowTitle())
+        self._title_label.setObjectName("viewerName")
+        header_row.addWidget(self._title_label, 1)
+        self._engine_label = QLabel("原生解码")
+        self._engine_label.setObjectName("viewerHint")
+        header_row.addWidget(self._engine_label)
+        layout.addWidget(header)
+
+    def _build_transport(self, row: QHBoxLayout, has_prev: bool, has_next: bool) -> None:
+        """传输控件：播放/暂停、上一集、下一集、进度条、时间。"""
         self._play_button = QPushButton("▶")
         self._play_button.setObjectName("playerButtonPrimary")
         self._play_button.setFixedWidth(46)
@@ -430,6 +464,18 @@ class VideoPlayerDialog(QDialog):
         self._time_label.setMinimumWidth(110)
         row.addWidget(self._time_label)
 
+    def _build_options(
+        self,
+        row: QHBoxLayout,
+        qualities: list[str],
+        current_quality: str,
+        episode_label: str,
+    ) -> None:
+        """右侧选项：清晰度、倍速、字幕、弹幕、静音/音量、小窗、全屏、集名。
+
+        倍速与音量的**初值来自用户偏好**（`load_playback_prefs()`），
+        所以这里不只建控件，还顺手把上次的选择恢复上。
+        """
         row.addWidget(QLabel("清晰度"))
         self._quality_box = QComboBox()
         self._quality_box.setMinimumWidth(96)
@@ -494,16 +540,6 @@ class VideoPlayerDialog(QDialog):
             self._episode_label = QLabel(episode_label)
             self._episode_label.setObjectName("musicMeta")
             row.addWidget(self._episode_label)
-
-        layout.addWidget(controls)
-
-        self._build_native_surface()
-        self._install_pointer_filters()
-
-        # 播放中每 2s 更新一次"该预取哪一段"（交给会话层用）
-        self._prefetch_timer = QTimer(self)
-        self._prefetch_timer.setInterval(2000)
-        self._prefetch_timer.timeout.connect(self._on_prefetch_tick)
 
     def _build_native_surface(self) -> None:
         """原生解码画面：优先 `QGraphicsVideoItem`，失败回退 `QVideoWidget`。"""

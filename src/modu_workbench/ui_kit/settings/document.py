@@ -54,6 +54,20 @@ class DocumentSettingsPage(SettingsPage):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
+        # 装配顺序 = 用户在设置页里从上往下看到的顺序。拆成 _build_* 之后
+        # **调用顺序就是这个顺序**，不要为了"看起来整齐"重排。
+        self._build_output(layout)
+        self._build_style(layout)
+        self._build_loop(layout)
+        self._build_permissions(layout)
+        self._build_capability(layout)
+        self._build_plugins(layout)
+        self._build_media_cache(layout)
+        layout.addStretch(1)
+
+
+    def _build_output(self, layout: QVBoxLayout) -> None:
+        """默认输出目录（留空则用数据目录下的 document/）。"""
         # ---- 目录 ----
         form = QFormLayout()
         form.setSpacing(10)
@@ -69,6 +83,9 @@ class DocumentSettingsPage(SettingsPage):
         form.addRow("默认输出目录", holder)
         layout.addLayout(form)
 
+
+    def _build_style(self, layout: QVBoxLayout) -> None:
+        """默认美化参数：模板、字体字号、行距段距、页边距 —— 进入板块时生效。"""
         # ---- 默认美化参数 ----
         style_title = QLabel("默认美化参数（进入板块时生效）")
         style_title.setObjectName("sectionTitle")
@@ -124,6 +141,9 @@ class DocumentSettingsPage(SettingsPage):
         style_form.addRow("自动保存间隔", self._autosave_seconds)
         layout.addLayout(style_form)
 
+
+    def _build_loop(self, layout: QVBoxLayout) -> None:
+        """AI 循环美化的默认值：最大轮次、质量阈值、每轮人工确认。"""
         # ---- 循环美化默认值 ----
         loop_title = QLabel("AI 循环美化默认值（进入板块时生效）")
         loop_title.setObjectName("sectionTitle")
@@ -146,6 +166,9 @@ class DocumentSettingsPage(SettingsPage):
         loop_form.addRow("人工确认", self._require_confirm)
         layout.addLayout(loop_form)
 
+
+    def _build_permissions(self, layout: QVBoxLayout) -> None:
+        """权限与脱敏：是否允许云端上传、上传前自动脱敏的规则开关。"""
         # ---- 权限与脱敏 ----
         privacy_title = QLabel("AI 权限与脱敏")
         privacy_title.setObjectName("sectionTitle")
@@ -177,6 +200,9 @@ class DocumentSettingsPage(SettingsPage):
             grid.addWidget(box, index // 4, index % 4)
         layout.addLayout(grid)
 
+
+    def _build_capability(self, layout: QVBoxLayout) -> None:
+        """能力状态：只读回显（哪些可选能力可用、缺什么），不可编辑。"""
         # ---- 能力状态 ----
         tools_title = QLabel("能力状态")
         tools_title.setObjectName("sectionTitle")
@@ -187,6 +213,9 @@ class DocumentSettingsPage(SettingsPage):
         self._tools_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self._tools_label)
 
+
+    def _build_plugins(self, layout: QVBoxLayout) -> None:
+        """插件（自定义工具）：目录、启用开关、打开目录、生成示例。"""
         # ---- 插件（自定义工具）----
         plugin_title = QLabel("插件（自定义工具）")
         plugin_title.setObjectName("sectionTitle")
@@ -223,6 +252,9 @@ class DocumentSettingsPage(SettingsPage):
         self._plugin_label.setWordWrap(True)
         layout.addWidget(self._plugin_label)
 
+
+    def _build_media_cache(self, layout: QVBoxLayout) -> None:
+        """素材缓存与 AI：素材目录占用、清空缓存、跳转大模型设置。"""
         # ---- 素材缓存（Word 等文档里的图片）----
         media_title = QLabel("素材缓存（文档里的图片）")
         media_title.setObjectName("sectionTitle")
@@ -252,7 +284,6 @@ class DocumentSettingsPage(SettingsPage):
         open_llm.clicked.connect(self._open_llm_settings)
         ai_row.addWidget(open_llm)
         layout.addLayout(ai_row)
-        layout.addStretch(1)
 
     # ---------------------------------------------------------------- 动作
 
