@@ -1,0 +1,64 @@
+job: build   status: SUCCESS   run: 44891563254   sha: 3c9c3a8c879616eb9e2db79a8e50331f0f0a7e39
+
+--- dist 顶层 ---
+ModuWorkbench  0 MB
+ModuWorkbench-3c9c3a8c879616eb9e2db79a8e50331f0f0a7e39.zip  158.2 MB
+SHA256SUMS.txt  0 MB
+墨软工作台-Setup-2.3.0.exe  158.1 MB
+--- 安装包 ---
+墨软工作台-Setup-2.3.0.exe  158.1 MB
+--- onedir ---
+ModuWorkbench.exe  12.5 MB
+文件数：250
+--- makensis ---
+PATH: 
+C:\Program Files (x86)\NSIS 存在: True
+C:\Program Files\NSIS 存在: False
+--- 步骤日志（尾部 400 行）---
+== NSIS 安装包 ==
+Chocolatey v2.7.5
+Installing the following packages:
+nsis
+By installing, you accept licenses for the packages.
+Downloading package from source 'https://community.chocolatey.org/api/v2/'
+
+nsis.install v3.13.0 [Approved]
+nsis.install package files install completed. Performing other installation steps.
+Installing nsis.install...
+nsis.install has been installed.
+  nsis.install can be automatically uninstalled.
+ The install of nsis.install was successful.
+  Deployed to 'C:\Program Files (x86)\NSIS'
+Downloading package from source 'https://community.chocolatey.org/api/v2/'
+
+nsis v3.13.0 [Approved]
+nsis package files install completed. Performing other installation steps.
+ The install of nsis was successful.
+  Deployed to 'C:\ProgramData\chocolatey\lib\nsis'
+
+Chocolatey installed 2/2 packages. 
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+版本：2.3.0
+makensis：C:\Program Files (x86)\NSIS\makensis.exe
+Command line defined: "APP_VERSION=2.3.0"
+Command line defined: "SOURCE_DIR=D:\a\fileType\fileType\dist\ModuWorkbench"
+Processing config: C:\Program Files (x86)\NSIS\nsisconf.nsh
+Processing script file: "D:\a\fileType\fileType\packaging\installer.nsi" (UTF8)
+
+Processed 1 file, writing output (x86-unicode):
+
+Output: "D:\a\fileType\fileType\dist\?????-Setup-2.3.0.exe"
+Install: 4 pages (256 bytes), 1 section (2072 bytes), 703 instructions (19684 bytes), 488 strings (21108 bytes), 1 language table (298 bytes).
+Uninstall: 2 pages (192 bytes), 1 section (2072 bytes), 75 instructions (2100 bytes), 104 strings (1920 bytes), 1 language table (254 bytes).
+Datablock optimizer saved 11642 bytes (~0.0%).
+
+Using zlib compression.
+
+EXE header size:               59392 / 39936 bytes
+Install code:                   8228 / 43882 bytes
+Install data:              165652850 / 419105733 bytes
+Uninstall code+data:           23362 / 23775 bytes
+CRC (0x46347A6A):                  4 / 4 bytes
+
+Total size:                165743836 / 419213330 bytes (39.5%)
+完成：D:\a\fileType\fileType\dist\墨软工作台-Setup-2.3.0.exe（158.1 MB）
