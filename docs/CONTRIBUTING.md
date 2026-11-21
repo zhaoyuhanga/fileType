@@ -3,6 +3,17 @@
 面向**要改这个项目的人**。只想运行/安装请看 `README.md`；架构规则看 `docs/ARCHITECTURE.md`；
 发版流程看 `docs/RELEASE.md`。
 
+## 0. 先读两条（不管你是人还是 AI）
+
+- **项目规则**：[`AGENTS.md`](../AGENTS.md) —— 技术栈、命令、架构红线、行为守恒铁律、
+  异常处理写法、UI/测试/提交规范，以及本仓库专属的坑。改任何代码前先过一遍。
+- **怎么安全地做重构/优化**：[`docs/AI_OPTIMIZATION_PLAYBOOK.md`](AI_OPTIMIZATION_PLAYBOOK.md)
+  —— 规则层与任务层怎么分工、先出方案后出代码、用快照/哈希证明"行为没变"，
+  以及四个可直接复制的场景提示词。
+
+如果只想看"上一轮优化做了什么、还有什么没做"，读
+[`docs/OPTIMIZATION_REPORT.md`](OPTIMIZATION_REPORT.md)。
+
 ## 1. 环境
 
 ```powershell

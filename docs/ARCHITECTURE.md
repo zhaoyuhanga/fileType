@@ -37,14 +37,20 @@
   quality/security/tools/ai/loop/storage/library/ocr）。
 - `src/modu_workbench/core/llm/`：大模型能力中心（跨板块共用：配置 / 路由 / 降级）。
 - `src/modu_workbench/core/platform/`：板块无关的公共能力（`db` 迁移执行器、`paths` 数据布局、
-  `settings`、`media` ffmpeg 定位、`http`、`textutil` 标题/集数归一化、`logging` 忽略失败留痕）。
+  `files` 受支持文件扫描 + 文件名净化 + 目标路径去重、`media` ffmpeg 定位、`http`、
+  `textutil` 标题/集数归一化、`logging` 忽略失败留痕）。
+  ⚠️ `files.safe_filename` / `files.unique_path` 是 v2.3.0 从三个板块的 `models.py` /
+  `downloader.py` 收敛上来的：乐库/影视/图库各自只留**签名与默认值**的薄封装
+  （图库的限长是 110，乐库/影视是 120，这是历史行为，不要"统一"）。
 - `src/modu_workbench/services/`：跨板块服务 ——
   `media_proxy/`（本机媒体代理，拆成 `fetch` / `handler` / `server` / `cache` / `playlist` /
   `upstream` / `config` / `stats` 8 个模块）、`dandanplay.py`（弹弹play 只读弹幕）、
   `app_context.py`（跨板块单例的**合法中介**，见下）。
-- `src/modu_workbench/app/` 只做装配：`main.py`（59 行，起 Qt + 主壳）、`selfcheck.py`
-  （打包自检 17 项）、`shell.py`（主壳，板块页**按需构造**）、`registry.py`（板块元数据，
-  用 `page_target` 字符串**延迟导入**板块模块）。
+- `src/modu_workbench/app/` 只做装配：`main.py`（59 行，起 Qt + 主壳）、
+  `selfcheck.py`（打包自检的**编排**：`_CHECKS` 表 + 执行 + 写 JSON；17 个检查按域放在
+  `selfcheck_convert` / `selfcheck_platform` / `selfcheck_media` / `selfcheck_document`
+  四个子模块，v2.3.0 从原来 831 行的 `run_checks` 拆出）、`shell.py`（主壳，板块页**按需构造**）、
+  `registry.py`（板块元数据，用 `page_target` 字符串**延迟导入**板块模块）。
 - `tests/`：pytest 单元 / 集成 / 无头 UI 冒烟。
 
 ## 依赖规则（唯一来源；`tests/architecture/test_architecture.py` 是它的可执行版本）
@@ -70,9 +76,33 @@ app             →  随便依赖（装配层），但**不允许被下层反向
 
 ## 视觉与主题的分层
 
-`ui_kit/tokens.py`（唯一令牌来源）→ `ui_kit/theme.py`（组装 QSS，约 800 行）→
+`ui_kit/tokens.py`（唯一令牌来源）→ `ui_kit/theme.py`（**只做组装**：算一次 QSS 用的
+五个小图标，再按固定顺序拼接，约 140 行）→ `ui_kit/theme_qss_*.py`（按控件族分五份：
+`base` 基础与容器 / `forms` 表单控件 / `views` 数据视图 / `boards` 板块专用 /
+`shell` 页面骨架，v2.3.0 从原来 714 行的单个 f-string 拆出）→
 `ui_kit/theme_icons.py`（QPainter 现画 QSS 需要的箭头/勾选 PNG，v2.1.0 从 theme 拆出）
-→ `ui_kit/components/`（页面模板与通用控件）。**改主题色只动 tokens；改控件样式动 theme。**
+→ `ui_kit/components/`（页面模板与通用控件）。**改主题色只动 tokens；改控件样式动 theme_qss_*。**
+
+⚠️ `app_qss` 的拼接方式是 `"\n" + "\n".join(...) + "\n"`，与拆分前的单个 f-string
+**字节序列完全一致**。拆分期间用 `sha256(app_qss(ThemeTokens()))` 前后比对作为
+"只搬家、没改样式"的硬证据（拆完 LIGHT/DARK 两份都逐字相同）。
+
+## 页面状态助手的统一来源（v2.3.0）
+
+乐库 5 个页面、影视 3 个页面此前各自复制 `_busy` / `_report` / `_idle` /
+`_set_progress` / `_note_fallback`（共 33 份）。现在统一由
+`ui_kit.components.task_status.TaskStatusMixin` 提供，页面写成
+`class MusicSearchPage(TaskStatusMixin, QWidget)`；宿主只需提供 `_task`
+（可选 `_task_bar` / `_fallback_status`）。
+
+**逐字相同的才删，有差异的一律保留**：影视 `VideoSearchPage._report`（不写右上角小标签）、
+`VideoSearchPage._idle`、`VideoHistoryPage._report`（直接 `idle`）、
+`_set_tail_stretch`（三份的布局属性不同）都仍是各页面自己的实现 —— 差异即行为。
+
+对应的架构闸门也同步收窄：`tests/architecture/test_ui_page_conventions.py` 放行
+**显式声明了该混入**的类（只认这一个基类名），并用
+`test_registered_mixins_really_provide_helpers` 防止"登记了却没实现"。混入的行为由
+`tests/architecture/test_ui_task_status.py`（假宿主、不起 Qt）单独钉住。
 
 ## 忽略失败的写法（v2.1.0 起的统一约定）
 
@@ -91,6 +121,10 @@ except sqlite3.Error as error:                 # 只吞得起的类型
   其它类型属于代码 bug，就该炸出来；
 - 第三方回调/Qt 槽等确实可能抛任何异常的边界 → 保留宽捕获，但把 `pass` 换成 `swallow(...)`；
 - 高频路径用 `debug(...)`（只在 `MODU_LOG_LEVEL=debug` 时输出），避免日志刷屏。
+
+**全仓唯一的例外**是 `app/main.py` 的"日志系统自身装配失败"：那里出问题的正是日志本身，
+`swallow()` 会再走同一条失败路径，所以刻意保留 `pass` 并在代码里写明了原因。
+v2.3.0 用 AST 扫过一遍，其余位置已清零（`except <具体类型>: pass` 属于"先收窄再忽略"，合规）。
 
 ## 墨软乐库设计要点
 
@@ -204,10 +238,15 @@ except sqlite3.Error as error:                 # 只吞得起的类型
   有模型时由模型写过渡句与摘要，并在报告的变更条目上标注 `ai_generated`。
   合并过程的冲突（找不到章节、表格模式无表可并）与两稿冲突**都要累加**进报告 ——
   曾经在这里用赋值覆盖过一次，导致"找不到章节"这类关键提示被静默丢掉。
-- **AI 工具调用走 JSON 协议**（`tools.py` + `ai.py`）：30+ 个工具是**真做事**的函数（读取/解析/写入/
+- **AI 工具调用走 JSON 协议**（`tools.py` + `ai.py`）：**51 个**工具是**真做事**的函数（读取/解析/写入/
   替换/排版/计算/表格/OCR/翻译/导出/合并/拆分/对比/摘要/脱敏/水印），界面按钮与 AI 调用同一套实现，
   因此"AI 能做的"和"手动能做的"永远一致；协议是 `{"tool": "...", "args": {...}}` / `{"final": "..."}`
   （不依赖厂商各自的 function calling，任何 OpenAI 兼容模型都能用）。
+  **注册按类别分成 9 组**（`_register_read/write/edit/sheet/ai/merge/pdf/write_2/secure_tools`，
+  v2.3.0 从原来 566 行的 `_register_all` 拆出）：分组**调用顺序就是 `TOOL_ORDER`**
+  （= AI 工具目录与界面的展示顺序），所以不要按类别字典重排 —— `export_images` 的类别是 `write`
+  却刻意排在 PDF 组之后。改注册表后请用"序列化 `TOOL_REGISTRY`/`TOOL_ORDER`/`catalog_lines()`
+  前后比对"来证明顺序没变。
 - **AI 文本工具必须真的改写文档**：`polish/proofread/rewrite/translate/condense/expand` 逐段调用模型
   并写回正文（保留标题与表格结构），每段留一条 `Change`（可预览、可回滚）；
   每轮只处理前 N 段以避免一次打几十个请求，界面会提示"还有 N 段，再跑一轮即可覆盖"。

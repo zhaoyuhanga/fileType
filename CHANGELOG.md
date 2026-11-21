@@ -3,7 +3,94 @@
 本项目遵循语义化版本；版本号单一来源为 `src/modu_workbench/__init__.py` 的 `__version__`
 （与 `pyproject.toml` 保持一致，见 `tests/architecture/test_version.py`）。
 
-## 未发版 — 代码优化与缺陷修复
+## 未发版
+
+（v2.3.0 定版后的新改动记在这里 —— 每条用 `### NN.` 编号并在下面写「之前/现在/验证」；
+定版时把本节整体改名为 `## v2.x.y — …`，并在上面新开一个空的「未发版」。）
+
+## v2.3.0 — 代码优化与缺陷修复（2026-11-21）
+
+本版没有新功能，是一次**纯质量版**：53 条及以前的行为一字未改，改的是"代码住在哪、
+有多少份重复、一个函数多长"。
+
+- **行为守恒证据**：全量 pytest 1665 条通过、`ruff` 干净、打包自检 17/17 与优化前逐项一致、
+  整份 QSS 的 sha256 前后相同、工具注册表快照逐字一致、7 个界面对象的结构探针逐字段一致；
+- **最长函数 831 → 205 行**；33 份逐字复制的页面状态助手收敛成 1 个共享混入；
+  平台层三处"各板块各抄一份"的文件名工具收敛到 `core/platform/files.py`；
+  831 行的自检函数与 714 行的 QSS 单函数按域拆开；
+- 细节、量化对比与"故意不做"的清单见 `docs/OPTIMIZATION_REPORT.md`；
+  协作方式（规则层 + 任务提示词 + 行为守恒的四类硬证据）见 `AGENTS.md` 与
+  `docs/AI_OPTIMIZATION_PLAYBOOK.md`。
+
+### 53. 代码优化（第二轮）：巨型装配函数按分节拆开 + 工具注册分组
+
+延续第 52 条，本轮仍然**只搬代码、不改行为**。区别是这轮的对象全在界面层：
+5 个"一个函数 150~263 行"的装配函数，加上 1 个 566 行的工具注册函数。
+
+| 场景 | 之前 | 现在 |
+|---|---|---|
+| 工具注册（`core/document/tools.py`） | `_register_all` 一个函数 566 行、51 个 `register_tool(...)` 平铺 | 按类别分成 9 组 `_register_*_tools()`，`_register_all` 只剩 9 行调用；注册顺序 = `TOOL_ORDER` 顺序不变 |
+| 影视设置页（`ui_kit/settings/video.py`） | `__init__` 263 行，一路 `form.addRow(...)` 到底 | 拆成 `_build_basics/_build_sources/_build_playback/_build_shortcuts/_build_cache/_build_danmaku/_build_footer` 7 个分节方法 |
+| 文档设置页（`ui_kit/settings/document.py`） | `__init__` 207 行 | 拆成 `_build_output/_build_style/_build_loop/_build_permissions/_build_capability/_build_plugins/_build_media_cache` |
+| 图库设置页（`ui_kit/settings/gallery.py`） | `__init__` 110 行 | 拆成 `_build_dirs/_build_preferences/_build_ai`（`form` 由前后两段共用，仍是一份） |
+| 大模型设置页（`ui_kit/settings/llm.py`） | `__init__` 173 行 | 按三栏拆成 `_build_kind_list/_build_profile_list/_build_profile_form` |
+| 转换板块（`boards/convert/board.py`） | `__init__` 219 行 | 拆成 `_build_header/_build_toolbar/_build_file_panel/_build_action_panel/_wire_up`（`QSplitter` 在 `__init__` 建好后传给左右面板） |
+| 视频播放器（`ui_kit/media/player.py`） | `__init__` 85 行状态初始化 + `_build_ui` 153 行 | `_init_state()` 承接状态字段；`_build_ui` 拆出 `_build_header/_build_transport/_build_options` |
+
+实现要点：
+
+1. **拆分只允许"搬家"**。语句顺序、控件父子关系、`addRow`/`addWidget` 的次序、
+   信号连接顺序全部逐字保持 —— 这些在 Qt 里就是行为，挪一处就可能变成"某个按钮没反应"。
+2. **共用容器要在 `__init__` 里建好再传下去**。`QFormLayout`（图库设置页的"目录"与
+   "浏览偏好"共用）、`QSplitter`（转换板块左右两栏共用）都属于这种"跨分节的容器"，
+   放进任一 `_build_*` 里都会让另一段拿到未定义的变量，或者（更隐蔽地）**多建一个
+   layout 把控件塞进孤儿布局**：界面看着"少了一半"，只在控制台留一行
+   `QLayout: Attempting to add QLayout ... which already has a layout`。
+3. **拆分后必须做结构比对**，不能只看测试绿。本轮用的探针：把文件切回 HEAD 版本 →
+   构造同一批页面 → 导出"控件数 / 布局条目数 / 实例属性集合 / 全部可见文案 /
+   全部 placeholder"→ 换回工作区版本再导一次 → 逐字段比对。7 个页面/面板全部
+   **完全一致**（`ALL IDENTICAL: True`）。第 2 条说的那个孤儿布局问题，正是这么抓到的。
+
+验证：全量 pytest **1665 条**通过（1 条按环境跳过）、`ruff check src tests` 干净、
+打包自检 17 项全 `true`（JSON 与优化前逐项一致）、工具注册表快照
+（`TOOL_REGISTRY`/`TOOL_ORDER`/`TOOL_CATEGORIES`/`catalog_lines`）逐字一致、
+7 个界面对象结构探针逐字段一致。
+
+### 52. 代码优化：平台层重复实现收敛、自检/主题拆分、状态助手混入
+
+本轮是**纯重构**（行为守恒）：公开接口、错误类型、调用时序、用户可见文案、整份 QSS 的
+字节序列全部不变。用户最直接的感受是"什么都没变"——这正是目的。
+
+| 场景 | 之前 | 现在 |
+|---|---|---|
+| 文件名净化 | 乐库/影视/图库各自 `models.py` 抄一份，且图库限长 110、另两个 120，改一处容易忘另两处 | 实现收敛到 `core/platform/files.py::safe_filename(limit=...)`；三个板块各留**签名与默认值不变**的薄封装（110/120 保持原样） |
+| 下载目标去重 | 乐库/影视的 `downloader.py` 各抄一份 `unique_path` | 收敛到 `core/platform/files.py::unique_path`，两个 downloader 导入绑定，`from core.music.downloader import unique_path` 照旧可用 |
+| 站点简介清洗 | `core/platform/textutil.py` 与 `core/video/models.py` 各一份 `strip_html` | 影视侧改为薄封装 |
+| 打包自检 | `selfcheck.run_checks` 一个函数 **831 行**，17 个检查是嵌套函数，没法单独调用或单独测 | 按域拆成 `selfcheck_convert/platform/media/document` 四个模块（111~333 行），`selfcheck.py` 只剩 168 行编排；`_CHECKS` 是一张数据表，新增检查 = 写函数 + 加一行 |
+| 页面状态助手 | 乐库 5 个页面 × 5 个方法、影视 8 处，共 **33 份逐字复制**；修一处忘一处就会出现"某个页面点了没反应" | 统一为 `ui_kit/components/task_status.py::TaskStatusMixin`；**只删逐字相同的**，影视 4 处有差异的（`_report`×2、`_idle`、`_set_tail_stretch`）原样保留 |
+| 主题 QSS | `app_qss` 一个 **714 行的 f-string**，24 个分节全挤在一起 | 按控件族拆成 `theme_qss_base/forms/views/boards/shell` 五份，`theme.py` 只剩 140 行；拼接结果与原 f-string 逐字节一致 |
+| 忽略失败的写法 | 还有 5 处 `except Exception: pass`（与 v2.1.0 起的约定不符） | 4 处改为 `swallow(...)`/`debug(...)`；只剩 `app/main.py` 的"日志自身装配失败"，已在代码里写明为什么不能留痕 |
+
+实现要点（给以后改这些地方的人）：
+
+1. **差异即行为**。影视那三份 `_report` 看起来"应该统一"，但它们分别对应"有没有右上角小标签"
+   "结束时要不要直接 idle"，收敛前必须先找出差异写进方案，而不是先删再修。
+2. **拆 QSS 用哈希当裁判**。`sha256(app_qss(t))` 前后完全相同（浅色 `8e2b96ea…`、
+   深色 `34892000…`，均 18221 字符）；拼接方式是 `"\n" + "\n".join(...) + "\n"`，
+   改它就会让哈希变、也就失去了"只搬家"的证明手段。
+3. **自检拆分用输出当裁判**。`MODU_CHECK_DEPS` 自检的 JSON **键、顺序、值**与重构前逐项一致
+   （17/17 `true`）——它覆盖渲染、转换、播放、六个板块内核与打包资源，比任何单测都全面。
+4. **闸门同步收窄，不是放松**。`test_ui_page_conventions.py` 的"助手必须自己定义"
+   放行了显式声明 `TaskStatusMixin` 的类（只认这一个基类名），并补了
+   `test_registered_mixins_really_provide_helpers` 防止空登记 —— 设计确实变了，
+   所以要改断言；但要同时把新的边界钉死。
+
+验证：新增 `tests/platform/test_platform_files.py`（15 条）、
+`tests/architecture/test_ui_task_status.py`（11 条）、
+`tests/architecture/test_ui_page_conventions.py::test_registered_mixins_really_provide_helpers`（1 条），
+合计 **+27 条**；全量 pytest **1665 条**通过（1 条按环境跳过）、`ruff check src tests` 干净、
+打包自检 17 项全 `true`。审计与后续施工清单见 `docs/OPTIMIZATION_REPORT.md`，
+提示词体系与规则分层见 `AGENTS.md` + `docs/AI_OPTIMIZATION_PLAYBOOK.md`。
 
 ### 51. 乐库/影视：播放偏好与下载目录记忆 + 导入可取消
 
